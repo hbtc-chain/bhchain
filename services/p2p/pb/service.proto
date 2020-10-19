@@ -1,0 +1,13 @@
+syntax = "proto3";
+package pb;
+
+service P2pService {
+    rpc Communicate(stream BHMsg) returns (stream BHMsg);
+}
+
+message BHMsg {
+    bytes signature = 1;
+    bytes payload = 2;
+    uint32 type = 3;
+}
+

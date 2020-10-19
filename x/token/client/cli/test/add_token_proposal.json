@@ -1,0 +1,34 @@
+{
+  "title": "Add Token",
+  "description": "add token proposal",
+  "token_info": {
+    "symbol": "usdt",
+    "issuer": "0xC9476A4919a7E5c7e1760b68F945971769D5c1D8",
+    "chain": "eth",
+    "type": "2",
+    "is_send_enabled": true,
+    "is_deposit_enabled": true,
+    "is_withdrawal_enabled": true,
+    "decimals": "6",
+    "total_supply": "30000000000000000",
+    "collect_threshold": "200000000",
+    "deposit_threshold": "200000000",
+    "open_fee": "28000000000000000000",
+    "sys_open_fee": "28000000000000000000",
+    "withdrawal_fee_rate": "2",
+    "max_op_cu_number": "10",
+    "sys_transfer_num": "5",
+    "op_cu_sys_transfer_num": "50",
+    "gas_limit": "80000",
+    "gas_price": "1000",
+    "confirmations": "1",
+    "is_nonce_based": false
+  },
+  "deposit": [
+    {
+      "denom": "hbc",
+      "amount": "10000"
+    }
+  ],
+  "votetime":120
+}

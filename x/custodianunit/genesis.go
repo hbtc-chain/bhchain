@@ -1,0 +1,20 @@
+package custodianunit
+
+import (
+	sdk "github.com/hbtc-chain/bhchain/types"
+)
+
+// InitGenesis - Init store state from genesis data
+//
+// CONTRACT: old coins from the FeeCollectionKeeper need to be transferred through
+// a genesis port script to the new fee collector CU
+func InitGenesis(ctx sdk.Context, ak CUKeeper, data GenesisState) {
+	ak.SetParams(ctx, data.Params)
+}
+
+// ExportGenesis returns a GenesisState for a given context and keeper
+func ExportGenesis(ctx sdk.Context, ck CUKeeper) GenesisState {
+	params := ck.GetParams(ctx)
+	cus := ck.GetAllCUs(ctx)
+	return NewGenesisState(params, cus)
+}

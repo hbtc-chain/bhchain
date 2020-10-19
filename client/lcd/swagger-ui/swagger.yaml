@@ -1,0 +1,3057 @@
+openapi: "3.0.0"
+info:
+  version: "1.0"
+  title: HBTCChain API
+  description: A REST interface for state queries, transaction generation and broadcasting.
+tags:
+  - name: Transactions
+    description: Search, encode, or broadcast transactions.
+  - name: Tendermint RPC
+    description: Tendermint APIs, such as query blocks, transactions and validatorset
+  - name: Cu
+    description: Custodian unit module APIs
+  - name: Staking
+    description: Stake module APIs
+  - name: Governance
+    description: Governance module APIs
+  - name: Distribution
+    description: Fee distribution module APIs
+  - name: Supply
+    description: Supply module APIs
+  - name: Slashing
+    description: Slashing module APIs
+  - name: Mint
+    description: Minting module APIs
+  - name: Misc
+    description: Miscellaneous APIs
+  - name: Token
+    description: Token module APIs
+  - name: Order
+    description: Order module APIs
+  - name: Mapping
+    description: Mapping module APIs
+  - name: Keygen
+    description: Keygen module APIs
+  - name: Openswap 
+    description: Openswap module APIs
+paths:
+  /gas_price:
+    get:
+      description: Suggest for a reasonable gas price from the last [count] blocks
+      summary: Suggest a gas price
+      tags:
+        - Misc
+      parameters:
+        - in: query
+          name: count
+          description: How many block to consider for suggesting gas price. Default to 12
+          required: false
+          schema:
+            type: number
+            example: 12
+      responses:
+        200:
+          description: The suggested gas price
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    denom:
+                      type: string
+                    amount:
+                      type: string
+        400:
+          description: Invalid count
+
+  /node_info:
+    get:
+      description: Information about the connected node
+      summary: The properties of the connected node
+      tags:
+        - Tendermint RPC
+      responses:
+        200:
+          description: Node status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  application_version:
+                    properties:
+                      build_tags:
+                        type: string
+                      client_name:
+                        type: string
+                      commit:
+                        type: string
+                      go:
+                        type: string
+                      name:
+                        type: string
+                      server_name:
+                        type: string
+                      version:
+                        type: string
+                  node_info:
+                    properties:
+                      id:
+                        type: string
+                      moniker:
+                        type: string
+                        example: validator-name
+                      protocol_version:
+                        properties:
+                          p2p:
+                            type: string
+                            example: 7
+                          block:
+                            type: string
+                            example: 10
+                          app:
+                            type: string
+                            example: 0
+                      network:
+                        type: string
+                        example: gaia-2
+                      channels:
+                        type: string
+                      listen_addr:
+                        type: string
+                        example: 192.168.56.1:26656
+                      version:
+                        description: Tendermint version
+                        type: string
+                        example: 0.15.0
+                      other:
+                        description: more information on versions
+                        type: object
+                        properties:
+                          tx_index:
+                            type: string
+                            example: on
+                          rpc_address:
+                            type: string
+                            example: tcp://0.0.0.0:26657
+        500:
+          description: Failed to query node status
+  /syncing:
+    get:
+      summary: Syncing state of node
+      tags:
+        - Tendermint RPC
+      description: Get if the node is currently syning with other nodes
+      responses:
+        200:
+          description: Node syncing status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  syncing:
+                    type: boolean
+        500:
+          description: Server internal error
+  /blocks/latest:
+    get:
+      summary: Get the latest block
+      tags:
+        - Tendermint RPC
+      responses:
+        200:
+          description: The latest block
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlockQuery"
+        500:
+          description: Server internal error
+  /blocks/{height}:
+    get:
+      summary: Get a block at a certain height
+      tags:
+        - Tendermint RPC
+      parameters:
+        - in: path
+          name: height
+          description: Block height
+          required: true
+          schema:
+            type: number
+            example: 1
+      responses:
+        200:
+          description: The block at a specific height
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlockQuery"
+        404:
+          description: Request block height doesn't
+        400:
+          description: Invalid height
+        500:
+          description: Server internal error
+  /validatorsets/latest:
+    get:
+      summary: Get the latest validator set
+      tags:
+        - Tendermint RPC
+      responses:
+        200:
+          description: The validator set at the latest block height
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  block_height:
+                    type: string
+                  validators:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TendermintValidator"
+        500:
+          description: Server internal error
+  /validatorsets/{height}:
+    get:
+      summary: Get a validator set a certain height
+      tags:
+        - Tendermint RPC
+      parameters:
+        - in: path
+          name: height
+          description: Block height
+          required: true
+          schema:
+            type: number
+            example: 1
+      responses:
+        200:
+          description: The validator set at a specific block height
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  block_height:
+                    type: string
+                  validators:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TendermintValidator"
+        404:
+          description: Block at height not available
+        400:
+          description: Invalid height
+        500:
+          description: Server internal error
+  /txs/{hash}:
+    get:
+      summary: Get a Tx by hash
+      tags:
+        - Transactions
+      description: Retrieve a transaction using its hash.
+      parameters:
+        - in: path
+          name: hash
+          description: Tx hash
+          required: true
+          schema:
+            type: string
+            example: BCBE20E8D46758B96AE5883B792858296AC06E51435490FBDCAE25A72B3CC76B
+      responses:
+        200:
+          description: Tx with the provided hash
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TxQuery"
+        500:
+          description: Internal Server Error
+  /txs:
+    post:
+      tags:
+        - Transactions
+      summary: Broadcast a signed tx
+      description: Broadcast a signed tx to a full node
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: The tx must be a signed StdTx. The supported broadcast modes include `"block"`(return after tx commit), `"sync"`(return afer CheckTx) and `"async"`(return right away).
+              properties:
+                tx:
+                  $ref: "#/components/schemas/StdTx"
+                mode:
+                  type: string
+                  example: block
+      responses:
+        200:
+          description: Tx broadcasting result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BroadcastTxCommitResult"
+        500:
+          description: Internal Server Error
+  /txs/encode:
+    post:
+      tags:
+        - Transactions
+      summary: Encode a transaction to the Amino wire format
+      description: Encode a transaction (signed or not) from JSON to base64-encoded Amino serialized bytes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: The tx to encode.
+              properties:
+                tx:
+                  $ref: "#/components/schemas/StdTx"
+      responses:
+        200:
+          description: The tx was successfully decoded and re-encoded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tx:
+                    type: string
+                    example: The base64-encoded Amino-serialized bytes for the tx
+        400:
+          description: The tx was malformated
+        500:
+          description: Server internal error
+  /cu/cus/{address}:
+    get:
+      summary: Get the custodian unit information on blockchain
+      tags:
+        - Cu
+      parameters:
+        - in: path
+          name: address
+          description: Account address
+          required: true
+          schema:
+            type: string
+            example: HBCTxmVA5pjFxUgU2UEzWipuDw1K2XaEzuKa
+      responses:
+        200:
+          description: Account information on the blockchain
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  type:
+                    type: string
+                  value:
+                    type: object
+                    properties:
+                      cu_type:
+                        type: string
+                      address:
+                        type: string
+                      migration_status:
+                        type: string
+                      asset_pubkey:
+                        type: string
+                      asset_pubkey_epoch:
+                        type: string
+                      assets:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Asset"
+                      asset_coins_hold:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Coin"
+                      asset_coins:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Coin"
+                      coins_hold:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Coin"
+                      coins:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Coin"
+                      gas_received:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Coin"
+                      gas_used:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Coin"
+                      public_key:
+                        $ref: "#/components/schemas/PublicKey"
+                      sequence:
+                        type: string
+        500:
+          description: Server internel error
+  /cu/pending_deposit/{address}:
+    get:
+      summary: Get the custodian unit pending deposit list
+      tags:
+        - Cu
+      parameters:
+        - in: path
+          name: address
+          description: Account address
+          required: true
+          schema:
+            type: string
+            example: HBCTxmVA5pjFxUgU2UEzWipuDw1K2XaEzuKa
+      responses:
+        200:
+          description: pending deposit list of address
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: object
+                  properties:
+                    hash:
+                      type: string
+                    index:
+                      type: string
+                    ext_address:
+                      type: string
+                    amount:
+                      type: string
+                    memo:
+                      type: string
+                    status:
+                      type: number
+        400:
+          description: invalid address
+        500:
+          description: Server internel error
+  /staking/delegators/{delegatorAddr}/delegations:
+    parameters:
+      - in: path
+        name: delegatorAddr
+        description: Account Address of Delegator
+        required: true
+        schema:
+          type: string
+          example: HBCTxmVA5pjFxUgU2UEzWipuDw1K2XaEzuKa
+    get:
+      summary: Get all delegations from a delegator
+      tags:
+        - Staking
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Delegation"
+        400:
+          description: Invalid delegator address
+        500:
+          description: Internal Server Error
+  /staking/delegators/{delegatorAddr}/delegations/{validatorAddr}:
+    parameters:
+      - in: path
+        name: delegatorAddr
+        description: Account Address of Delegator
+        required: true
+        schema:
+          type: string
+          example: HBCTxmVA5pjFxUgU2UEzWipuDw1K2XaEzuKa
+      - in: path
+        name: validatorAddr
+        description: Bech32 OperatorAddress of validator
+        required: true
+        schema:
+          type: string
+          example: hbcvaloper1we2ufxj2wpanrhzd2h7upw07hffudxfw472txx
+    get:
+      summary: Query the current delegation between a delegator and a validator
+      tags:
+        - Staking
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Delegation"
+        400:
+          description: Invalid delegator address or validator address
+        500:
+          description: Internal Server Error
+  /staking/delegators/{delegatorAddr}/unbonding_delegations:
+    parameters:
+      - in: path
+        name: delegatorAddr
+        description: Account Address of Delegator
+        required: true
+        schema:
+          type: string
+          example: HBCTxmVA5pjFxUgU2UEzWipuDw1K2XaEzuKa
+    get:
+      summary: Get all unbonding delegations from a delegator
+      tags:
+        - Staking
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UnbondingDelegation"
+        400:
+          description: Invalid delegator address
+        500:
+          description: Internal Server Error
+  /staking/delegators/{delegatorAddr}/unbonding_delegations/{validatorAddr}:
+    parameters:
+      - in: path
+        name: delegatorAddr
+        description: Account Address of Delegator
+        required: true
+        schema:
+          type: string
+          example: HBCTxmVA5pjFxUgU2UEzWipuDw1K2XaEzuKa
+      - in: path
+        name: validatorAddr
+        description: Bech32 OperatorAddress of validator
+        required: true
+        schema:
+          type: string
+          example: hbcvaloper1we2ufxj2wpanrhzd2h7upw07hffudxfw472txx
+    get:
+      summary: Query all unbonding delegations between a delegator and a validator
+      tags:
+        - Staking
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnbondingDelegationPair"
+        400:
+          description: Invalid delegator address or validator address
+        500:
+          description: Internal Server Error
+  /staking/redelegations:
+    parameters:
+      - in: query
+        name: delegator
+        description: Bech32 AccAddress of Delegator
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: validator_from
+        description: Bech32 ValAddress of SrcValidator
+        required: false
+        schema:
+          type: string
+      - in: query
+        name: validator_to
+        description: Bech32 ValAddress of DstValidator
+        required: false
+        schema:
+          type: string
+    get:
+      summary: Get all redelegations (filter by query params)
+      tags:
+        - Staking
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Redelegation"
+        500:
+          description: Internal Server Error
+  /staking/delegators/{delegatorAddr}/validators:
+    parameters:
+      - in: path
+        name: delegatorAddr
+        description: Account Address of Delegator
+        required: true
+        schema:
+          type: string
+          example: HBCTxmVA5pjFxUgU2UEzWipuDw1K2XaEzuKa
+    get:
+      summary: Query all validators that a delegator is bonded to
+      tags:
+        - Staking
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Validator"
+        400:
+          description: Invalid delegator address
+        500:
+          description: Internal Server Error
+  /staking/delegators/{delegatorAddr}/validators/{validatorAddr}:
+    parameters:
+      - in: path
+        name: delegatorAddr
+        description: Account Address of Delegator
+        required: true
+        schema:
+          type: string
+          example: HBCTxmVA5pjFxUgU2UEzWipuDw1K2XaEzuKa
+      - in: path
+        name: validatorAddr
+        description: Bech32 ValAddress of Delegator
+        required: true
+        schema:
+          type: string
+          example: hbcvaloper1we2ufxj2wpanrhzd2h7upw07hffudxfw472txx
+    get:
+      summary: Query a validator that a delegator is bonded to
+      tags:
+        - Staking
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Validator"
+        400:
+          description: Invalid delegator address or validator address
+        500:
+          description: Internal Server Error
+  /staking/validators:
+    get:
+      summary: Get all validator candidates. By default it returns only the bonded validators.
+      parameters:
+        - in: query
+          name: status
+          description: The validator bond status. Must be either 'bonded', 'unbonded', or 'unbonding'.
+          schema:
+            type: string
+            example: bonded
+        - in: query
+          name: page
+          description: The page number.
+          schema:
+            type: integer
+            example: 1
+        - in: query
+          name: limit
+          description: The maximum number of items per page.
+          schema:
+            type: integer
+            example: 1
+      tags:
+        - Staking
+
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Validator"
+        500:
+          description: Internal Server Error
+  /staking/validators/{validatorAddr}:
+    parameters:
+      - in: path
+        name: validatorAddr
+        description: Bech32 OperatorAddress of validator
+        required: true
+        schema:
+          type: string
+          example: hbcvaloper1we2ufxj2wpanrhzd2h7upw07hffudxfw472txx
+    get:
+      summary: Query the information from a single validator
+      tags:
+        - Staking
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Validator"
+        400:
+          description: Invalid validator address
+        500:
+          description: Internal Server Error
+  /staking/validators/{validatorAddr}/delegations:
+    parameters:
+      - in: path
+        name: validatorAddr
+        description: Bech32 OperatorAddress of validator
+        required: true
+        schema:
+          type: string
+          example: hbcvaloper1we2ufxj2wpanrhzd2h7upw07hffudxfw472txx
+    get:
+      summary: Get all delegations from a validator
+      tags:
+        - Staking
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Delegation"
+        400:
+          description: Invalid validator address
+        500:
+          description: Internal Server Error
+  /staking/validators/{validatorAddr}/unbonding_delegations:
+    parameters:
+      - in: path
+        name: validatorAddr
+        description: Bech32 OperatorAddress of validator
+        required: true
+        schema:
+          type: string
+          example: hbcvaloper1we2ufxj2wpanrhzd2h7upw07hffudxfw472txx
+    get:
+      summary: Get all unbonding delegations from a validator
+      tags:
+        - Staking
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UnbondingDelegation"
+        400:
+          description: Invalid validator address
+        500:
+          description: Internal Server Error
+  /staking/pool:
+    get:
+      summary: Get the current state of the staking pool
+      tags:
+        - Staking
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  loose_tokens:
+                    type: string
+                  bonded_tokens:
+                    type: string
+                  inflation_last_time:
+                    type: string
+                  inflation:
+                    type: string
+                  date_last_commission_reset:
+                    type: string
+                  prev_bonded_shares:
+                    type: string
+        500:
+          description: Internal Server Error
+  /staking/parameters:
+    get:
+      summary: Get the current staking parameter values
+      tags:
+        - Staking
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  max_entries:
+                    type: string
+                  election_period:
+                    type: string
+                  min_validator_delegation:
+                    type: string
+                  min_key_node_delegation:
+                    type: string
+                  max_key_node_heartbeat_interval:
+                    type: string
+                  max_candidate_key_node_heartbeat_interval:
+                    type: string
+                  unbonding_time:
+                    type: string
+                  max_validators:
+                    type: integer
+                  max_key_nodes:
+                    type: integer
+                  bond_denom:
+                    type: string
+        500:
+          description: Internal Server Error
+  # TODO: We need to either fix this route when the validator is not found or add a slashed validator in the contract tests
+  #  /slashing/validators/{validatorPubKey}/signing_info:
+  #    get:
+  #      summary: Get sign info of given validator
+  #      description: Get sign info of given validator
+  #      produces:
+  #        - application/json
+  #      tags:
+  #        - Slashing
+  #      parameters:
+  #        - type: string
+  #          description: Bech32 validator public key
+  #          name: validatorPubKey
+  #          required: true
+  #          in: path
+  #          x-example: hbcvalconspub1zcjduepq6f9zhhlwne7gkx0yrpg3ff3xe4yl6eu977mjjexlf5jjspjq26zqmyekwd
+  #      responses:
+  #        200:
+  #          description: OK
+  #          schema:
+  #            $ref: "#/components/schemas/SigningInfo"
+  #        400:
+  #          description: Invalid validator public key
+  #        500:
+  /slashing/signing_infos:
+    get:
+      summary: Get sign info of given all validators
+      description: Get sign info of all validators
+
+      tags:
+        - Slashing
+      parameters:
+        - in: query
+          name: page
+          description: Page number
+          required: true
+          schema:
+            type: integer
+            example: 1
+        - in: query
+          name: limit
+          description: Maximum number of items per page
+          required: true
+          schema:
+            type: integer
+            example: 5
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SigningInfo"
+        400:
+          description: Invalid validator public key for one of the validators
+        500:
+          description: Internal Server Error
+  /slashing/parameters:
+    get:
+      summary: Get the current slashing parameters
+      tags:
+        - Slashing
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  max_evidence_age:
+                    type: string
+                  signed_blocks_window:
+                    type: string
+                  min_signed_per_window:
+                    type: string
+                  double_sign_unbond_duration:
+                    type: string
+                  downtime_unbond_duration:
+                    type: string
+                  slash_fraction_double_sign:
+                    type: string
+                  slash_fraction_downtime:
+                    type: string
+        500:
+          description: Internal Server Error
+  /gov/proposals:
+    get:
+      summary: Query proposals
+      description: Query proposals information with parameters
+
+      tags:
+        - Governance
+      parameters:
+        - in: query
+          name: voter
+          description: voter address
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: depositor
+          description: depositor address
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: status
+          description: proposal status, valid values can be `"deposit_period"`, `"voting_period"`, `"passed"`, `"rejected"`
+          required: false
+          schema:
+            type: string
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TextProposal"
+        400:
+          description: Invalid query parameters
+        500:
+          description: Internal Server Error
+  /gov/proposals/{proposalId}:
+    get:
+      summary: Query a proposal
+      description: Query a proposal by id
+
+      tags:
+        - Governance
+      parameters:
+        - name: proposalId
+          required: true
+          in: path
+          schema:
+            type: string
+            example: "2"
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TextProposal"
+        400:
+          description: Invalid proposal id
+        500:
+          description: Internal Server Error
+  /gov/proposals/{proposalId}/proposer:
+    get:
+      summary: Query proposer
+      description: Query for the proposer for a proposal
+      tags:
+        - Governance
+      parameters:
+        - name: proposalId
+          required: true
+          in: path
+          schema:
+            type: string
+            example: "2"
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Proposer"
+        400:
+          description: Invalid proposal ID
+        500:
+          description: Internal Server Error
+  /gov/proposals/{proposalId}/deposits:
+    get:
+      summary: Query deposits
+      description: Query deposits by proposalId
+      tags:
+        - Governance
+      parameters:
+        - name: proposalId
+          required: true
+          in: path
+          schema:
+            type: string
+            example: "2"
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Deposit"
+        400:
+          description: Invalid proposal id
+        500:
+          description: Internal Server Error
+  /gov/proposals/{proposalId}/deposits/{depositor}:
+    get:
+      summary: Query deposit
+      description: Query deposit by proposalId and depositor address
+      tags:
+        - Governance
+      parameters:
+        - description: proposal id
+          name: proposalId
+          required: true
+          in: path
+          schema:
+            type: string
+            example: "2"
+        - description: depositor account address
+          name: depositor
+          required: true
+          in: path
+          schema:
+            type: string
+            example: HBCTxmVA5pjFxUgU2UEzWipuDw1K2XaEzuKa
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Deposit"
+        400:
+          description: Invalid proposal id or depositor address
+        404:
+          description: Found no deposit
+        500:
+          description: Internal Server Error
+  /gov/proposals/{proposalId}/votes:
+    get:
+      summary: Query voters
+      description: Query voters information by proposalId
+      tags:
+        - Governance
+      parameters:
+        - description: proposal id
+          name: proposalId
+          required: true
+          in: path
+          schema:
+            type: string
+            example: "2"
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Vote"
+        400:
+          description: Invalid proposal id
+        500:
+          description: Internal Server Error
+  /gov/proposals/{proposalId}/votes/{voter}:
+    get:
+      summary: Query vote
+      description: Query vote information by proposal Id and voter address
+      tags:
+        - Governance
+      parameters:
+        - description: proposal id
+          name: proposalId
+          required: true
+          in: path
+          schema:
+            type: string
+            example: "2"
+        - description: voter account address
+          name: voter
+          required: true
+          in: path
+          schema:
+            type: string
+            example: HBCTxmVA5pjFxUgU2UEzWipuDw1K2XaEzuKa
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vote"
+        400:
+          description: Invalid proposal id or voter address
+        404:
+          description: Found no vote
+        500:
+          description: Internal Server Error
+  /gov/proposals/{proposalId}/tally:
+    get:
+      summary: Get a proposal's tally result at the current time
+      description: Gets a proposal's tally result at the current time. If the proposal is pending deposits (i.e status 'DepositPeriod') it returns an empty tally result.
+
+      tags:
+        - Governance
+      parameters:
+        - description: proposal id
+          name: proposalId
+          required: true
+          in: path
+          schema:
+            type: string
+            example: "2"
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TallyResult"
+        400:
+          description: Invalid proposal id
+        500:
+          description: Internal Server Error
+  /gov/parameters/deposit:
+    get:
+      summary: Query governance deposit parameters
+      description: Query governance deposit parameters. The max_deposit_period units are in nanoseconds.
+      tags:
+        - Governance
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  min_deposit:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Coin"
+                  max_deposit_period:
+                    type: string
+                    example: "86400000000000"
+        400:
+          description: <other_path> is not a valid query request path
+        404:
+          description: Found no deposit parameters
+        500:
+          description: Internal Server Error
+  /gov/parameters/tallying:
+    get:
+      summary: Query governance tally parameters
+      description: Query governance tally parameters
+      tags:
+        - Governance
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                properties:
+                  threshold:
+                    type: string
+                    example: "0.5000000000"
+                  veto:
+                    type: string
+                    example: "0.3340000000"
+                  governance_penalty:
+                    type: string
+                    example: "0.0100000000"
+        400:
+          description: <other_path> is not a valid query request path
+        404:
+          description: Found no tally parameters
+        500:
+          description: Internal Server Error
+  /gov/parameters/voting:
+    get:
+      summary: Query governance voting parameters
+      description: Query governance voting parameters. The voting_period units are in nanoseconds.
+      tags:
+        - Governance
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                properties:
+                  voting_period:
+                    type: string
+                    example: "86400000000000"
+        400:
+          description: <other_path> is not a valid query request path
+        404:
+          description: Found no voting parameters
+        500:
+          description: Internal Server Error
+  /distribution/delegators/{delegatorAddr}/rewards:
+    parameters:
+      - in: path
+        name: delegatorAddr
+        description: Account Address of Delegator
+        required: true
+        schema:
+          type: string
+          example: HBCTxmVA5pjFxUgU2UEzWipuDw1K2XaEzuKa
+    get:
+      summary: Get the total rewards balance from all delegations
+      description: Get the sum of all the rewards earned by delegations by a single delegator
+      tags:
+        - Distribution
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DelegatorTotalRewards"
+        400:
+          description: Invalid delegator address
+        500:
+          description: Internal Server Error
+  /distribution/delegators/{delegatorAddr}/rewards/{validatorAddr}:
+    parameters:
+      - in: path
+        name: delegatorAddr
+        description: Account Address of Delegator
+        required: true
+        schema:
+          type: string
+          example: HBCTxmVA5pjFxUgU2UEzWipuDw1K2XaEzuKa
+      - in: path
+        name: validatorAddr
+        description: Bech32 OperatorAddress of validator
+        required: true
+        schema:
+          type: string
+          example: hbcvaloper1we2ufxj2wpanrhzd2h7upw07hffudxfw472txx
+    get:
+      summary: Query a delegation reward
+      description: Query a single delegation reward by a delegator
+      tags:
+        - Distribution
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Coin"
+        400:
+          description: Invalid delegator address
+        500:
+          description: Internal Server Error
+  /distribution/delegators/{delegatorAddr}/withdraw_address:
+    parameters:
+      - in: path
+        name: delegatorAddr
+        description: Account Address of Delegator
+        required: true
+        schema:
+          type: string
+          example: HBCTxmVA5pjFxUgU2UEzWipuDw1K2XaEzuKa
+    get:
+      summary: Get the rewards withdrawal address
+      description: Get the delegations' rewards withdrawal address. This is the address in which the user will receive the reward funds
+      tags:
+        - Distribution
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Address"
+        400:
+          description: Invalid delegator address
+        500:
+          description: Internal Server Error
+  /distribution/validators/{validatorAddr}:
+    parameters:
+      - in: path
+        name: validatorAddr
+        description: Bech32 OperatorAddress of validator
+        required: true
+        schema:
+          type: string
+          example: hbcvaloper1we2ufxj2wpanrhzd2h7upw07hffudxfw472txx
+    get:
+      summary: Validator distribution information
+      description: Query the distribution information of a single validator
+      tags:
+        - Distribution
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidatorDistInfo"
+        400:
+          description: Invalid validator address
+        500:
+          description: Internal Server Error
+  /distribution/validators/{validatorAddr}/outstanding_rewards:
+    parameters:
+      - in: path
+        name: validatorAddr
+        description: Bech32 OperatorAddress of validator
+        required: true
+        schema:
+          type: string
+          example: hbcvaloper1we2ufxj2wpanrhzd2h7upw07hffudxfw472txx
+    get:
+      summary: Fee distribution outstanding rewards of a single validator
+      tags:
+        - Distribution
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Coin"
+        500:
+          description: Internal Server Error
+  /distribution/validators/{validatorAddr}/rewards:
+    parameters:
+      - in: path
+        name: validatorAddr
+        description: Bech32 OperatorAddress of validator
+        required: true
+        schema:
+          type: string
+          example: hbcvaloper1we2ufxj2wpanrhzd2h7upw07hffudxfw472txx
+    get:
+      summary: Commission and self-delegation rewards of a single validator
+      description: Query the commission and self-delegation rewards of validator.
+      tags:
+        - Distribution
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Coin"
+        400:
+          description: Invalid validator address
+        500:
+          description: Internal Server Error
+  /distribution/community_pool:
+    get:
+      summary: Community pool parameters
+      tags:
+        - Distribution
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Coin"
+        500:
+          description: Internal Server Error
+  /distribution/parameters:
+    get:
+      summary: Fee distribution parameters
+      tags:
+        - Distribution
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                properties:
+                  base_proposer_reward:
+                    type: string
+                  bonus_proposer_reward:
+                    type: string
+                  community_tax:
+                    type: string
+        500:
+          description: Internal Server Error
+  /minting/parameters:
+    get:
+      summary: Minting module parameters
+      tags:
+        - Mint
+
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                properties:
+                  mint_denom:
+                    type: string
+                  inflation:
+                    type: string
+                  mint_per_block:
+                    type: string
+        500:
+          description: Internal Server Error
+  /supply/total:
+    get:
+      summary: Total supply of coins in the chain
+      tags:
+        - Supply
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Supply"
+        500:
+          description: Internal Server Error
+  /supply/total/{denomination}:
+    parameters:
+      - in: path
+        name: denomination
+        description: Coin denomination
+        required: true
+        schema:
+          type: string
+          example: hbc
+    get:
+      summary: Total supply of a single coin denomination
+      tags:
+        - Supply
+
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: string
+        400:
+          description: Invalid coin denomination
+        500:
+          description: Internal Server Error
+  /supply/burned:
+    get:
+      summary: Amount of burned coins in the chain
+      tags:
+        - Supply
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Supply"
+        500:
+          description: Internal Server Error
+  /supply/burned/{denomination}:
+    parameters:
+      - in: path
+        name: denomination
+        description: Coin denomination
+        required: true
+        schema:
+          type: string
+          example: hdt
+    get:
+      summary: Burned amount of a single coin denomination
+      tags:
+        - Supply
+
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: string
+        400:
+          description: Invalid coin denomination
+        500:
+          description: Internal Server Error
+  /token/info/{denom}:
+    parameters:
+      - in: path
+        name: denom
+        description: Token denomination
+        required: true
+        schema:
+          type: string
+          example: hbc
+    get:
+      summary: Information about a token denomination
+      tags:
+        - Token
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  block_height:
+                    type: string
+                  result:
+                    $ref: "#/components/schemas/Token"
+        400:
+          description: Invalid token denomination
+        500:
+          description: Internal Server Error
+  /token/tokens:
+    get:
+      summary: Query all tokens.
+      tags:
+        - Token
+
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Token"
+        500:
+          description: Internal Server Error
+  /order/info/{orderId}:
+    parameters:
+      - in: path
+        name: orderId
+        description: order ID
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Information of an order
+      tags:
+        - Order
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        400:
+          description: Invalid order ID
+        500:
+          description: Internal Server Error
+  /order/process_list:
+    get:
+      summary: List of process order id
+      tags:
+        - Order
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        500:
+          description: Internal Server Error
+  /mapping:
+    parameters:
+      - in: query
+        name: page
+        description: The page number.
+        schema:
+          type: integer
+          example: 1
+      - in: query
+        name: limit
+        description: The maximum number of items per page.
+        schema:
+          type: integer
+          example: 1
+    get:
+      summary: Query list of mappings
+      tags:
+        - Mapping
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  block_height:
+                    type: string
+                  result:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/MappingInfo"
+        500:
+          description: Internal Server Error
+  /mapping/{issue-symbol}:
+    parameters:
+      - in: path
+        name: issue-symbol
+        description: The issue symbol of the mapping info to query.
+        required: true
+        schema:
+          type: string
+          example: cbtc
+    get:
+      summary: Query mapping info specified by an issue symbol.
+      tags:
+        - Mapping
+
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  block_height:
+                    type: string
+                  result:
+                    $ref: "#/components/schemas/MappingInfo"
+        400:
+          description: Invalid token denomination
+        500:
+          description: Internal Server Error
+  /keygen/wait_assign:
+    get:
+      summary: Query all wait assign keygen order ids.
+      tags:
+        - Keygen
+
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        500:
+          description: Internal Server Error
+  /hrc20/parameters:
+    get:
+      summary: Query the hrc20 module's parameters
+      tags:
+        - Hrc20
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  issue_token_fee:
+                    type: string
+        500:
+          description: Internal Server Error
+  /transfer/accounts/{address}/transfers:
+    parameters:
+      - in: path
+        name: address
+        description: Account address
+        required: true
+        schema:
+          type: string
+          example: HBCTxmVA5pjFxUgU2UEzWipuDw1K2XaEzuKa
+    post:
+      summary: Send coins to a address
+      tags:
+        - Transfer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                base_req:
+                  $ref: "#/components/schemas/BaseReq"
+                amount:
+                  type: string
+                  example: "0.0100000000"
+      responses:
+        200:
+          description: The transaction was succesfully generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StdTx"
+        400:
+          description: Invalid account address
+        500:
+          description: Internal Server Error
+  /transfer/balances/{address}:
+    parameters:
+      - in: path
+        name: address
+        description: Account address
+        required: true
+        schema:
+          type: string
+          example: HBCTxmVA5pjFxUgU2UEzWipuDw1K2XaEzuKa
+    get:
+      summary: Query account balance info
+      tags:
+        - Transfer
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  coins:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Coin"
+        400:
+          description: Invalid account address
+        500:
+          description: Internal Server Error
+  /upgrade/current:
+    get:
+      summary: Query currently scheduled upgrade plan
+      tags:
+        - Upgrade
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  time:
+                    type: string
+                  height:
+                    type: number
+                  info:
+                    type: string
+        500:
+          description: Internal Server Error
+  /upgrade/applied/{name}:
+    parameters:
+      - in: path
+        name: name
+        description: Plan name
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Query height at which the given upgrade was executed
+      tags:
+        - Upgrade
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: number
+        400:
+          description: Invalid plan name
+        500:
+          description: Internal Server Error
+  /openswap/pair/{tokenA}/{tokenB}:
+    parameters:
+      - in: path
+        name: tokenA
+        description: Trading pair Token A
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: tokenB
+        description: Trading pair Token B
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Query openswap trading pair by tokens
+      tags:
+        - Openswap
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token_a:
+                    type: string
+                    example: "btc"
+                  token_b:
+                    type: string
+                    example: "usdt"
+                  token_a_amount:
+                    type: string
+                    example: "100"
+                  token_b_amount:
+                    type: string
+                    example: "10000"
+                  total_liquidity:
+                    type: string
+                    example: "1000"
+
+        400:
+          description: Invalid token name
+        500:
+          description: Internal Server Error
+  /openswap/pairs:
+    get:
+      summary: Query openswap all trading pair
+      tags:
+        - Openswap
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    token_a:
+                      type: string
+                      example: "btc"
+                    token_b:
+                      type: string
+                      example: "usdt"
+                    token_a_amount:
+                      type: string
+                      example: "100"
+                    token_b_amount:
+                      type: string
+                      example: "10000"
+                    total_liquidity:
+                      type: string
+                      example: "1000"
+
+        500:
+          description: Internal Server Error
+  /openswap/liquidity/{addr}:
+    parameters:
+      - in: path
+        name: addr
+        description: Account address
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Query openswap liquidity by account address
+      tags:
+        - Openswap
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    trading_pair:
+                      type: object
+                      properties:
+                        token_a:
+                          type: string
+                          example: "btc"
+                        token_b:
+                          type: string
+                          example: "usdt"
+                        token_a_amount:
+                          type: string
+                          example: "100"
+                        token_b_amount:
+                          type: string
+                          example: "10000"
+                        total_liquidity:
+                          type: string
+                          example: "1000"
+                    liquidity:
+                      type: "string"
+                      example: "100"
+                    liquidity_share:
+                      type: "string"
+                      example: "0.1"
+        400:
+          description: Invalid address
+        500:
+          description: Internal Server Error
+  /openswap/orderbook/{pair}:
+    parameters:
+      - in: path
+        name: pair
+        description: token pair
+        required: true
+        schema:
+          type: string
+      - in: query
+        name: merge
+        description: whether to merge the orderbook
+        schema:
+          type: boolean
+          example: false
+    get:
+      summary: Query orderbook of a trading pair
+      tags:
+        - Openswap
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  buy:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OpenswapOrder"
+                  sell:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OpenswapOrder"
+        400:
+          description: Invalid trading pair
+        500:
+          description: Internal Server Error
+  /openswap/order/{orderID}:
+    parameters:
+      - in: path
+        name: orderID
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Query a limit-price order information
+      tags:
+        - Openswap
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenswapOrder"
+        500:
+          description: Internal Server Error
+  /openswap/pending_orders/{pair}/{addr}:
+    parameters:
+      - in: path
+        name: pair
+        description: token pair
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: addr
+        description: address
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Query a pending orders of an address
+      tags:
+        - Openswap
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OpenswapOrder"
+        400:
+          description: Invalid trading pair
+        500:
+          description: Internal Server Error
+  /openswap/earnings/{addr}:
+    parameters:
+      - in: path
+        name: addr
+        description: address
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Query unclaimed earnings of an address
+      tags:
+        - Openswap
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    token_a:
+                      type: string
+                      example: btc
+                    token_b:
+                      type: string
+                      example: usdt
+                    amount:
+                      type: string
+                      example: 1000.121
+        400:
+          description: Invalid address
+        500:
+          description: Internal Server Error
+  /openswap/parameters:
+    get:
+      summary: Query parameters of openswap module
+      tags:
+        - Openswap
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  minimum_liquidity:
+                    type: string
+                  fee_rate:
+                    type: string
+                  repurchase_rate:
+                    type: string
+                  referer_transaction_bonus_rate:
+                    type: string
+                  referer_mining_bonus_rate:
+                    type: string
+                  mining_weights:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        token_a:
+                          type: string
+                        token_b:
+                          type: string
+                        weight:
+                          type: string
+                  mining_plans:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        start_height:
+                          type: string
+                        mining_per_block:
+                          type: string
+        500:
+          description: Internal Server Error
+components:
+  schemas:
+    CheckTxResult:
+      type: object
+      properties:
+        code:
+          type: integer
+        data:
+          type: string
+        gas_used:
+          type: integer
+        gas_wanted:
+          type: integer
+        info:
+          type: string
+        log:
+          type: string
+        tags:
+          type: array
+          items:
+            $ref: "#/components/schemas/KVPair"
+      example:
+        code: 0
+        data: data
+        log: log
+        gas_used: 5000
+        gas_wanted: 10000
+        info: info
+        tags:
+          - ""
+          - ""
+    DeliverTxResult:
+      type: object
+      properties:
+        code:
+          type: integer
+        data:
+          type: string
+        gas_used:
+          type: integer
+        gas_wanted:
+          type: integer
+        info:
+          type: string
+        log:
+          type: string
+        tags:
+          type: array
+          items:
+            $ref: "#/components/schemas/KVPair"
+      example:
+        code: 5
+        data: data
+        log: log
+        gas_used: 5000
+        gas_wanted: 10000
+        info: info
+        tags:
+          - ""
+          - ""
+    BroadcastTxCommitResult:
+      type: object
+      properties:
+        check_tx:
+          $ref: "#/components/schemas/CheckTxResult"
+        deliver_tx:
+          $ref: "#/components/schemas/DeliverTxResult"
+        hash:
+          $ref: "#/components/schemas/Hash"
+        height:
+          type: integer
+    KVPair:
+      type: object
+      properties:
+        key:
+          type: string
+        value:
+          type: string
+    Msg:
+      type: string
+    Address:
+      type: string
+      description: base58 encoded address
+      example: HBCTxmVA5pjFxUgU2UEzWipuDw1K2XaEzuKa
+    ValidatorAddress:
+      type: string
+      description: bech32 encoded address
+      example: hbcvaloper1we2ufxj2wpanrhzd2h7upw07hffudxfw472txx
+    Asset:
+      type: object
+      properties:
+        address:
+          type: string
+          example: 0x6621892346A47d319e705b76a3EF9Bb226fBe8cA
+        denom:
+          type: string
+          example: eth
+        enable_sendtx:
+          type: boolean
+          example: true
+        epoch:
+          type: string
+          example: 1
+        gas_remained:
+          type: string
+          example: 0
+        nonce:
+          type: string
+          example: 0
+    Hash:
+      type: string
+      example: EE5F3404034C524501629B56E0DDC38FAD651F04
+    TxQuery:
+      type: object
+      properties:
+        hash:
+          type: string
+          example: "D085138D913993919295FF4B0A9107F1F2CDE0D37A87CE0644E217CBF3B49656"
+        height:
+          type: number
+          example: 368
+        tx:
+          $ref: "#/components/schemas/StdTx"
+        result:
+          type: object
+          properties:
+            log:
+              type: string
+            gas_wanted:
+              type: string
+              example: "200000"
+            gas_used:
+              type: string
+              example: "26354"
+            tags:
+              type: array
+              items:
+                $ref: "#/components/schemas/KVPair"
+    StdTx:
+      type: object
+      properties:
+        msg:
+          type: array
+          items:
+            $ref: "#/components/schemas/Msg"
+        fee:
+          type: object
+          properties:
+            gas:
+              type: string
+            amount:
+              type: array
+              items:
+                $ref: "#/components/schemas/Coin"
+        memo:
+          type: string
+        signature:
+          type: object
+          properties:
+            signature:
+              type: string
+              example: MEUCIQD02fsDPra8MtbRsyB1w7bqTM55Wu138zQbFcWx4+CFyAIge5WNPfKIuvzBZ69MyqHsqD8S1IwiEp+iUb6VSdtlpgY=
+            pub_key:
+              type: object
+              properties:
+                type:
+                  type: string
+                  example: "tendermint/PubKeySecp256k1"
+                value:
+                  type: string
+                  example: "Avz04VhtKJh8ACCVzlI8aTosGy0ikFXKIVHQ3jKMrosH"
+            account_number:
+              type: string
+              example: "0"
+            sequence:
+              type: string
+              example: "0"
+    BlockID:
+      type: object
+      properties:
+        hash:
+          $ref: "#/components/schemas/Hash"
+        parts:
+          type: object
+          properties:
+            total:
+              type: number
+              example: 0
+            hash:
+              $ref: "#/components/schemas/Hash"
+    BlockHeader:
+      type: object
+      properties:
+        chain_id:
+          type: string
+          example: hbtc-testnet
+        height:
+          type: number
+          example: 1
+        time:
+          type: string
+          example: "2017-12-30T05:53:09.287+01:00"
+        num_txs:
+          type: number
+          example: 0
+        last_block_id:
+          $ref: "#/components/schemas/BlockID"
+        total_txs:
+          type: number
+          example: 35
+        last_commit_hash:
+          $ref: "#/components/schemas/Hash"
+        data_hash:
+          $ref: "#/components/schemas/Hash"
+        validators_hash:
+          $ref: "#/components/schemas/Hash"
+        next_validators_hash:
+          $ref: "#/components/schemas/Hash"
+        consensus_hash:
+          $ref: "#/components/schemas/Hash"
+        app_hash:
+          $ref: "#/components/schemas/Hash"
+        last_results_hash:
+          $ref: "#/components/schemas/Hash"
+        evidence_hash:
+          $ref: "#/components/schemas/Hash"
+        proposer_address:
+          $ref: "#/components/schemas/Address"
+        version:
+          type: object
+          properties:
+            block:
+              type: string
+              example: 10
+            app:
+              type: string
+              example: 0
+    Block:
+      type: object
+      properties:
+        header:
+          $ref: "#/components/schemas/BlockHeader"
+        txs:
+          type: array
+          items:
+            type: string
+        evidence:
+          type: array
+          items:
+            type: string
+        last_commit:
+          type: object
+          properties:
+            block_id:
+              $ref: "#/components/schemas/BlockID"
+            precommits:
+              type: array
+              items:
+                type: object
+                properties:
+                  validator_address:
+                    type: string
+                  validator_index:
+                    type: string
+                    example: "0"
+                  height:
+                    type: string
+                    example: "0"
+                  round:
+                    type: string
+                    example: "0"
+                  timestamp:
+                    type: string
+                    example: "2017-12-30T05:53:09.287+01:00"
+                  type:
+                    type: number
+                    example: 2
+                  block_id:
+                    $ref: "#/components/schemas/BlockID"
+                  signature:
+                    type: string
+                    example: "7uTC74QlknqYWEwg7Vn6M8Om7FuZ0EO4bjvuj6rwH1mTUJrRuMMZvAAqT9VjNgP0RA/TDp6u/92AqrZfXJSpBQ=="
+    BlockQuery:
+      type: object
+      properties:
+        block_meta:
+          type: object
+          properties:
+            header:
+              $ref: "#/components/schemas/BlockHeader"
+            block_id:
+              $ref: "#/components/schemas/BlockID"
+        block:
+          $ref: "#/components/schemas/Block"
+    DelegationDelegatorReward:
+      type: object
+      properties:
+        validator_address:
+          $ref: "#/components/schemas/ValidatorAddress"
+        reward:
+          type: array
+          items:
+            $ref: "#/components/schemas/Coin"
+    DelegatorTotalRewards:
+      type: object
+      properties:
+        rewards:
+          type: array
+          items:
+            $ref: "#/components/schemas/DelegationDelegatorReward"
+        total:
+          type: array
+          items:
+            $ref: "#/components/schemas/Coin"
+    BaseReq:
+      type: object
+      properties:
+        from:
+          type: string
+          example: "HBCTxmVA5pjFxUgU2UEzWipuDw1K2XaEzuKa"
+          description: Sender address or Keybase name to generate a transaction
+        memo:
+          type: string
+          example: "Sent via hbtcchain 🚀"
+        chain_id:
+          type: string
+          example: "hbtc-testnet"
+        account_number:
+          type: string
+          example: "0"
+        sequence:
+          type: string
+          example: "1"
+        gas:
+          type: string
+          example: "200000"
+        gas_adjustment:
+          type: string
+          example: "1.2"
+        fees:
+          type: array
+          items:
+            $ref: "#/components/schemas/Coin"
+        simulate:
+          type: boolean
+          example: false
+          description: Estimate gas for a transaction (cannot be used in conjunction with generate_only)
+    TendermintValidator:
+      type: object
+      properties:
+        address:
+          $ref: "#/components/schemas/ValidatorAddress"
+        pub_key:
+          type: string
+          example: hbcvalconspub1zcjduepq6f9zhhlwne7gkx0yrpg3ff3xe4yl6eu977mjjexlf5jjspjq26zqmyekwd
+        voting_power:
+          type: string
+          example: "1000"
+        proposer_priority:
+          type: string
+          example: "1000"
+    TextProposal:
+      type: object
+      properties:
+        proposal_id:
+          type: integer
+        title:
+          type: string
+        description:
+          type: string
+        proposal_type:
+          type: string
+        proposal_status:
+          type: string
+        final_tally_result:
+          $ref: "#/components/schemas/TallyResult"
+        submit_time:
+          type: string
+        total_deposit:
+          type: array
+          items:
+            $ref: "#/components/schemas/Coin"
+        voting_start_time:
+          type: string
+    Proposer:
+      type: object
+      properties:
+        proposal_id:
+          type: string
+        proposer:
+          type: string
+    Deposit:
+      type: object
+      properties:
+        amount:
+          type: array
+          items:
+            $ref: "#/components/schemas/Coin"
+        proposal_id:
+          type: string
+        depositor:
+          $ref: "#/components/schemas/Address"
+    TallyResult:
+      type: object
+      properties:
+        yes:
+          type: string
+          example: "0.0000000000"
+        abstain:
+          type: string
+          example: "0.0000000000"
+        no:
+          type: string
+          example: "0.0000000000"
+        no_with_veto:
+          type: string
+          example: "0.0000000000"
+    CUKeyGen:
+      type: object
+      properties:
+        FromCU:
+          type: string
+        ToCU:
+          type: string
+        OrderID:
+          type: string
+        Symobl:
+          type: string
+    CUDeposit:
+      type: object
+      properties:
+        FromCU:
+          type: string
+        ToCU:
+          type: string
+        ToAddr:
+          type: string
+        Symobl:
+          type: string
+        Amount:
+          type: number
+        TxHash:
+          type: string
+        Index:
+          type: number
+        Height:
+          type: number
+        OrderID:
+          type: string
+        Memo:
+          type: string
+    CUWithdrawal:
+      type: object
+      properties:
+        FromCU:
+          type: string
+        ToAddr:
+          type: string
+        Symobl:
+          type: string
+        Amount:
+          type: number
+        GasFee:
+          type: number
+        OrderID:
+          type: string
+    Vote:
+      type: object
+      properties:
+        voter:
+          type: string
+        proposal_id:
+          type: string
+        option:
+          type: string
+    Validator:
+      type: object
+      properties:
+        operator_address:
+          $ref: "#/components/schemas/ValidatorAddress"
+        consensus_pubkey:
+          type: string
+          example: hbcvalconspub1zcjduepq6f9zhhlwne7gkx0yrpg3ff3xe4yl6eu977mjjexlf5jjspjq26zqmyekwd
+        jailed:
+          type: boolean
+        is_key_node:
+          type: boolean
+        min_self_delegation:
+          type: string
+        last_key_node_heartbeat_height:
+          type: string
+        status:
+          type: integer
+        tokens:
+          type: string
+        delegator_shares:
+          type: string
+        description:
+          type: object
+          properties:
+            moniker:
+              type: string
+            identity:
+              type: string
+            website:
+              type: string
+            details:
+              type: string
+        bond_height:
+          type: string
+          example: "0"
+        bond_intra_tx_counter:
+          type: integer
+          example: 0
+        unbonding_height:
+          type: string
+          example: "0"
+        unbonding_time:
+          type: string
+          example: "1970-01-01T00:00:00Z"
+        commission:
+          type: object
+          properties:
+            rate:
+              type: string
+              example: "0"
+            max_rate:
+              type: string
+              example: "0"
+            max_change_rate:
+              type: string
+              example: "0"
+            update_time:
+              type: string
+              example: "1970-01-01T00:00:00Z"
+    Delegation:
+      type: object
+      properties:
+        delegator_address:
+          type: string
+        validator_address:
+          type: string
+        shares:
+          type: string
+        height:
+          type: integer
+    UnbondingDelegationPair:
+      type: object
+      properties:
+        delegator_address:
+          type: string
+        validator_address:
+          type: string
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/UnbondingEntries"
+    UnbondingEntries:
+      type: object
+      properties:
+        initial_balance:
+          type: string
+        balance:
+          type: string
+        creation_height:
+          type: string
+        min_time:
+          type: string
+    UnbondingDelegation:
+      type: object
+      properties:
+        delegator_address:
+          type: string
+        validator_address:
+          type: string
+        initial_balance:
+          type: string
+        balance:
+          type: string
+        creation_height:
+          type: integer
+        min_time:
+          type: integer
+    Redelegation:
+      type: object
+      properties:
+        delegator_address:
+          type: string
+        validator_src_address:
+          type: string
+        validator_dst_address:
+          type: string
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/Redelegation"
+    RedelegationEntry:
+      type: object
+      properties:
+        creation_height:
+          type: integer
+        completion_time:
+          type: integer
+        initial_balance:
+          type: string
+        balance:
+          type: string
+        shares_dst:
+          type: string
+    ValidatorDistInfo:
+      type: object
+      properties:
+        operator_address:
+          $ref: "#/components/schemas/ValidatorAddress"
+        self_bond_rewards:
+          type: array
+          items:
+            $ref: "#/components/schemas/Coin"
+        val_commission:
+          type: array
+          items:
+            $ref: "#/components/schemas/Coin"
+    PublicKey:
+      type: object
+      properties:
+        type:
+          type: string
+        value:
+          type: string
+    SigningInfo:
+      type: object
+      properties:
+        start_height:
+          type: string
+        index_offset:
+          type: string
+        jailed_until:
+          type: string
+        missed_blocks_counter:
+          type: string
+    ParamChange:
+      type: object
+      properties:
+        subspace:
+          type: string
+          example: "staking"
+        key:
+          type: string
+          example: "MaxValidators"
+        subkey:
+          type: string
+          example: ""
+        value:
+          type: object
+    Supply:
+      type: object
+      properties:
+        total:
+          type: array
+          items:
+            $ref: "#/components/schemas/Coin"
+    Token:
+      type: object
+      properties:
+        symbol:
+          type: string
+          example: "hbc"
+        issuer:
+          type: string
+          example: ""
+        chain:
+          type: string
+          example: "hbc"
+        type:
+          type: string
+          example: "2"
+        is_send_enabled:
+          type: boolean
+          example: true
+        is_deposit_enabled:
+          type: boolean
+          example: false
+        is_withdrawal_enabled:
+          type: boolean
+          example: false
+        decimals:
+          type: string
+          example: "18"
+        total_supply:
+          type: string
+          example: "0"
+        collect_threshold:
+          type: string
+          example: "0"
+        deposit_threshold:
+          type: string
+          example: "0"
+        open_fee:
+          type: string
+          example: "1000000000000000000"
+        sys_open_fee:
+          type: string
+          example: "1000000000000000000"
+        withdrawal_fee_rate:
+          type: string
+          example: "2.0"
+        max_op_cu_number:
+          type: string
+          example: "3"
+        sys_transfer_num:
+          type: string
+          example: "0"
+        op_cu_sys_transfer_num:
+          type: string
+          example: "0"
+        gas_limit:
+          type: string
+          example: "1000000"
+        gas_price:
+          type: string
+          example: "1"
+        confirmations:
+          type: string
+          example: "1"
+        is_nonce_based:
+          type: boolean
+          example: false
+    Order:
+      type: object
+      oneOf:
+        - $ref: '#/components/schemas/OrderKeyGen'
+        - $ref: '#/components/schemas/OrderCollect'
+        - $ref: '#/components/schemas/OrderWithdrawal'
+        - $ref: '#/components/schemas/OrderSysTransfer'
+    OrderKeyGen:
+      type: object
+      properties:
+        cu_address:
+          type: string
+        id:
+          type: string
+        order_type:
+          type: number
+        symbol:
+          type: string
+        status:
+          type: number
+        height:
+          type: number
+        key_nodes:
+          type: array
+          items:
+            type: string
+        sign_threshold:
+          type: number
+        to:
+          type: string
+        open_fee:
+          type: array
+          items:
+            $ref: "#/components/schemas/Coin"
+        multi_sign_address:
+          type: string
+        pubkey:
+          type: string
+        epoch:
+          type: string
+    OrderCollect:
+      type: object
+      properties:
+        cu_address:
+          type: string
+        id:
+          type: string
+        order_type:
+          type: number
+        symbol:
+          type: string
+        status:
+          type: number
+        height:
+          type: number
+        collect_from_cu:
+          type: string
+        collect_from_address:
+          type: string
+        collect_to_cu:
+          type: string
+        amount:
+          type: string
+        gas_price:
+          type: string
+        gas_limit:
+          type: string
+        cost_fee:
+          type: string
+        tx_hash:
+          type: string
+        index:
+          type: number
+        memo:
+          type: string
+        raw_data:
+          type: string
+        signed_Tx:
+          type: string
+        ext_txhash:
+          type: string
+        depositstatus:
+          type: number
+    OrderWithdrawal:
+      type: object
+      properties:
+        cu_address:
+          type: string
+        id:
+          type: string
+        order_type:
+          type: number
+        symbol:
+          type: string
+        status:
+          type: number
+        height:
+          type: number
+        amount:
+          type: string
+        gas_fee:
+          type: string
+        cost_fee:
+          type: string
+        withdraw_to_address:
+          type: string
+        from_address:
+          type: string
+        opcu_address:
+          type: string
+        utxoin_num:
+          type: number
+        tx_hash:
+          type: string
+        raw_data:
+          type: string
+        signed_tx:
+          type: string
+        withdraw_status:
+          type: number
+    OrderSysTransfer:
+      type: object
+      properties:
+        cu_address:
+          type: string
+        id:
+          type: string
+        order_type:
+          type: number
+        symbol:
+          type: string
+        status:
+          type: number
+        height:
+          type: number
+        amount:
+          type: string
+        cost_fee:
+          type: string
+        to_cu:
+          type: string
+        to_address:
+          type: string
+        from_address:
+          type: string
+        opcu_address:
+          type: string
+        tx_hash:
+          type: string
+        raw_data:
+          type: string
+        signed_tx:
+          type: string
+    MappingInfo:
+      type: object
+      properties:
+        issue_symbol:
+          type: string
+          description: issue symbol as mapping source
+          example: cbtc
+        target_symbol:
+          type: string
+          description: target symbol as mapping target
+          example: btc
+        total_supply:
+          type: string
+          description: total supply for both issue and target symbols
+          example: "2100000000000000"
+        issue_pool:
+          type: string
+          description: current amount locked in the issue pool
+          example: "2099999900000000"
+        enabled:
+          type: boolean
+          description: whether the mapping is enabled
+          example: true
+    OpenswapOrder:
+      type: object
+      properties:
+        order_id:
+          type: string
+          example: eba67e0b-e4d7-4584-af5a-4e9f58a484d9
+        from:
+          type: string
+          example: HBCPWdYBMJRLt929pSfoJPTW7y5hao9CFN12
+        referer:
+          type: string
+          example: HBCPWdYBMJRLt929pSfoJPTW7y5hao9CFN12
+        receiver:
+          type: string
+          example: HBCPWdYBMJRLt929pSfoJPTW7y5hao9CFN12
+        created_time:
+          type: string
+          example: 1602661457
+        expired_time:
+          type: string
+          example: -1
+        finished_time:
+          type: string
+          example: 1602661857
+        status:
+          type: string
+        side:
+          type: string
+        base_symbol:
+          type: string
+          example: btc
+        quote_symbol:
+          type: string
+          example: usdt
+        price:
+          type: string
+          example: 172.323
+        amount_int:
+          type: string
+          example: 1000
+        locked_fund:
+          type: string
+          example: 1000
+

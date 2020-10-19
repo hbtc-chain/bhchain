@@ -1,0 +1,11 @@
+{
+  "title": "Disable Token",
+  "description": "disable token proposal",
+  "symbol": "usdt",
+  "deposit": [
+    {
+      "denom": "hbc",
+      "amount": "10000"
+    }
+  ]
+}
