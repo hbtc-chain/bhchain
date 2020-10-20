@@ -1,19 +1,10 @@
-/*
- * *******************************************************************
- * @项目名称: genesis
- * @文件名称: genesis.go
- * @Date: 2019/08/29
- * @Author: Keep
- * @Copyright（C）: 2019 BlueHelix Inc.   All rights reserved.
- * 注意：本内容仅限于内部传阅，禁止外泄以及用于其他的商业目的.
- * *******************************************************************
- */
 package genesis
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
 	"github.com/hbtc-chain/bhchain/codec"
 	sdk "github.com/hbtc-chain/bhchain/types"
 	"github.com/hbtc-chain/bhchain/x/custodianunit"

@@ -1,18 +1,8 @@
-/*
- * *******************************************************************
- * @项目名称: chainnode
- * @文件名称: chainnode.go
- * @Date: 2019/03/22
- * @Author: kai.wen
- * @Copyright（C）: 2019 BlueHelix Inc.   All rights reserved.
- * 注意：本内容仅限于内部传阅，禁止外泄以及用于其他的商业目的.
- * *******************************************************************
- */
-
 package chainnode
 
 import (
 	"errors"
+
 	sdk "github.com/hbtc-chain/bhchain/types"
 )
 

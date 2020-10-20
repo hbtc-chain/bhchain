@@ -1,28 +1,18 @@
-/*
- * *******************************************************************
- * @项目名称: client
- * @文件名称: grpc.go
- * @Date: 2019/03/28
- * @Author: kai.wen
- * @Copyright（C）: 2019 BlueHelix Inc.   All rights reserved.
- * 注意：本内容仅限于内部传阅，禁止外泄以及用于其他的商业目的.
- * *******************************************************************
- */
-
 package grpcclient
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
+	"reflect"
+
 	"github.com/hbtc-chain/bhchain/chainnode"
 	sdk "github.com/hbtc-chain/bhchain/types"
 	"github.com/hbtc-chain/chainnode/chaindispatcher"
 	"github.com/hbtc-chain/chainnode/config"
 	"github.com/hbtc-chain/chainnode/proto"
 	"github.com/tendermint/tendermint/libs/log"
-	"math/big"
-	"reflect"
 )
 
 var (

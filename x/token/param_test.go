@@ -1,19 +1,10 @@
-/*
- * *******************************************************************
- * @项目名称: token
- * @文件名称: params.go
- * @Date: 2019/08/07
- * @Author: Keep
- * @Copyright（C）: 2019 BlueHelix Inc.   All rights reserved.
- * 注意：本内容仅限于内部传阅，禁止外泄以及用于其他的商业目的.
- * *******************************************************************
- */
 package token
 
 import (
+	"testing"
+
 	"github.com/hbtc-chain/bhchain/x/token/types"
 	"github.com/stretchr/testify/assert"
-	"testing"
 )
 
 func TestParamsEqual(t *testing.T) {

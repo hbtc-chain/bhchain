@@ -1,20 +1,11 @@
-/*
- * *******************************************************************
- * @项目名称: types
- * @文件名称: params_test.go
- * @Date: 2019/10/26
- * @Author: Keep
- * @Copyright（C）: 2019 BlueHelix Inc.   All rights reserved.
- * 注意：本内容仅限于内部传阅，禁止外泄以及用于其他的商业目的.
- * *******************************************************************
- */
 package types
 
 import (
-	sdk "github.com/hbtc-chain/bhchain/types"
-	"github.com/stretchr/testify/assert"
 	"testing"
 	"time"
+
+	sdk "github.com/hbtc-chain/bhchain/types"
+	"github.com/stretchr/testify/assert"
 )
 
 var native100 = sdk.NewCoin(sdk.NativeToken, sdk.NewInt(100))
