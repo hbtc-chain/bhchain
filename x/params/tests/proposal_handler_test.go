@@ -3,13 +3,18 @@ package tests
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
+	abci "github.com/tendermint/tendermint/abci/types"
+	"github.com/tendermint/tendermint/libs/log"
+	dbm "github.com/tendermint/tm-db"
+
 	"github.com/hbtc-chain/bhchain/codec"
 	"github.com/hbtc-chain/bhchain/store"
 	sdk "github.com/hbtc-chain/bhchain/types"
 	"github.com/hbtc-chain/bhchain/x/custodianunit"
 	distr "github.com/hbtc-chain/bhchain/x/distribution"
 	"github.com/hbtc-chain/bhchain/x/gov"
-	"github.com/hbtc-chain/bhchain/x/hrc20"
+	"github.com/hbtc-chain/bhchain/x/hrc10"
 	"github.com/hbtc-chain/bhchain/x/mint"
 	"github.com/hbtc-chain/bhchain/x/order"
 	"github.com/hbtc-chain/bhchain/x/params"
@@ -18,12 +23,9 @@ import (
 	"github.com/hbtc-chain/bhchain/x/staking"
 	"github.com/hbtc-chain/bhchain/x/supply"
 	"github.com/hbtc-chain/bhchain/x/token"
+	tktypes "github.com/hbtc-chain/bhchain/x/token/types"
 	"github.com/hbtc-chain/bhchain/x/transfer"
 	"github.com/hbtc-chain/bhchain/x/transfer/keeper"
-	"github.com/stretchr/testify/require"
-	abci "github.com/tendermint/tendermint/abci/types"
-	"github.com/tendermint/tendermint/libs/log"
-	dbm "github.com/tendermint/tm-db"
 )
 
 type testEnv struct {
@@ -38,7 +40,7 @@ type testEnv struct {
 	supplyKeeper  supply.Keeper
 	pk            params.Keeper
 	mk            mint.Keeper
-	hk            hrc20.Keeper
+	hk            hrc10.Keeper
 }
 
 func setupTestEnv(t *testing.T) testEnv {
@@ -56,7 +58,7 @@ func setupTestEnv(t *testing.T) testEnv {
 	keyTransfer := sdk.NewKVStoreKey(transfer.StoreKey)
 	keyDistr := sdk.NewKVStoreKey(distr.StoreKey)
 	keyMint := sdk.NewKVStoreKey(mint.StoreKey)
-	keyHrc20 := sdk.NewKVStoreKey(hrc20.StoreKey)
+	keyHrc10 := sdk.NewKVStoreKey(hrc10.StoreKey)
 
 	db := dbm.NewMemDB()
 	ms := store.NewCommitMultiStore(db)
@@ -74,7 +76,7 @@ func setupTestEnv(t *testing.T) testEnv {
 	ms.MountStoreWithDB(keyTransfer, sdk.StoreTypeIAVL, db)
 	ms.MountStoreWithDB(keyDistr, sdk.StoreTypeIAVL, db)
 	ms.MountStoreWithDB(keyMint, sdk.StoreTypeIAVL, db)
-	ms.MountStoreWithDB(keyHrc20, sdk.StoreTypeIAVL, db)
+	ms.MountStoreWithDB(keyHrc10, sdk.StoreTypeIAVL, db)
 	err := ms.LoadLatestVersion()
 	require.Nil(t, err)
 
@@ -93,7 +95,7 @@ func setupTestEnv(t *testing.T) testEnv {
 	distr.RegisterCodec(cdc)
 	transfer.RegisterCodec(cdc)
 	mint.RegisterCodec(cdc)
-	hrc20.RegisterCodec(cdc)
+	hrc10.RegisterCodec(cdc)
 
 	feeCollectorAcc := supply.NewEmptyModuleAccount(custodianunit.FeeCollectorName)
 	notBondedPool := supply.NewEmptyModuleAccount(staking.NotBondedPoolName, supply.Burner, supply.Staking)
@@ -108,15 +110,15 @@ func setupTestEnv(t *testing.T) testEnv {
 	ctx := sdk.NewContext(ms, abci.Header{ChainID: "test-chain-id"}, false, log.NewNopLogger())
 
 	pk := params.NewKeeper(cdc, keyParams, tkeyParams, params.DefaultCodespace)
-	tk := token.NewKeeper(keyToken, cdc, pk.Subspace(token.DefaultParamspace))
+	tk := token.NewKeeper(keyToken, cdc)
 	rk := receipt.NewKeeper(cdc)
 	ok := order.NewKeeper(cdc, keyOrder, pk.Subspace(order.DefaultParamspace))
 	ck := custodianunit.NewCUKeeper(
-		cdc, keyAcc, &tk, pk.Subspace(custodianunit.DefaultParamspace), custodianunit.ProtoBaseCU,
+		cdc, keyAcc, pk.Subspace(custodianunit.DefaultParamspace), custodianunit.ProtoBaseCU,
 	)
 	ck.SetParams(ctx, custodianunit.DefaultParams())
 
-	bankKeeper := keeper.NewBaseKeeper(cdc, keyTransfer, ck, &tk, &ok, rk, nil, nil, pk.Subspace(transfer.DefaultParamspace), transfer.DefaultCodespace, blacklistedAddrs)
+	bankKeeper := keeper.NewBaseKeeper(cdc, keyTransfer, ck, nil, &tk, &ok, rk, nil, nil, pk.Subspace(transfer.DefaultParamspace), transfer.DefaultCodespace, blacklistedAddrs)
 	bankKeeper.SetSendEnabled(ctx, true)
 
 	maccPerms := map[string][]string{
@@ -134,10 +136,10 @@ func setupTestEnv(t *testing.T) testEnv {
 	params := staking.DefaultParams()
 	stakingKeeper.SetParams(ctx, params)
 	mk := mint.NewKeeper(cdc, keyMint, pk.Subspace(mint.DefaultParamspace), stakingKeeper, supplyKeeper, custodianunit.FeeCollectorName)
-	bankKeeper.SetStakingKeeper(ctx, stakingKeeper)
+	bankKeeper.SetStakingKeeper(stakingKeeper)
 	tk.SetStakingKeeper(stakingKeeper)
 
-	hk := hrc20.NewKeeper(cdc, keyHrc20, pk.Subspace(hrc20.DefaultParamspace), &tk, ck, nil, supplyKeeper, rk)
+	hk := hrc10.NewKeeper(cdc, keyHrc10, pk.Subspace(hrc10.DefaultParamspace), &tk, nil, supplyKeeper, rk, bankKeeper)
 
 	return testEnv{cdc: cdc, ctx: ctx, k: *bankKeeper, ck: ck, tk: tk, ok: ok, rk: *rk, stakingkeeper: stakingKeeper, supplyKeeper: *supplyKeeper, pk: pk, mk: mk, hk: hk}
 }
@@ -204,25 +206,47 @@ func TestModifyTokenParamByProposal(t *testing.T) {
 	input := setupTestEnv(t)
 	ctx := input.ctx
 	tk := input.tk
-	pk := input.pk
+	var btc = &sdk.IBCToken{
+		BaseToken: sdk.BaseToken{
+			Name:        "btc",
+			Symbol:      sdk.Symbol("btc"),
+			Issuer:      "",
+			Chain:       sdk.Symbol("btc"),
+			SendEnabled: true,
+			Decimals:    8,
+			TotalSupply: sdk.NewIntWithDecimal(21, 15),
+		},
+		TokenType:          sdk.UtxoBased,
+		DepositEnabled:     true,
+		WithdrawalEnabled:  true,
+		CollectThreshold:   sdk.NewIntWithDecimal(2, 5),   // btc
+		OpenFee:            sdk.NewIntWithDecimal(28, 18), // nativeToken
+		SysOpenFee:         sdk.NewIntWithDecimal(28, 18), // nativeToken
+		WithdrawalFeeRate:  sdk.NewDecWithPrec(2, 0),      // gas * 10  btc
+		MaxOpCUNumber:      10,
+		SysTransferNum:     sdk.NewInt(3),  // gas * 3
+		OpCUSysTransferNum: sdk.NewInt(30), // SysTransferAmount * 10
+		GasLimit:           sdk.NewInt(1),
+		GasPrice:           sdk.NewInt(1000),
+		DepositThreshold:   sdk.NewIntWithDecimal(2, 4),
+		Confirmations:      1,
+		IsNonceBased:       false,
+		NeedCollectFee:     false,
+	}
+	tk.SetToken(ctx, btc)
 
-	tk.SetParams(ctx, token.DefaultParams())
-	p := tk.GetParams(ctx)
-	require.Equal(t, token.DefaultParams(), p)
-	require.Equal(t, token.DefaultTokenCacheSize, p.TokenCacheSize)
-	tp := testProposal(params.NewParamChange(token.DefaultParamspace, string(token.KeyTokenCacheSize), `"10"`))
+	tp := token.NewTokenParamsChangeProposal("title", "desc", "btc", []tktypes.ParamChange{
+		tktypes.NewParamChange(sdk.KeyDepositEnabled, "false"),
+		tktypes.NewParamChange(sdk.KeyOpenFee, `"1"`),
+	})
 
-	hdlr := params.NewParamChangeProposalHandler(pk)
+	hdlr := token.NewTokenProposalHandler(tk)
 	res := hdlr(input.ctx, tp)
 	require.Equal(t, sdk.CodeOK, res.Code)
 
-	var param uint64
-	ss, ok := pk.GetSubspace(token.DefaultParamspace)
-	require.True(t, ok)
-
-	ss.Get(ctx, token.KeyTokenCacheSize, &param)
-	require.Equal(t, uint64(10), param)
-	require.Equal(t, param, tk.GetParams(ctx).TokenCacheSize)
+	btc = tk.GetIBCToken(ctx, "btc")
+	require.Equal(t, btc.DepositEnabled, false)
+	require.Equal(t, btc.OpenFee, sdk.NewInt(1))
 }
 
 func TestModifyHr20ParamByProposal(t *testing.T) {
@@ -231,20 +255,20 @@ func TestModifyHr20ParamByProposal(t *testing.T) {
 	pk := input.pk
 	hk := input.hk
 
-	hk.SetParams(ctx, hrc20.DefaultParams())
+	hk.SetParams(ctx, hrc10.DefaultParams())
 	p := hk.GetParams(ctx)
-	require.Equal(t, hrc20.DefaultParams(), p)
-	require.Equal(t, hrc20.DefaultIssueTokenFee, p.IssueTokenFee)
-	tp := testProposal(params.NewParamChange(hrc20.DefaultParamspace, string(hrc20.KeyIssueTokenFee), `"21000000000000000"`))
+	require.Equal(t, hrc10.DefaultParams(), p)
+	require.Equal(t, hrc10.DefaultIssueTokenFee, p.IssueTokenFee)
+	tp := testProposal(params.NewParamChange(hrc10.DefaultParamspace, string(hrc10.KeyIssueTokenFee), `"21000000000000000"`))
 
 	hdlr := params.NewParamChangeProposalHandler(pk)
 	res := hdlr(input.ctx, tp)
 	require.Equal(t, sdk.CodeOK, res.Code)
 
 	var param sdk.Int
-	ss, ok := pk.GetSubspace(hrc20.DefaultParamspace)
+	ss, ok := pk.GetSubspace(hrc10.DefaultParamspace)
 	require.True(t, ok)
-	ss.Get(ctx, hrc20.KeyIssueTokenFee, &param)
+	ss.Get(ctx, hrc10.KeyIssueTokenFee, &param)
 	require.Equal(t, sdk.NewInt(21000000000000000), param)
 	require.Equal(t, param, hk.GetParams(ctx).IssueTokenFee)
 

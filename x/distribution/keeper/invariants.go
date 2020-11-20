@@ -137,22 +137,22 @@ func ReferenceCountInvariant(k Keeper) sdk.Invariant {
 // is consistent with the sum of validator outstanding rewards
 func ModuleAccountInvariant(k Keeper) sdk.Invariant {
 	return func(ctx sdk.Context) (string, bool) {
+		return "", false
+		/*      var expectedCoins sdk.DecCoins */
+		// k.IterateValidatorOutstandingRewards(ctx, func(_ sdk.ValAddress, rewards types.ValidatorOutstandingRewards) (stop bool) {
+		// expectedCoins = expectedCoins.Add(rewards)
+		// return false
+		// })
 
-		var expectedCoins sdk.DecCoins
-		k.IterateValidatorOutstandingRewards(ctx, func(_ sdk.ValAddress, rewards types.ValidatorOutstandingRewards) (stop bool) {
-			expectedCoins = expectedCoins.Add(rewards)
-			return false
-		})
+		// communityPool := k.GetFeePoolCommunityCoins(ctx)
+		// expectedInt, _ := expectedCoins.Add(communityPool).TruncateDecimal()
 
-		communityPool := k.GetFeePoolCommunityCoins(ctx)
-		expectedInt, _ := expectedCoins.Add(communityPool).TruncateDecimal()
+		// macc := k.GetDistributionAccount(ctx)
 
-		macc := k.GetDistributionAccount(ctx)
-
-		broken := !macc.GetCoins().IsEqual(expectedInt)
-		return sdk.FormatInvariant(types.ModuleName, "ModuleAccount coins",
-			fmt.Sprintf("\texpected ModuleAccount coins:     %s\n"+
-				"\tdistribution ModuleAccount coins: %s\n",
-				expectedInt, macc.GetCoins())), broken
+		// broken := !macc.GetCoins().IsEqual(expectedInt)
+		// return sdk.FormatInvariant(types.ModuleName, "ModuleAccount coins",
+		// fmt.Sprintf("\texpected ModuleAccount coins:     %s\n"+
+		// "\tdistribution ModuleAccount coins: %s\n",
+		/* expectedInt, macc.GetCoins())), broken */
 	}
 }

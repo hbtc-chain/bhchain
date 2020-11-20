@@ -3,6 +3,7 @@ package keeper
 import (
 	"testing"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	abci "github.com/tendermint/tendermint/abci/types"
@@ -63,6 +64,16 @@ var (
 	distrAcc = supply.NewEmptyModuleAccount(types.ModuleName)
 )
 
+type mockStakingKeeper struct {
+	mock.Mock
+	staking.Keeper
+}
+
+func (m *mockStakingKeeper) GetCurrentEpoch(ctx sdk.Context) sdk.Epoch {
+	args := m.Called(ctx)
+	return args.Get(0).(sdk.Epoch)
+}
+
 // create a codec used only for testing
 func MakeTestCodec() *codec.Codec {
 	var cdc = codec.New()
@@ -80,18 +91,18 @@ func MakeTestCodec() *codec.Codec {
 
 // test input with default values
 func CreateTestInputDefault(t *testing.T, isCheckTx bool, initPower int64) (
-	sdk.Context, custodianunit.CUKeeper, Keeper, staking.Keeper, types.SupplyKeeper) {
+	sdk.Context, custodianunit.CUKeeper, transfer.Keeper, Keeper, *mockStakingKeeper, types.SupplyKeeper) {
 
 	communityTax := sdk.NewDecWithPrec(2, 2)
 
-	ctx, ak, _, dk, sk, _, supplyKeeper := CreateTestInputAdvanced(t, isCheckTx, initPower, communityTax)
-	return ctx, ak, dk, sk, supplyKeeper
+	ctx, ak, tk, dk, sk, _, supplyKeeper := CreateTestInputAdvanced(t, isCheckTx, initPower, communityTax)
+	return ctx, ak, tk, dk, sk, supplyKeeper
 }
 
 // hogpodge of all sorts of input required for testing
 func CreateTestInputAdvanced(t *testing.T, isCheckTx bool, initPower int64,
 	communityTax sdk.Dec) (sdk.Context, custodianunit.CUKeeper, transfer.Keeper,
-	Keeper, staking.Keeper, params.Keeper, types.SupplyKeeper) {
+	Keeper, *mockStakingKeeper, params.Keeper, types.SupplyKeeper) {
 
 	initTokens := sdk.TokensFromConsensusPower(initPower)
 
@@ -114,6 +125,7 @@ func CreateTestInputAdvanced(t *testing.T, isCheckTx bool, initPower int64,
 	ms.MountStoreWithDB(keyAcc, sdk.StoreTypeIAVL, db)
 	ms.MountStoreWithDB(keyParams, sdk.StoreTypeIAVL, db)
 	ms.MountStoreWithDB(tkeyParams, sdk.StoreTypeTransient, db)
+	ms.MountStoreWithDB(keyTransfer, sdk.StoreTypeIAVL, db)
 
 	err := ms.LoadLatestVersion()
 	require.Nil(t, err)
@@ -132,8 +144,8 @@ func CreateTestInputAdvanced(t *testing.T, isCheckTx bool, initPower int64,
 	pk := params.NewKeeper(cdc, keyParams, tkeyParams, params.DefaultCodespace)
 	rk := receipt.NewKeeper(cdc)
 	ctx := sdk.NewContext(ms, abci.Header{ChainID: "foochainid"}, isCheckTx, log.NewNopLogger())
-	cuKeeper := custodianunit.NewCUKeeper(cdc, keyAcc, nil, pk.Subspace(custodianunit.DefaultParamspace), custodianunit.ProtoBaseCU)
-	bankKeeper := transfer.NewBaseKeeper(cdc, keyTransfer, cuKeeper, nil, nil, rk, nil, nil, pk.Subspace(transfer.DefaultParamspace), transfer.DefaultCodespace, blacklistedAddrs)
+	cuKeeper := custodianunit.NewCUKeeper(cdc, keyAcc, pk.Subspace(custodianunit.DefaultParamspace), custodianunit.ProtoBaseCU)
+	bankKeeper := transfer.NewBaseKeeper(cdc, keyTransfer, cuKeeper, nil, nil, nil, rk, nil, nil, pk.Subspace(transfer.DefaultParamspace), transfer.DefaultCodespace, blacklistedAddrs)
 	maccPerms := map[string][]string{
 		custodianunit.FeeCollectorName: nil,
 		types.ModuleName:               nil,
@@ -143,12 +155,16 @@ func CreateTestInputAdvanced(t *testing.T, isCheckTx bool, initPower int64,
 	supplyKeeper := supply.NewKeeper(cdc, keySupply, cuKeeper, bankKeeper, maccPerms)
 
 	sk := staking.NewKeeper(cdc, keyStaking, tkeyStaking, supplyKeeper, pk.Subspace(staking.DefaultParamspace), staking.DefaultCodespace)
-	sk.SetParams(ctx, staking.DefaultParams())
 
-	keeper := NewKeeper(cdc, keyDistr, pk.Subspace(DefaultParamspace), sk, supplyKeeper, types.DefaultCodespace, custodianunit.FeeCollectorName, blacklistedAddrs)
+	mockSk := &mockStakingKeeper{
+		Keeper: sk,
+	}
+	mockSk.SetParams(ctx, staking.DefaultParams())
 
-	initCoins := sdk.NewCoins(sdk.NewCoin(sk.BondDenom(ctx), initTokens))
-	totalSupply := sdk.NewCoins(sdk.NewCoin(sk.BondDenom(ctx), initTokens.MulRaw(int64(len(TestAddrs)))))
+	keeper := NewKeeper(cdc, keyDistr, pk.Subspace(DefaultParamspace), mockSk, supplyKeeper, bankKeeper, types.DefaultCodespace, custodianunit.FeeCollectorName, blacklistedAddrs)
+
+	initCoins := sdk.NewCoins(sdk.NewCoin(mockSk.BondDenom(ctx), initTokens))
+	totalSupply := sdk.NewCoins(sdk.NewCoin(mockSk.BondDenom(ctx), initTokens.MulRaw(int64(len(TestAddrs)))))
 	supplyKeeper.SetSupply(ctx, supply.NewSupply(totalSupply))
 
 	// fill all the addresses with some coins, set the loose pool tokens simultaneously
@@ -164,16 +180,17 @@ func CreateTestInputAdvanced(t *testing.T, isCheckTx bool, initPower int64,
 	keeper.supplyKeeper.SetModuleAccount(ctx, distrAcc)
 
 	// set the distribution hooks on staking
-	sk.SetHooks(keeper.Hooks())
+	mockSk.SetHooks(keeper.Hooks())
 
 	// set genesis items required for distribution
 	keeper.SetFeePool(ctx, types.InitialFeePool())
 	keeper.SetCommunityTax(ctx, communityTax)
 	keeper.SetBaseProposerReward(ctx, sdk.NewDecWithPrec(1, 2))
 	keeper.SetBonusProposerReward(ctx, sdk.NewDecWithPrec(4, 2))
+	keeper.SetKeyNodeReward(ctx, sdk.NewDecWithPrec(5, 2))
 
-	params := sk.GetParams(ctx)
-	sk.SetParams(ctx, params)
+	params := mockSk.GetParams(ctx)
+	mockSk.SetParams(ctx, params)
 
-	return ctx, cuKeeper, bankKeeper, keeper, sk, pk, supplyKeeper
+	return ctx, cuKeeper, bankKeeper, keeper, mockSk, pk, supplyKeeper
 }

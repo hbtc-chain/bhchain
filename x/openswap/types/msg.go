@@ -7,32 +7,254 @@ import (
 )
 
 const (
-	TypeMsgAddLiquidity    = "addliquidity"
-	TypeMsgRemoveLiquidity = "removeliquidity"
-	TypeMsgSwapExactIn     = "swapexactin"
-	TypeMsgSwapExactOut    = "swapexactout"
-	TypeMsgLimitSwap       = "limitswap"
-	TypeMsgCancelLimitSwap = "cancellimitswap"
-	TypeMsgClaimEarning    = "withdrawearning"
+	maxDexNameLength = 32
+
+	TypeMsgCreateDex         = "createdex"
+	TypeMsgEditDex           = "editdex"
+	TypeMsgCreateTradingPair = "createtradingpair"
+	TypeMsgEditTradingPair   = "edittradingpair"
+	TypeMsgAddLiquidity      = "addliquidity"
+	TypeMsgRemoveLiquidity   = "removeliquidity"
+	TypeMsgSwapExactIn       = "swapexactin"
+	TypeMsgSwapExactOut      = "swapexactout"
+	TypeMsgLimitSwap         = "limitswap"
+	TypeMsgCancelLimitSwap   = "cancellimitswap"
+	TypeMsgClaimEarning      = "withdrawearning"
 )
+
+type MsgCreateDex struct {
+	From           sdk.CUAddress `json:"from"`
+	Name           string        `json:"name"`
+	IncomeReceiver sdk.CUAddress `json:"income_receiver"`
+}
+
+func NewMsgCreateDex(from sdk.CUAddress, name string, incomeReceiver sdk.CUAddress) MsgCreateDex {
+	return MsgCreateDex{
+		From:           from,
+		Name:           name,
+		IncomeReceiver: incomeReceiver,
+	}
+}
+
+func (msg MsgCreateDex) Route() string {
+	return RouterKey
+}
+
+func (msg MsgCreateDex) Type() string {
+	return TypeMsgCreateDex
+}
+
+func (msg MsgCreateDex) ValidateBasic() sdk.Error {
+	if !msg.From.IsValidAddr() {
+		return sdk.ErrInvalidAddr(fmt.Sprintf("from address: %s is invalid", msg.From.String()))
+	}
+	if !msg.IncomeReceiver.IsValidAddr() {
+		return sdk.ErrInvalidAddr(fmt.Sprintf("income receiver address: %s is invalid", msg.IncomeReceiver.String()))
+	}
+	if msg.Name == "" || len(msg.Name) > maxDexNameLength {
+		return sdk.ErrInvalidTx("invalid dex name")
+	}
+
+	return nil
+}
+
+func (msg MsgCreateDex) GetSignBytes() []byte {
+	bz := ModuleCdc.MustMarshalJSON(msg)
+	return sdk.MustSortJSON(bz)
+}
+
+func (msg MsgCreateDex) GetSigners() []sdk.CUAddress {
+	return []sdk.CUAddress{msg.From}
+}
+
+type MsgEditDex struct {
+	From           sdk.CUAddress  `json:"from"`
+	DexID          uint32         `json:"dex_id"`
+	Name           string         `json:"name"`
+	IncomeReceiver *sdk.CUAddress `json:"income_receiver,omitempty"`
+}
+
+func NewMsgEditDex(from sdk.CUAddress, dexID uint32, name string, incomeReceiver *sdk.CUAddress) MsgEditDex {
+	return MsgEditDex{
+		From:           from,
+		DexID:          dexID,
+		Name:           name,
+		IncomeReceiver: incomeReceiver,
+	}
+}
+
+func (msg MsgEditDex) Route() string {
+	return RouterKey
+}
+
+func (msg MsgEditDex) Type() string {
+	return TypeMsgEditDex
+}
+
+func (msg MsgEditDex) ValidateBasic() sdk.Error {
+	if !msg.From.IsValidAddr() {
+		return sdk.ErrInvalidAddr(fmt.Sprintf("from address: %s is invalid", msg.From.String()))
+	}
+	if msg.IncomeReceiver != nil && !msg.IncomeReceiver.IsValidAddr() {
+		return sdk.ErrInvalidAddr(fmt.Sprintf("income receiver address: %s is invalid", msg.IncomeReceiver.String()))
+	}
+	if len(msg.Name) > maxDexNameLength {
+		return sdk.ErrInvalidTx("invalid dex name")
+	}
+
+	return nil
+}
+
+func (msg MsgEditDex) GetSignBytes() []byte {
+	bz := ModuleCdc.MustMarshalJSON(msg)
+	return sdk.MustSortJSON(bz)
+}
+
+func (msg MsgEditDex) GetSigners() []sdk.CUAddress {
+	return []sdk.CUAddress{msg.From}
+}
+
+type MsgCreateTradingPair struct {
+	From              sdk.CUAddress `json:"from"`
+	DexID             uint32        `json:"dex_id"`
+	TokenA            sdk.Symbol    `json:"token_a"`
+	TokenB            sdk.Symbol    `json:"token_b"`
+	IsPublic          bool          `json:"is_public"`
+	LPRewardRate      sdk.Dec       `json:"lp_reward_rate"`
+	RefererRewardRate sdk.Dec       `json:"referer_reward_rate"`
+}
+
+func NewMsgCreateTradingPair(from sdk.CUAddress, dexID uint32, tokenA, tokenB sdk.Symbol, isPublic bool, lpReward, refererReward sdk.Dec) MsgCreateTradingPair {
+	return MsgCreateTradingPair{
+		From:              from,
+		DexID:             dexID,
+		TokenA:            tokenA,
+		TokenB:            tokenB,
+		IsPublic:          isPublic,
+		LPRewardRate:      lpReward,
+		RefererRewardRate: refererReward,
+	}
+}
+
+func (msg MsgCreateTradingPair) Route() string {
+	return RouterKey
+}
+
+func (msg MsgCreateTradingPair) Type() string {
+	return TypeMsgCreateTradingPair
+}
+
+func (msg MsgCreateTradingPair) ValidateBasic() sdk.Error {
+	if !msg.From.IsValidAddr() {
+		return sdk.ErrInvalidAddr(fmt.Sprintf("from address: %s is invalid", msg.From.String()))
+	}
+	if msg.DexID == 0 {
+		return sdk.ErrInvalidTx("dex id must be larger than 0")
+	}
+	if !msg.TokenA.IsValid() || !msg.TokenB.IsValid() {
+		return sdk.ErrInvalidSymbol("invalid token symbol")
+	}
+	if msg.TokenA == msg.TokenB {
+		return sdk.ErrInvalidSymbol("token a and token b cannot be equal")
+	}
+	if msg.LPRewardRate.IsNegative() || msg.LPRewardRate.GTE(sdk.OneDec()) {
+		return sdk.ErrInvalidAddr("lp reward rate must be between 0-1")
+	}
+	if msg.RefererRewardRate.IsNegative() || msg.RefererRewardRate.GTE(sdk.OneDec()) {
+		return sdk.ErrInvalidAddr("referer reward rate must be between 0-1")
+	}
+	return nil
+}
+
+func (msg MsgCreateTradingPair) GetSignBytes() []byte {
+	bz := ModuleCdc.MustMarshalJSON(msg)
+	return sdk.MustSortJSON(bz)
+}
+
+func (msg MsgCreateTradingPair) GetSigners() []sdk.CUAddress {
+	return []sdk.CUAddress{msg.From}
+}
+
+type MsgEditTradingPair struct {
+	From              sdk.CUAddress `json:"from"`
+	DexID             uint32        `json:"dex_id"`
+	TokenA            sdk.Symbol    `json:"token_a"`
+	TokenB            sdk.Symbol    `json:"token_b"`
+	IsPublic          *bool         `json:"is_public,omitempty"`
+	LPRewardRate      *sdk.Dec      `json:"lp_reward_rate,omitempty"`
+	RefererRewardRate *sdk.Dec      `json:"referer_reward_rate,omitempty"`
+}
+
+func NewMsgEditTradingPair(from sdk.CUAddress, dexID uint32, tokenA, tokenB sdk.Symbol, isPublic *bool, lpReward, refererReward *sdk.Dec) MsgEditTradingPair {
+	return MsgEditTradingPair{
+		From:              from,
+		DexID:             dexID,
+		TokenA:            tokenA,
+		TokenB:            tokenB,
+		IsPublic:          isPublic,
+		LPRewardRate:      lpReward,
+		RefererRewardRate: refererReward,
+	}
+}
+
+func (msg MsgEditTradingPair) Route() string {
+	return RouterKey
+}
+
+func (msg MsgEditTradingPair) Type() string {
+	return TypeMsgEditTradingPair
+}
+
+func (msg MsgEditTradingPair) ValidateBasic() sdk.Error {
+	if !msg.From.IsValidAddr() {
+		return sdk.ErrInvalidAddr(fmt.Sprintf("from address: %s is invalid", msg.From.String()))
+	}
+	if msg.DexID == 0 {
+		return sdk.ErrInvalidTx("dex id must be larger than 0")
+	}
+	if !msg.TokenA.IsValid() || !msg.TokenB.IsValid() {
+		return sdk.ErrInvalidSymbol("invalid token symbol")
+	}
+	if msg.TokenA == msg.TokenB {
+		return sdk.ErrInvalidSymbol("token a and token b cannot be equal")
+	}
+	if msg.LPRewardRate != nil && (msg.LPRewardRate.IsNegative() || msg.LPRewardRate.GTE(sdk.OneDec())) {
+		return sdk.ErrInvalidAddr("lp reward rate must be between 0-1")
+	}
+	if msg.RefererRewardRate != nil && (msg.RefererRewardRate.IsNegative() || msg.RefererRewardRate.GTE(sdk.OneDec())) {
+		return sdk.ErrInvalidAddr("referer reward rate must be between 0-1")
+	}
+	return nil
+}
+
+func (msg MsgEditTradingPair) GetSignBytes() []byte {
+	bz := ModuleCdc.MustMarshalJSON(msg)
+	return sdk.MustSortJSON(bz)
+}
+
+func (msg MsgEditTradingPair) GetSigners() []sdk.CUAddress {
+	return []sdk.CUAddress{msg.From}
+}
 
 type MsgAddLiquidity struct {
 	From            sdk.CUAddress `json:"from"`
+	DexID           uint32        `json:"dex_id"`
 	TokenA          sdk.Symbol    `json:"token_a"`
 	TokenB          sdk.Symbol    `json:"token_b"`
-	MinTokenAAmount sdk.Int       `json:"min_token_a_amount"`
-	MinTokenBAmount sdk.Int       `json:"min_token_b_amount"`
+	MaxTokenAAmount sdk.Int       `json:"max_token_a_amount"`
+	MaxTokenBAmount sdk.Int       `json:"max_token_b_amount"`
 	ExpiredAt       int64         `json:"expired_at"`
 }
 
-func NewMsgAddLiquidity(from sdk.CUAddress, tokenA, tokenB sdk.Symbol,
-	minTokenAAmount, minTokenBAmount sdk.Int, expiredAt int64) MsgAddLiquidity {
+func NewMsgAddLiquidity(from sdk.CUAddress, dexID uint32, tokenA, tokenB sdk.Symbol,
+	maxTokenAAmount, maxTokenBAmount sdk.Int, expiredAt int64) MsgAddLiquidity {
 	return MsgAddLiquidity{
 		From:            from,
+		DexID:           dexID,
 		TokenA:          tokenA,
 		TokenB:          tokenB,
-		MinTokenAAmount: minTokenAAmount,
-		MinTokenBAmount: minTokenBAmount,
+		MaxTokenAAmount: maxTokenAAmount,
+		MaxTokenBAmount: maxTokenBAmount,
 		ExpiredAt:       expiredAt,
 	}
 }
@@ -49,14 +271,14 @@ func (msg MsgAddLiquidity) ValidateBasic() sdk.Error {
 	if !msg.From.IsValidAddr() {
 		return sdk.ErrInvalidAddr(fmt.Sprintf("from address: %s is invalid", msg.From.String()))
 	}
-	if !msg.TokenA.IsValidTokenName() || !msg.TokenB.IsValidTokenName() {
-		return sdk.ErrInvalidSymbol("invalid token")
+	if !msg.TokenA.IsValid() || !msg.TokenB.IsValid() {
+		return sdk.ErrInvalidSymbol("invalid token symbol")
 	}
 	if msg.TokenA == msg.TokenB {
-		return sdk.ErrInvalidSymbol("same token")
+		return sdk.ErrInvalidSymbol("token a and token b cannot be equal")
 	}
-	if !msg.MinTokenAAmount.IsPositive() || !msg.MinTokenAAmount.IsPositive() {
-		return sdk.ErrInvalidAmount("min token amount should be positive")
+	if !msg.MaxTokenAAmount.IsPositive() || !msg.MaxTokenAAmount.IsPositive() {
+		return sdk.ErrInvalidAmount("token amount should be positive")
 	}
 	return nil
 }
@@ -72,15 +294,17 @@ func (msg MsgAddLiquidity) GetSigners() []sdk.CUAddress {
 
 type MsgRemoveLiquidity struct {
 	From      sdk.CUAddress `json:"from"`
+	DexID     uint32        `json:"dex_id"`
 	TokenA    sdk.Symbol    `json:"token_a"`
 	TokenB    sdk.Symbol    `json:"token_b"`
 	Liquidity sdk.Int       `json:"liquidity"`
 	ExpiredAt int64         `json:"expired_at"`
 }
 
-func NewMsgRemoveLiquidity(from sdk.CUAddress, tokenA, tokenB sdk.Symbol, liquidity sdk.Int, expiredAt int64) MsgRemoveLiquidity {
+func NewMsgRemoveLiquidity(from sdk.CUAddress, dexID uint32, tokenA, tokenB sdk.Symbol, liquidity sdk.Int, expiredAt int64) MsgRemoveLiquidity {
 	return MsgRemoveLiquidity{
 		From:      from,
+		DexID:     dexID,
 		TokenA:    tokenA,
 		TokenB:    tokenB,
 		Liquidity: liquidity,
@@ -100,11 +324,11 @@ func (msg MsgRemoveLiquidity) ValidateBasic() sdk.Error {
 	if !msg.From.IsValidAddr() {
 		return sdk.ErrInvalidAddr(fmt.Sprintf("From address: %s is invalid", msg.From.String()))
 	}
-	if !msg.TokenA.IsValidTokenName() || !msg.TokenB.IsValidTokenName() {
-		return sdk.ErrInvalidSymbol("invalid token")
+	if !msg.TokenA.IsValid() || !msg.TokenB.IsValid() {
+		return sdk.ErrInvalidSymbol("invalid token symbol")
 	}
 	if msg.TokenA == msg.TokenB {
-		return sdk.ErrInvalidSymbol("same token")
+		return sdk.ErrInvalidSymbol("token a and token b cannot be equal")
 	}
 	if !msg.Liquidity.IsPositive() {
 		return sdk.ErrInvalidAmount("liquidity should be positive")
@@ -123,6 +347,7 @@ func (msg MsgRemoveLiquidity) GetSigners() []sdk.CUAddress {
 
 type MsgSwapExactIn struct {
 	From         sdk.CUAddress `json:"from"`
+	DexID        uint32        `json:"dex_id"`
 	Referer      sdk.CUAddress `json:"referer"`
 	Receiver     sdk.CUAddress `json:"receiver"`
 	AmountIn     sdk.Int       `json:"amount_in"`
@@ -131,10 +356,11 @@ type MsgSwapExactIn struct {
 	ExpiredAt    int64         `json:"expired_at"`
 }
 
-func NewMsgSwapExactIn(from, referer, receiver sdk.CUAddress, amountIn, minAmountOut sdk.Int,
+func NewMsgSwapExactIn(dexID uint32, from, referer, receiver sdk.CUAddress, amountIn, minAmountOut sdk.Int,
 	path []sdk.Symbol, expiredAt int64) MsgSwapExactIn {
 	return MsgSwapExactIn{
 		From:         from,
+		DexID:        dexID,
 		Referer:      referer,
 		Receiver:     receiver,
 		AmountIn:     amountIn,
@@ -166,14 +392,14 @@ func (msg MsgSwapExactIn) ValidateBasic() sdk.Error {
 		return sdk.ErrInvalidSymbol("length of path should be larger than 2")
 	}
 	for i := range msg.SwapPath {
-		if !msg.SwapPath[i].IsValidTokenName() {
+		if !msg.SwapPath[i].IsValid() {
 			return sdk.ErrInvalidSymbol("invalid symbol")
 		}
 		if i > 0 && msg.SwapPath[i] == msg.SwapPath[i-1] {
 			return sdk.ErrInvalidSymbol("swap tokens are same")
 		}
 	}
-	if !msg.AmountIn.IsPositive() || msg.MinAmountOut.IsNegative() {
+	if !msg.AmountIn.IsPositive() || !msg.MinAmountOut.IsPositive() {
 		return sdk.ErrInvalidAmount("token amount should be positive")
 	}
 	return nil
@@ -190,6 +416,7 @@ func (msg MsgSwapExactIn) GetSigners() []sdk.CUAddress {
 
 type MsgSwapExactOut struct {
 	From        sdk.CUAddress `json:"from"`
+	DexID       uint32        `json:"dex_id"`
 	Referer     sdk.CUAddress `json:"referer"`
 	Receiver    sdk.CUAddress `json:"receiver"`
 	MaxAmountIn sdk.Int       `json:"max_amount_in"`
@@ -198,10 +425,11 @@ type MsgSwapExactOut struct {
 	ExpiredAt   int64         `json:"expired_at"`
 }
 
-func NewMsgSwapExactOut(from, referer, receiver sdk.CUAddress, amountOut, maxAmountIn sdk.Int,
+func NewMsgSwapExactOut(dexID uint32, from, referer, receiver sdk.CUAddress, amountOut, maxAmountIn sdk.Int,
 	path []sdk.Symbol, expiredAt int64) MsgSwapExactOut {
 	return MsgSwapExactOut{
 		From:        from,
+		DexID:       dexID,
 		Referer:     referer,
 		Receiver:    receiver,
 		AmountOut:   amountOut,
@@ -233,7 +461,7 @@ func (msg MsgSwapExactOut) ValidateBasic() sdk.Error {
 		return sdk.ErrInvalidSymbol("length of path should be larger than 2")
 	}
 	for i := range msg.SwapPath {
-		if !msg.SwapPath[i].IsValidTokenName() {
+		if !msg.SwapPath[i].IsValid() {
 			return sdk.ErrInvalidSymbol("invalid symbol")
 		}
 		if i > 0 && msg.SwapPath[i] == msg.SwapPath[i-1] {
@@ -257,6 +485,7 @@ func (msg MsgSwapExactOut) GetSigners() []sdk.CUAddress {
 
 type MsgLimitSwap struct {
 	From        sdk.CUAddress `json:"from"`
+	DexID       uint32        `json:"dex_id"`
 	OrderID     string        `json:"order_id"`
 	Referer     sdk.CUAddress `json:"referer"`
 	Receiver    sdk.CUAddress `json:"receiver"`
@@ -268,10 +497,11 @@ type MsgLimitSwap struct {
 	ExpiredAt   int64         `json:"expired_at"`
 }
 
-func NewMsgLimitSwap(orderID string, from, referer, receiver sdk.CUAddress, amountIn sdk.Int, price sdk.Dec,
+func NewMsgLimitSwap(orderID string, dexID uint32, from, referer, receiver sdk.CUAddress, amountIn sdk.Int, price sdk.Dec,
 	baseSymbol, quoteSymbol sdk.Symbol, side int, expiredAt int64) MsgLimitSwap {
 	return MsgLimitSwap{
 		From:        from,
+		DexID:       dexID,
 		OrderID:     orderID,
 		Referer:     referer,
 		Receiver:    receiver,
@@ -308,10 +538,10 @@ func (msg MsgLimitSwap) ValidateBasic() sdk.Error {
 	if msg.BaseSymbol >= msg.QuoteSymbol {
 		return sdk.ErrInvalidSymbol("wrong symbol sequence")
 	}
-	if !msg.BaseSymbol.IsValidTokenName() {
+	if !msg.BaseSymbol.IsValid() {
 		return sdk.ErrInvalidSymbol("invalid base symbol")
 	}
-	if !msg.QuoteSymbol.IsValidTokenName() {
+	if !msg.QuoteSymbol.IsValid() {
 		return sdk.ErrInvalidSymbol("invalid quote symbol")
 	}
 	if !msg.AmountIn.IsPositive() {
@@ -379,13 +609,15 @@ func (msg MsgCancelLimitSwap) GetSigners() []sdk.CUAddress {
 
 type MsgClaimEarning struct {
 	From   sdk.CUAddress `json:"from"`
+	DexID  uint32        `json:"dex_id"`
 	TokenA sdk.Symbol    `json:"token_a"`
 	TokenB sdk.Symbol    `json:"token_b"`
 }
 
-func NewMsgClaimEarning(from sdk.CUAddress, tokenA, tokenB sdk.Symbol) MsgClaimEarning {
+func NewMsgClaimEarning(from sdk.CUAddress, dexID uint32, tokenA, tokenB sdk.Symbol) MsgClaimEarning {
 	return MsgClaimEarning{
 		From:   from,
+		DexID:  dexID,
 		TokenA: tokenA,
 		TokenB: tokenB,
 	}
@@ -403,11 +635,11 @@ func (msg MsgClaimEarning) ValidateBasic() sdk.Error {
 	if !msg.From.IsValidAddr() {
 		return sdk.ErrInvalidAddr(fmt.Sprintf("from address: %s is invalid", msg.From.String()))
 	}
-	if !msg.TokenA.IsValidTokenName() || !msg.TokenB.IsValidTokenName() {
-		return sdk.ErrInvalidSymbol("invalid token")
+	if !msg.TokenA.IsValid() || !msg.TokenB.IsValid() {
+		return sdk.ErrInvalidSymbol("invalid token symbol")
 	}
 	if msg.TokenA == msg.TokenB {
-		return sdk.ErrInvalidSymbol("same token")
+		return sdk.ErrInvalidSymbol("token a and token b cannot be equal")
 	}
 
 	return nil

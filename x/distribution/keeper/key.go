@@ -48,6 +48,7 @@ var (
 	ParamStoreKeyBaseProposerReward  = []byte("baseproposerreward")
 	ParamStoreKeyBonusProposerReward = []byte("bonusproposerreward")
 	ParamStoreKeyWithdrawAddrEnabled = []byte("withdrawaddrenabled")
+	ParamStoreKeyKeyNodeReward       = []byte("keynodereward")
 )
 
 // gets an address from a validator's outstanding rewards key

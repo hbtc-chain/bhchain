@@ -1,7 +1,6 @@
 package types
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -13,9 +12,6 @@ func TestNewDecCoin(t *testing.T) {
 	})
 	require.NotPanics(t, func() {
 		NewInt64DecCoin(testDenom1, 0)
-	})
-	require.Panics(t, func() {
-		NewInt64DecCoin(strings.ToUpper(testDenom1), 5)
 	})
 	require.Panics(t, func() {
 		NewInt64DecCoin(testDenom1, -5)
@@ -30,9 +26,6 @@ func TestNewDecCoinFromDec(t *testing.T) {
 		NewDecCoinFromDec(testDenom1, ZeroDec())
 	})
 	require.Panics(t, func() {
-		NewDecCoinFromDec(strings.ToUpper(testDenom1), NewDec(5))
-	})
-	require.Panics(t, func() {
 		NewDecCoinFromDec(testDenom1, NewDec(-5))
 	})
 }
@@ -43,9 +36,6 @@ func TestNewDecCoinFromCoin(t *testing.T) {
 	})
 	require.NotPanics(t, func() {
 		NewDecCoinFromCoin(Coin{testDenom1, NewInt(0)})
-	})
-	require.Panics(t, func() {
-		NewDecCoinFromCoin(Coin{strings.ToUpper(testDenom1), NewInt(5)})
 	})
 	require.Panics(t, func() {
 		NewDecCoinFromCoin(Coin{testDenom1, NewInt(-5)})
@@ -168,11 +158,11 @@ func TestDecCoinsIsValid(t *testing.T) {
 		{DecCoins{DecCoin{testDenom1, NewDec(5)}}, true},
 		{DecCoins{DecCoin{testDenom1, NewDec(5)}, DecCoin{testDenom2, NewDec(100000)}}, true},
 		{DecCoins{DecCoin{testDenom1, NewDec(-5)}}, false},
-		{DecCoins{DecCoin{"AAA", NewDec(5)}}, false},
+		{DecCoins{DecCoin{"AAA", NewDec(5)}}, true},
 		{DecCoins{DecCoin{testDenom1, NewDec(5)}, DecCoin{"B", NewDec(100000)}}, false},
 		{DecCoins{DecCoin{testDenom1, NewDec(5)}, DecCoin{testDenom2, NewDec(-100000)}}, false},
 		{DecCoins{DecCoin{testDenom1, NewDec(-5)}, DecCoin{testDenom2, NewDec(100000)}}, false},
-		{DecCoins{DecCoin{"AAA", NewDec(5)}, DecCoin{testDenom2, NewDec(100000)}}, false},
+		{DecCoins{DecCoin{"AAA", NewDec(5)}, DecCoin{testDenom2, NewDec(100000)}}, true},
 	}
 
 	for i, tc := range testCases {
@@ -191,7 +181,7 @@ func TestParseDecCoins(t *testing.T) {
 		{"4stake", nil, true},
 		{"5.5atom,4stake", nil, true},
 		{"0.0stake", nil, true},
-		{"0.004STAKE", nil, true},
+		{"0.004STA KE", nil, true},
 		{
 			"0.004stake",
 			DecCoins{NewDecCoinFromDec("stake", NewDecWithPrec(4000000000000000, Precision))},

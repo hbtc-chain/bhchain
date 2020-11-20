@@ -99,14 +99,12 @@ func (ma ModuleAccount) String() string {
 func (ma ModuleAccount) MarshalYAML() (interface{}, error) {
 	bs, err := yaml.Marshal(struct {
 		Address     sdk.CUAddress
-		Coins       sdk.Coins
 		PubKey      string
 		Sequence    uint64
 		Name        string
 		Permissions []string
 	}{
 		Address:     ma.Address,
-		Coins:       ma.Coins,
 		PubKey:      "",
 		Sequence:    ma.Sequence,
 		Name:        ma.Name,

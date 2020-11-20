@@ -21,7 +21,6 @@ const (
 	DefaultSigVerifyCostED25519   = types.DefaultSigVerifyCostED25519
 	DefaultSigVerifyCostSecp256k1 = types.DefaultSigVerifyCostSecp256k1
 	QueryCU                       = types.QueryCU
-	QueryOpCU                     = types.QueryOpCU
 )
 
 var (
@@ -59,8 +58,7 @@ var (
 	KeySigVerifyCostED25519   = types.KeySigVerifyCostED25519
 	KeySigVerifyCostSecp256k1 = types.KeySigVerifyCostSecp256k1
 
-	QueryOpCUForTest = queryOpCUInfo
-	QueryCUForTest   = queryCU
+	QueryCUForTest = queryCU
 )
 
 type (
@@ -70,7 +68,6 @@ type (
 	GenesisState       = types.GenesisState
 	Params             = types.Params
 	QueryAccountParams = types.QueryCUParams
-	QueryOpCUParams    = types.QueryOpCUParams
 	StdSignMsg         = types.StdSignMsg
 	StdTx              = types.StdTx
 	StdFee             = types.StdFee

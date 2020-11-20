@@ -3,8 +3,10 @@ package mapping
 import (
 	"testing"
 
-	sdk "github.com/hbtc-chain/bhchain/types"
 	"github.com/stretchr/testify/assert"
+
+	sdk "github.com/hbtc-chain/bhchain/types"
+	"github.com/hbtc-chain/bhchain/x/transfer"
 )
 
 func TestMappingSwap(t *testing.T) {
@@ -14,10 +16,11 @@ func TestMappingSwap(t *testing.T) {
 	ck := input.ck
 	rk := input.rk
 	tk := input.tk
+	trk := input.trk
 	symbol := sdk.Symbol("tbtc")
-	denom := symbol.ToDenomName()
+	denom := symbol.String()
 	targetSymbol := sdk.Symbol("btc")
-	targetDenom := targetSymbol.ToDenomName()
+	targetDenom := targetSymbol.String()
 	from, _ := sdk.CUAddressFromBase58("HBCZSkjCGQggAT28GcQednHbpJyfxHhmeTCH")
 
 	// Prepare mapping
@@ -29,7 +32,8 @@ func TestMappingSwap(t *testing.T) {
 		Enabled:      true,
 	}
 	cu := ck.NewCUWithAddress(ctx, sdk.CUTypeUser, from)
-	_ = cu.SetCoins(sdk.NewCoins(sdk.NewCoin(denom, sdk.NewInt(2100))))
+	testSetCUCoins(ctx, trk, cu.GetAddress(), sdk.NewCoins(sdk.NewCoin(denom, sdk.NewInt(2100))))
+	//_ = cu.SetCoins(sdk.NewCoins(sdk.NewCoin(denom, sdk.NewInt(2100))))
 	ck.SetCU(ctx, cu)
 	keeper.SetMappingInfo(ctx, mappingInfo)
 
@@ -38,51 +42,57 @@ func TestMappingSwap(t *testing.T) {
 		from,
 		sdk.Symbol("notfound"),
 		sdk.NewCoins(sdk.NewCoin(targetDenom, sdk.NewInt(10))))
-	res := handleMsgMappingSwap(ctx, keeper, msgIssueNotFound)
+	res := handleMsgMappingSwap(ctx.WithMultiStore(ctx.MultiStore().CacheMultiStore()), keeper, msgIssueNotFound)
+
 	assert.False(t, res.IsOK())
 
 	msgInvalidSwapAmountZero := NewMsgMappingSwap(
 		from,
 		symbol,
 		sdk.NewCoins(sdk.NewCoin(targetDenom, sdk.ZeroInt())))
-	res = handleMsgMappingSwap(ctx, keeper, msgInvalidSwapAmountZero)
+	res = handleMsgMappingSwap(ctx.WithMultiStore(ctx.MultiStore().CacheMultiStore()), keeper, msgInvalidSwapAmountZero)
 	assert.False(t, res.IsOK())
 
 	msgInvalidSwapAmountDenom := NewMsgMappingSwap(
 		from,
 		symbol,
 		sdk.NewCoins(sdk.NewCoin("notexist", sdk.NewInt(10))))
-	res = handleMsgMappingSwap(ctx, keeper, msgInvalidSwapAmountDenom)
+	res = handleMsgMappingSwap(ctx.WithMultiStore(ctx.MultiStore().CacheMultiStore()), keeper, msgInvalidSwapAmountDenom)
+
 	assert.False(t, res.IsOK())
 
 	msgCoinsFromNil := NewMsgMappingSwap(
 		from,
 		symbol,
 		sdk.NewCoins(sdk.NewCoin(targetDenom, sdk.NewInt(10))))
-	res = handleMsgMappingSwap(ctx, keeper, msgCoinsFromNil)
+	res = handleMsgMappingSwap(ctx.WithMultiStore(ctx.MultiStore().CacheMultiStore()), keeper, msgCoinsFromNil)
+
 	assert.False(t, res.IsOK())
 
-	_ = cu.SetCoins(sdk.NewCoins(sdk.NewCoin(targetDenom, sdk.NewInt(500))))
+	testSetCUCoins(ctx, trk, cu.GetAddress(), sdk.NewCoins(sdk.NewCoin(targetDenom, sdk.NewInt(500))))
 	ck.SetCU(ctx, cu)
 
 	msgCoinsFromNotEnough := NewMsgMappingSwap(
 		from,
 		symbol,
 		sdk.NewCoins(sdk.NewCoin(targetDenom, sdk.NewInt(510)))) // > 500
-	res = handleMsgMappingSwap(ctx, keeper, msgCoinsFromNotEnough)
+	res = handleMsgMappingSwap(ctx.WithMultiStore(ctx.MultiStore().CacheMultiStore()), keeper, msgCoinsFromNotEnough)
+
 	assert.False(t, res.IsOK())
 
-	_ = cu.SetCoins(sdk.NewCoins(sdk.NewCoin(targetDenom, sdk.NewInt(2200))))
+	testSetCUCoins(ctx, trk, cu.GetAddress(), sdk.NewCoins(sdk.NewCoin(targetDenom, sdk.NewInt(2200))))
+	//_ = cu.SetCoins(sdk.NewCoins(sdk.NewCoin(targetDenom, sdk.NewInt(2200))))
 	ck.SetCU(ctx, cu)
 
 	msgPoolFromNotEnough := NewMsgMappingSwap(
 		from,
 		symbol,
 		sdk.NewCoins(sdk.NewCoin(targetDenom, sdk.NewInt(2101))))
-	res = handleMsgMappingSwap(ctx, keeper, msgPoolFromNotEnough)
+	res = handleMsgMappingSwap(ctx.WithMultiStore(ctx.MultiStore().CacheMultiStore()), keeper, msgPoolFromNotEnough)
 	assert.False(t, res.IsOK())
 
-	_ = cu.SetCoins(sdk.NewCoins(sdk.NewCoin(targetDenom, sdk.NewInt(500))))
+	testSetCUCoins(ctx, trk, cu.GetAddress(), sdk.NewCoins(sdk.NewCoin(targetDenom, sdk.NewInt(500))))
+	//_ = cu.SetCoins(sdk.NewCoins(sdk.NewCoin(targetDenom, sdk.NewInt(500))))
 	ck.SetCU(ctx, cu)
 
 	msgTarget := NewMsgMappingSwap(
@@ -94,7 +104,7 @@ func TestMappingSwap(t *testing.T) {
 	mi := keeper.GetMappingInfo(ctx, symbol)
 	mi.Enabled = false
 	keeper.SetMappingInfo(ctx, mi)
-	res = handleMsgMappingSwap(ctx, keeper, msgTarget)
+	res = handleMsgMappingSwap(ctx.WithMultiStore(ctx.MultiStore().CacheMultiStore()), keeper, msgTarget)
 	assert.False(t, res.IsOK())
 	// Enable back
 	mi = keeper.GetMappingInfo(ctx, symbol)
@@ -102,29 +112,31 @@ func TestMappingSwap(t *testing.T) {
 	keeper.SetMappingInfo(ctx, mi)
 
 	// Disable issue token send
-	issueTokenInfo := tk.GetTokenInfo(ctx, symbol)
-	issueTokenInfo.IsSendEnabled = false
-	tk.SetTokenInfo(ctx, issueTokenInfo)
-	res = handleMsgMappingSwap(ctx, keeper, msgTarget)
+	issueTokenInfo := tk.GetIBCToken(ctx, symbol)
+	issueTokenInfo.SendEnabled = false
+	tk.SetToken(ctx, issueTokenInfo)
+	res = handleMsgMappingSwap(ctx.WithMultiStore(ctx.MultiStore().CacheMultiStore()), keeper, msgTarget)
 	assert.False(t, res.IsOK())
 	// Enable back
-	issueTokenInfo.IsSendEnabled = true
-	tk.SetTokenInfo(ctx, issueTokenInfo)
+	issueTokenInfo.SendEnabled = true
+	tk.SetToken(ctx, issueTokenInfo)
 
 	// Disabled target token send
-	targetTokenInfo := tk.GetTokenInfo(ctx, targetSymbol)
-	targetTokenInfo.IsSendEnabled = false
-	tk.SetTokenInfo(ctx, targetTokenInfo)
-	res = handleMsgMappingSwap(ctx, keeper, msgTarget)
+	targetTokenInfo := tk.GetIBCToken(ctx, targetSymbol)
+	targetTokenInfo.SendEnabled = false
+	tk.SetToken(ctx, targetTokenInfo)
+	res = handleMsgMappingSwap(ctx.WithMultiStore(ctx.MultiStore().CacheMultiStore()), keeper, msgTarget)
 	assert.False(t, res.IsOK())
 	// Enable back
-	targetTokenInfo.IsSendEnabled = true
-	tk.SetTokenInfo(ctx, targetTokenInfo)
+	targetTokenInfo.SendEnabled = true
+	tk.SetToken(ctx, targetTokenInfo)
 
 	res = handleMsgMappingSwap(ctx, keeper, msgTarget)
+
 	assert.True(t, res.IsOK())
 	cu = ck.GetCU(ctx, from)
-	assert.True(t, cu.GetCoins().IsEqual(sdk.NewCoins(
+
+	assert.True(t, trk.GetAllBalance(ctx, cu.GetAddress()).IsEqual(sdk.NewCoins(
 		sdk.NewCoin(denom, sdk.NewInt(100)),
 		sdk.NewCoin(targetDenom, sdk.NewInt(400)))))
 	mi = keeper.GetMappingInfo(ctx, symbol)
@@ -178,9 +190,12 @@ func TestMappingSwap(t *testing.T) {
 	res = handleMsgMappingSwap(ctx, keeper, msgCoinsFromNotEnough)
 	assert.False(t, res.IsOK())
 
-	_ = cu.SetCoins(sdk.NewCoins(
+	testSetCUCoins(ctx, trk, cu.GetAddress(), sdk.NewCoins(
 		sdk.NewCoin(denom, sdk.NewInt(200)),
 		sdk.NewCoin(targetDenom, sdk.NewInt(400))))
+	//_ = cu.SetCoins(sdk.NewCoins(
+	//	sdk.NewCoin(denom, sdk.NewInt(200)),
+	//	sdk.NewCoin(targetDenom, sdk.NewInt(400))))
 	ck.SetCU(ctx, cu)
 	msgPoolFromNotEnough = NewMsgMappingSwap(
 		from,
@@ -189,9 +204,13 @@ func TestMappingSwap(t *testing.T) {
 	res = handleMsgMappingSwap(ctx, keeper, msgPoolFromNotEnough)
 	assert.False(t, res.IsOK())
 
-	_ = cu.SetCoins(sdk.NewCoins(
+	testSetCUCoins(ctx, trk, cu.GetAddress(), sdk.NewCoins(
 		sdk.NewCoin(denom, sdk.NewInt(100)),
 		sdk.NewCoin(targetDenom, sdk.NewInt(400))))
+
+	//_ = cu.SetCoins(sdk.NewCoins(
+	//	sdk.NewCoin(denom, sdk.NewInt(100)),
+	//	sdk.NewCoin(targetDenom, sdk.NewInt(400))))
 	ck.SetCU(ctx, cu)
 
 	msgIssue := NewMsgMappingSwap(
@@ -201,7 +220,7 @@ func TestMappingSwap(t *testing.T) {
 	res = handleMsgMappingSwap(ctx, keeper, msgIssue)
 	assert.True(t, res.IsOK())
 	cu = ck.GetCU(ctx, from)
-	assert.True(t, cu.GetCoins().IsEqual(sdk.NewCoins(
+	assert.True(t, trk.GetAllBalance(ctx, cu.GetAddress()).IsEqual(sdk.NewCoins(
 		sdk.NewCoin(denom, sdk.NewInt(100-30)),
 		sdk.NewCoin(targetDenom, sdk.NewInt(400+30)))))
 	mi = keeper.GetMappingInfo(ctx, symbol)
@@ -232,4 +251,10 @@ func TestMappingSwap(t *testing.T) {
 		sdk.NewInt(2000)))
 	assert.True(t, receipt.Flows[flowId].(MappingBalanceFlow).IssuePoolChange.Equal(
 		sdk.NewInt(30)))
+}
+
+func testSetCUCoins(ctx sdk.Context, trk transfer.Keeper, cu sdk.CUAddress, coins sdk.Coins) {
+	curCoins := trk.GetAllBalance(ctx, cu)
+	trk.SubCoins(ctx, cu, curCoins)
+	trk.AddCoins(ctx, cu, coins)
 }

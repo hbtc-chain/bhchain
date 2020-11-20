@@ -200,20 +200,16 @@ func TestQueries(t *testing.T) {
 
 	// input.addrs[0] proposes (and deposits) proposals #1 and #2
 	res := handler(ctx, NewMsgSubmitProposal(testProposal(), sdk.Coins{sdk.NewInt64Coin(sdk.DefaultBondDenom, 3)}, input.addrs[0], 0))
-	var proposalID1 uint64
-	require.True(t, res.IsOK())
-	cdc.MustUnmarshalBinaryLengthPrefixed(res.Data, &proposalID1)
+
+	var proposalID1 = readProposalID(t, res)
 
 	res = handler(ctx, NewMsgSubmitProposal(testProposal(), sdk.Coins{sdk.NewInt64Coin(sdk.DefaultBondDenom, 10000000)}, input.addrs[0], 0))
-	var proposalID2 uint64
-	require.True(t, res.IsOK())
-	cdc.MustUnmarshalBinaryLengthPrefixed(res.Data, &proposalID2)
+
+	var proposalID2 = readProposalID(t, res)
 
 	// input.addrs[1] proposes (and deposits) proposals #3
 	res = handler(ctx, NewMsgSubmitProposal(testProposal(), sdk.Coins{sdk.NewInt64Coin(sdk.DefaultBondDenom, 3)}, input.addrs[1], 0))
-	var proposalID3 uint64
-	require.True(t, res.IsOK())
-	cdc.MustUnmarshalBinaryLengthPrefixed(res.Data, &proposalID3)
+	var proposalID3 uint64 = readProposalID(t, res)
 
 	// input.addrs[1] deposits on proposals #2 & #3
 	res = handler(ctx, NewMsgDeposit(input.addrs[1], proposalID2, depositParams.MinDeposit))

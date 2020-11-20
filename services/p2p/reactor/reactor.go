@@ -128,6 +128,8 @@ func (bhR *BHReactor) gossipBHMsgRoutine(peer *peerWithMark) {
 		}
 
 		select {
+		case <-peer.Quit():
+			return
 		case msg := <-ch:
 			hash := toHash(msg.Payload)
 			if !peer.marked(hash) {

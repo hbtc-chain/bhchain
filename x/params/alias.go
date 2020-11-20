@@ -25,20 +25,21 @@ const (
 
 var (
 	// functions aliases
-	NewSubspace                = subspace.NewSubspace
-	NewKeyTable                = subspace.NewKeyTable
-	DefaultTestComponents      = subspace.DefaultTestComponents
-	RegisterCodec              = types.RegisterCodec
-	ErrUnknownSubspace         = types.ErrUnknownSubspace
-	ErrSettingParameter        = types.ErrSettingParameter
-	ErrEmptyChanges            = types.ErrEmptyChanges
-	ErrEmptySubspace           = types.ErrEmptySubspace
-	ErrEmptyKey                = types.ErrEmptyKey
-	ErrEmptyValue              = types.ErrEmptyValue
-	NewParameterChangeProposal = types.NewParameterChangeProposal
-	NewParamChange             = types.NewParamChange
-	NewParamChangeWithSubkey   = types.NewParamChangeWithSubkey
-	ValidateChanges            = types.ValidateChanges
+	NewSubspace                      = subspace.NewSubspace
+	NewKeyTable                      = subspace.NewKeyTable
+	DefaultTestComponents            = subspace.DefaultTestComponents
+	RegisterCodec                    = types.RegisterCodec
+	ErrUnknownSubspace               = types.ErrUnknownSubspace
+	ErrSettingParameter              = types.ErrSettingParameter
+	ErrEmptyChanges                  = types.ErrEmptyChanges
+	ErrEmptySubspace                 = types.ErrEmptySubspace
+	ErrEmptyKey                      = types.ErrEmptyKey
+	ErrEmptyValue                    = types.ErrEmptyValue
+	NewParameterChangeProposal       = types.NewParameterChangeProposal
+	NewParamChange                   = types.NewParamChange
+	NewParamChangeWithSubkey         = types.NewParamChangeWithSubkey
+	ValidateChanges                  = types.ValidateChanges
+	RegisterParameterChangeValidator = types.RegisterParameterChangeValidator
 
 	// variable aliases
 	ModuleCdc = types.ModuleCdc

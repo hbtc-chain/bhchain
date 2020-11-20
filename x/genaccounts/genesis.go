@@ -8,14 +8,27 @@ import (
 )
 
 // InitGenesis initializes accounts and deliver genesis transactions
-func InitGenesis(ctx sdk.Context, _ *codec.Codec, cuKeeper types.CUKeeper, genesisState GenesisState) {
+func InitGenesis(ctx sdk.Context, _ *codec.Codec, cuKeeper types.CUKeeper, transferKeeper types.TransferKeeper, genesisState GenesisState) {
 	genesisState.Sanitize()
 
 	// load the accounts
 	for _, gacc := range genesisState {
 		cu := gacc.ToCU()
 		cuKeeper.SetCU(ctx, cu)
+		if !gacc.Coins.IsZero() {
+			_, _, err := transferKeeper.AddCoins(ctx, cu.GetAddress(), gacc.Coins)
+			if err != nil {
+				panic(err)
+			}
 
+		}
+		if !gacc.CoinsHold.IsZero() {
+			_, _, err := transferKeeper.AddCoinsHold(ctx, cu.GetAddress(), gacc.CoinsHold)
+			if err != nil {
+				panic(err)
+			}
+
+		}
 	}
 }
 

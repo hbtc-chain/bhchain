@@ -10,17 +10,16 @@ import (
 	"github.com/hbtc-chain/bhchain/x/params"
 )
 
-const (
-	RepurchaseRoutingCoin = sdk.NativeToken
-)
-
 var (
 	DefaultMinimumLiquidity            = sdk.NewInt(1000)
-	DefaultFeeRate                     = sdk.NewDecWithPrec(225, 5) // 0.00225
-	DefaultRefererTransactionBonusRate = sdk.NewDecWithPrec(25, 5)  // 0.00025
-	DefaultRepurchaseRate              = sdk.NewDecWithPrec(5, 4)   // 0.0005
-	DefaultRefererMiningBonusRate      = sdk.NewDecWithPrec(1, 1)   // 0.1
-	DefaultMiningWeights               = []*MiningWeight{NewMiningWeight("hbc", "test", sdk.OneInt())}
+	DefaultLimitSwapMatchingGas        = sdk.NewUint(50000)
+	DefaultMaxFeeRate                  = sdk.NewDecWithPrec(1, 1)  // 0.1
+	DefaultLpRewardRate                = sdk.NewDecWithPrec(25, 4) // 0.0025
+	DefaultRefererTransactionBonusRate = sdk.NewDecWithPrec(1, 4)  // 0.0001
+	DefaultRepurchaseRate              = sdk.NewDecWithPrec(4, 4)  // 0.0004
+	DefaultRefererMiningBonusRate      = sdk.NewDecWithPrec(1, 1)  // 0.1
+	DefaultRepurchaseDuration          = int64(1000)
+	DefaultMiningWeights               = []*MiningWeight{NewMiningWeight(0, "hbc", "test", sdk.OneInt())}
 	DefaultMiningPlans                 = []*MiningPlan{
 		NewMiningPlan(1, sdk.NewInt(3000000000)),      // 30 perblock
 		NewMiningPlan(650001, sdk.NewInt(1500000000)), // 15 perblock
@@ -32,22 +31,27 @@ var (
 
 var (
 	KeyMinimumLiquidity            = []byte("MinimumLiquidity")
-	KeyFeeRate                     = []byte("FeeRate")
+	KeyLimitSwapMatchingGas        = []byte("LimitSwapMatchingGas")
+	KeyMaxFeeRate                  = []byte("MaxFeeRate")
+	KeyLpRewardRate                = []byte("LpRewardRate")
 	KeyRepurchaseRate              = []byte("RepurchaseRate")
 	KeyRefererTransactionBonusRate = []byte("RefererTransactionBonusRate")
 	KeyRefererMiningBonusRate      = []byte("RefererMiningBonusRate")
+	KeyRepurchaseDuration          = []byte("RepurchaseDuration")
 	KeyMiningWeights               = []byte("MiningWeights")
 	KeyMiningPlans                 = []byte("MiningPlans")
 )
 
 type MiningWeight struct {
+	DexID  uint32     `json:"dex_id"`
 	TokenA sdk.Symbol `json:"token_a"`
 	TokenB sdk.Symbol `json:"token_b"`
 	Weight sdk.Int    `json:"weight"`
 }
 
-func NewMiningWeight(tokenA, tokenB sdk.Symbol, weight sdk.Int) *MiningWeight {
+func NewMiningWeight(dexID uint32, tokenA, tokenB sdk.Symbol, weight sdk.Int) *MiningWeight {
 	return &MiningWeight{
+		DexID:  dexID,
 		TokenA: tokenA,
 		TokenB: tokenB,
 		Weight: weight,
@@ -71,23 +75,29 @@ var _ params.ParamSet = (*Params)(nil)
 // Params defines the high level settings for staking
 type Params struct {
 	MinimumLiquidity            sdk.Int         `json:"minimum_liquidity"`
-	FeeRate                     sdk.Dec         `json:"fee_rate"`
+	LimitSwapMatchingGas        sdk.Uint        `json:"limit_swap_matching_gas"`
+	MaxFeeRate                  sdk.Dec         `json:"max_fee_rate"`
+	LpRewardRate                sdk.Dec         `json:"lp_reward_rate"`
 	RepurchaseRate              sdk.Dec         `json:"repurchase_rate"`
 	RefererTransactionBonusRate sdk.Dec         `json:"referer_transaction_bonus_rate"`
 	RefererMiningBonusRate      sdk.Dec         `json:"referer_mining_bonus_rate"`
+	RepurchaseDuration          int64           `json:"repurchase_duration"`
 	MiningWeights               []*MiningWeight `json:"mining_weights"`
 	MiningPlans                 []*MiningPlan   `json:"mining_plans"`
 }
 
 // NewParams creates a new Params instance
-func NewParams(minLiquidity sdk.Int, feeRate, repurchaseRate, refererTransactionBonusRate, refererMiningBonusRate sdk.Dec,
-	miningWeights []*MiningWeight, miningPlans []*MiningPlan) Params {
+func NewParams(minLiquidity sdk.Int, limitSwapMatchingGas sdk.Uint, maxFeeRate, lpRewardRate, repurchaseRate, refererTransactionBonusRate, refererMiningBonusRate sdk.Dec,
+	repurchaseDuration int64, miningWeights []*MiningWeight, miningPlans []*MiningPlan) Params {
 	return Params{
 		MinimumLiquidity:            minLiquidity,
-		FeeRate:                     feeRate,
+		LimitSwapMatchingGas:        limitSwapMatchingGas,
+		MaxFeeRate:                  maxFeeRate,
+		LpRewardRate:                lpRewardRate,
 		RepurchaseRate:              repurchaseRate,
 		RefererTransactionBonusRate: refererTransactionBonusRate,
 		RefererMiningBonusRate:      refererMiningBonusRate,
+		RepurchaseDuration:          repurchaseDuration,
 		MiningWeights:               miningWeights,
 		MiningPlans:                 miningPlans,
 	}
@@ -97,10 +107,13 @@ func NewParams(minLiquidity sdk.Int, feeRate, repurchaseRate, refererTransaction
 func (p *Params) ParamSetPairs() params.ParamSetPairs {
 	return params.ParamSetPairs{
 		{KeyMinimumLiquidity, &p.MinimumLiquidity},
-		{KeyFeeRate, &p.FeeRate},
+		{KeyLimitSwapMatchingGas, &p.LimitSwapMatchingGas},
+		{KeyMaxFeeRate, &p.MaxFeeRate},
+		{KeyLpRewardRate, &p.LpRewardRate},
 		{KeyRepurchaseRate, &p.RepurchaseRate},
 		{KeyRefererTransactionBonusRate, &p.RefererTransactionBonusRate},
 		{KeyRefererMiningBonusRate, &p.RefererMiningBonusRate},
+		{KeyRepurchaseDuration, &p.RepurchaseDuration},
 		{KeyMiningWeights, &p.MiningWeights},
 		{KeyMiningPlans, &p.MiningPlans},
 	}
@@ -114,22 +127,27 @@ func (p Params) Equal(p2 Params) bool {
 
 // DefaultParams returns a default set of parameters.
 func DefaultParams() Params {
-	return NewParams(DefaultMinimumLiquidity, DefaultFeeRate, DefaultRepurchaseRate, DefaultRefererTransactionBonusRate,
-		DefaultRefererMiningBonusRate, DefaultMiningWeights, DefaultMiningPlans)
+	return NewParams(DefaultMinimumLiquidity, DefaultLimitSwapMatchingGas, DefaultMaxFeeRate, DefaultLpRewardRate,
+		DefaultRepurchaseRate, DefaultRefererTransactionBonusRate, DefaultRefererMiningBonusRate,
+		DefaultRepurchaseDuration, DefaultMiningWeights, DefaultMiningPlans)
 }
 
 // String returns a human readable string representation of the parameters.
 func (p Params) String() string {
 	return fmt.Sprintf(`Params:
   MinimumLiquidity: %s
-  FeeRate: %s
+  LimitSwapMatchingGas: %s
+  MaxFeeRate: %s
+  LpRewardRate: %s
   RepurchaseRate: %s
   RefererTransactionBonusRate: %s
   RefererMiningBonusRate: %s
+  RepurchaseDuration: %d
   MiningWeights: %v
   MiningPlans: %v`,
-		p.MinimumLiquidity.String(), p.FeeRate.String(), p.RepurchaseRate.String(), p.RefererTransactionBonusRate.String(),
-		p.RefererMiningBonusRate.String(), p.MiningWeights, p.MiningPlans)
+		p.MinimumLiquidity.String(), p.LimitSwapMatchingGas.String(), p.MaxFeeRate.String(),
+		p.LpRewardRate.String(), p.RepurchaseRate.String(), p.RefererTransactionBonusRate.String(),
+		p.RefererMiningBonusRate.String(), p.RepurchaseDuration, p.MiningWeights, p.MiningPlans)
 }
 
 // unmarshal the current staking params value from store key or panic
@@ -155,7 +173,10 @@ func (p Params) Validate() error {
 	if !p.MinimumLiquidity.IsPositive() {
 		return errors.New("minimun liquidity should be positive")
 	}
-	if p.FeeRate.IsNegative() {
+	if p.MaxFeeRate.IsNegative() || p.MaxFeeRate.GT(sdk.OneDec()) {
+		return errors.New("max fee rate must be between 0 to 1")
+	}
+	if p.LpRewardRate.IsNegative() {
 		return errors.New("fee rate cannot be negative")
 	}
 	if p.RepurchaseRate.IsNegative() {
@@ -164,8 +185,11 @@ func (p Params) Validate() error {
 	if p.RefererTransactionBonusRate.IsNegative() {
 		return errors.New("referer transaction bonus rate cannot be negative")
 	}
-	if p.FeeRate.Add(p.RefererTransactionBonusRate).GT(sdk.OneDec()) {
-		return errors.New("sum of fee rate and referer transaction bonus rate must be less than 1")
+	if p.LpRewardRate.Add(p.RepurchaseRate).Add(p.RefererTransactionBonusRate).GT(p.MaxFeeRate) {
+		return errors.New("sum of fee rate must be less than max fee rate")
+	}
+	if p.RepurchaseDuration <= 0 {
+		return errors.New("repurchase duration should be positive")
 	}
 	if p.RefererMiningBonusRate.IsNegative() || p.RefererMiningBonusRate.GT(sdk.OneDec()) {
 		return errors.New("referer mining bonus rate must be between 0 to 1")

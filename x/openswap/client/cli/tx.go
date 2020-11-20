@@ -25,6 +25,10 @@ func GetTxCmd(storeKey string, cdc *codec.Codec) *cobra.Command {
 		RunE:                       client.ValidateCmd,
 	}
 	openswapTxCmd.AddCommand(client.PostCommands(
+		GetCmdCreateDex(cdc),
+		GetCmdEditDex(cdc),
+		GetCmdCreateTradingPair(cdc),
+		GetCmdEditTradingPair(cdc),
 		GetCmdAddLiquidity(cdc),
 		GetCmdRemoveLiquidity(cdc),
 		GetCmdSwapExactIn(cdc),
@@ -34,6 +38,125 @@ func GetTxCmd(storeKey string, cdc *codec.Codec) *cobra.Command {
 		GetCmdClaimEarning(cdc),
 	)...)
 	return openswapTxCmd
+}
+
+func GetCmdCreateDex(cdc *codec.Codec) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "create-dex",
+		Short: "create a new dex",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			txBldr := custodianunit.NewTxBuilderFromCLI().WithTxEncoder(utils.GetTxEncoder(cdc))
+			cliCtx := context.NewCLIContext().WithCodec(cdc)
+
+			msg, err := buildCreateDexMsg(cliCtx)
+			if err != nil {
+				return err
+			}
+
+			return utils.GenerateOrBroadcastMsgs(cliCtx, txBldr, []sdk.Msg{msg})
+		},
+	}
+
+	cmd.Flags().String(FlagDexName, "", "The name of dex")
+	cmd.Flags().String(FlagDexIncomeReceiver, "", "The income receiver of dex")
+
+	cmd.MarkFlagRequired(client.FlagFrom)
+	cmd.MarkFlagRequired(FlagDexName)
+
+	return cmd
+}
+
+func GetCmdEditDex(cdc *codec.Codec) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "edit-dex",
+		Short: "edit a dex",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			txBldr := custodianunit.NewTxBuilderFromCLI().WithTxEncoder(utils.GetTxEncoder(cdc))
+			cliCtx := context.NewCLIContext().WithCodec(cdc)
+
+			msg, err := buildEditDexMsg(cliCtx)
+			if err != nil {
+				return err
+			}
+
+			return utils.GenerateOrBroadcastMsgs(cliCtx, txBldr, []sdk.Msg{msg})
+		},
+	}
+
+	cmd.Flags().Uint32(FlagDexID, 0, "The dex id")
+	cmd.Flags().String(FlagDexName, "", "The name of dex")
+	cmd.Flags().String(FlagDexIncomeReceiver, "", "The income receiver of dex")
+
+	cmd.MarkFlagRequired(client.FlagFrom)
+	cmd.MarkFlagRequired(FlagDexID)
+
+	return cmd
+}
+
+func GetCmdCreateTradingPair(cdc *codec.Codec) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "create-pair",
+		Short: "create a trading pair in a dex",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			txBldr := custodianunit.NewTxBuilderFromCLI().WithTxEncoder(utils.GetTxEncoder(cdc))
+			cliCtx := context.NewCLIContext().WithCodec(cdc)
+
+			msg, err := buildCreateTradingPairMsg(cliCtx)
+			if err != nil {
+				return err
+			}
+
+			return utils.GenerateOrBroadcastMsgs(cliCtx, txBldr, []sdk.Msg{msg})
+		},
+	}
+
+	cmd.Flags().Uint32(FlagDexID, 0, "The dex id")
+	cmd.Flags().String(FlagTokenA, "", "The first token of the pair")
+	cmd.Flags().String(FlagTokenB, "", "The second token of the pair")
+	cmd.Flags().String(FlagIsPublic, "fales", "Whether is public")
+	cmd.Flags().String(FlagLpRewardRate, "", "LP reward rate")
+	cmd.Flags().String(FlagRefererRewardRate, "", "Referer reward rate")
+
+	cmd.MarkFlagRequired(client.FlagFrom)
+	cmd.MarkFlagRequired(FlagDexID)
+	cmd.MarkFlagRequired(FlagTokenA)
+	cmd.MarkFlagRequired(FlagTokenB)
+	cmd.MarkFlagRequired(FlagLpRewardRate)
+	cmd.MarkFlagRequired(FlagRefererRewardRate)
+
+	return cmd
+}
+
+func GetCmdEditTradingPair(cdc *codec.Codec) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "edit-pair",
+		Short: "edit a trading pair in a dex",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			txBldr := custodianunit.NewTxBuilderFromCLI().WithTxEncoder(utils.GetTxEncoder(cdc))
+			cliCtx := context.NewCLIContext().WithCodec(cdc)
+
+			msg, err := buildEditTradingPairMsg(cliCtx)
+			if err != nil {
+				return err
+			}
+
+			return utils.GenerateOrBroadcastMsgs(cliCtx, txBldr, []sdk.Msg{msg})
+		},
+	}
+
+	cmd.Flags().Uint32(FlagDexID, 0, "The dex id")
+	cmd.Flags().String(FlagTokenA, "", "The first token of the pair")
+	cmd.Flags().String(FlagTokenB, "", "The second token of the pair")
+	cmd.Flags().String(FlagIsPublic, "", "Whether is public")
+	cmd.Flags().String(FlagLpRewardRate, "", "LP reward rate")
+	cmd.Flags().String(FlagRefererRewardRate, "", "Referer reward rate")
+
+	cmd.MarkFlagRequired(client.FlagFrom)
+	cmd.MarkFlagRequired(FlagDexID)
+	cmd.MarkFlagRequired(FlagTokenA)
+	cmd.MarkFlagRequired(FlagTokenB)
+
+	return cmd
 }
 
 func GetCmdAddLiquidity(cdc *codec.Codec) *cobra.Command {
@@ -53,6 +176,7 @@ func GetCmdAddLiquidity(cdc *codec.Codec) *cobra.Command {
 		},
 	}
 
+	cmd.Flags().Uint32(FlagDexID, 0, "The dex id")
 	cmd.Flags().String(FlagTokenA, "", "The first token of the pair")
 	cmd.Flags().String(FlagTokenB, "", "The second token of the pair")
 	cmd.Flags().String(FlagTokenAAmount, "", "The amount of the first token")
@@ -85,6 +209,7 @@ func GetCmdRemoveLiquidity(cdc *codec.Codec) *cobra.Command {
 		},
 	}
 
+	cmd.Flags().Uint32(FlagDexID, 0, "The dex id")
 	cmd.Flags().String(FlagTokenA, "", "The first token of the pair")
 	cmd.Flags().String(FlagTokenB, "", "The second token of the pair")
 	cmd.Flags().String(FlagLiquidity, "", "The liquidity you want to remove")
@@ -115,6 +240,7 @@ func GetCmdSwapExactIn(cdc *codec.Codec) *cobra.Command {
 		},
 	}
 
+	cmd.Flags().Uint32(FlagDexID, 0, "The dex id")
 	cmd.Flags().String(FlagReferer, "", "The referer of you")
 	cmd.Flags().String(FlagReceiver, "", "The receiver of this swap")
 	cmd.Flags().String(FlagAmountIn, "", "The exact amount of input token")
@@ -147,6 +273,7 @@ func GetCmdSwapExactOut(cdc *codec.Codec) *cobra.Command {
 		},
 	}
 
+	cmd.Flags().Uint32(FlagDexID, 0, "The dex id")
 	cmd.Flags().String(FlagReferer, "", "The referer of you")
 	cmd.Flags().String(FlagReceiver, "", "The receiver of this swap")
 	cmd.Flags().String(FlagMaxAmountIn, "", "The maximum amount of input token")
@@ -179,6 +306,7 @@ func GetCmdLimitSwap(cdc *codec.Codec) *cobra.Command {
 		},
 	}
 
+	cmd.Flags().Uint32(FlagDexID, 0, "The dex id")
 	cmd.Flags().String(FlagReferer, "", "The referer of you")
 	cmd.Flags().String(FlagReceiver, "", "The receiver of this swap")
 	cmd.Flags().String(FlagAmountIn, "", "The amount of input token")
@@ -249,6 +377,7 @@ func GetCmdClaimEarning(cdc *codec.Codec) *cobra.Command {
 		},
 	}
 
+	cmd.Flags().Uint32(FlagDexID, 0, "The dex id")
 	cmd.Flags().String(FlagTokenA, "", "The first token of the pair")
 	cmd.Flags().String(FlagTokenB, "", "The second token of the pair")
 

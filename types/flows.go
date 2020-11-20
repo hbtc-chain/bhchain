@@ -34,7 +34,7 @@ const (
 	CategoryTypeOpcuAssetTransfer CategoryType = 0xA
 	CategoryTypeOpenswap          CategoryType = 0xB
 	CategoryTypeQuickSwap         CategoryType = 0xC
-	CategoryTypeHrc20             CategoryType = 0xD
+	CategoryTypeHrc10             CategoryType = 0xD
 )
 
 const (
@@ -77,7 +77,7 @@ type BalanceFlow struct {
 
 	// Symbol token symbol for the asset
 	//Symbol Symbol
-	Symbol Symbol //FIXME(liyong.zhang): temp change
+	Symbol Symbol
 
 	// PreviousBalance previous balance for the balance change
 	PreviousBalance Int
@@ -106,7 +106,8 @@ type DepositFlow struct {
 }
 
 type OrderRetryFlow struct {
-	OrderIDs []string
+	OrderIDs        []string
+	ExcludedKeyNode CUAddress
 }
 
 type DepositConfirmedFlow struct {
@@ -122,7 +123,6 @@ type CollectWaitSignFlow struct {
 type CollectSignFinishFlow struct {
 	OrderIDs []string
 	SignedTx []byte
-	TxHash   string
 }
 
 type CollectFinishFlow struct {
@@ -155,7 +155,6 @@ type WithdrawalWaitSignFlow struct {
 type WithdrawalSignFinishFlow struct {
 	OrderIDs []string
 	SignedTx []byte
-	TxHash   string
 }
 
 type WithdrawalFinishFlow struct {
@@ -181,7 +180,6 @@ type OpcuAssetTransferWaitSignFlow struct {
 type OpcuAssetTransferSignFinishFlow struct {
 	OrderID  string
 	SignedTx []byte
-	TxHash   string
 }
 
 type OpcuAssetTransferFinishFlow struct {
@@ -207,7 +205,6 @@ type SysTransferWaitSignFlow struct {
 type SysTransferSignFinishFlow struct {
 	OrderID  string
 	SignedTx []byte
-	TxHash   string
 }
 
 type SysTransferFinishFlow struct {
@@ -216,11 +213,12 @@ type SysTransferFinishFlow struct {
 }
 
 type KeyGenFlow struct {
-	OrderID     string
-	Symbol      Symbol
-	From        CUAddress
-	To          CUAddress
-	IsPreKeyGen bool
+	OrderID         string
+	Symbol          Symbol
+	From            CUAddress
+	To              CUAddress
+	IsPreKeyGen     bool
+	ExcludedKeyNode CUAddress
 }
 
 type KeyGenWaitSignFlow struct {

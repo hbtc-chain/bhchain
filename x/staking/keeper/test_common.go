@@ -24,6 +24,7 @@ import (
 	"github.com/hbtc-chain/bhchain/x/receipt"
 	"github.com/hbtc-chain/bhchain/x/staking/types"
 	"github.com/hbtc-chain/bhchain/x/supply"
+	"github.com/hbtc-chain/bhchain/x/supply/exported"
 	"github.com/hbtc-chain/bhchain/x/transfer"
 )
 
@@ -51,6 +52,37 @@ var (
 	}
 )
 
+type testCU struct {
+	exported.ModuleAccountI
+	ctx       sdk.Context
+	trk       transfer.Keeper
+	coinCache *sdk.Coins
+}
+
+func NewTestCU(ctx sdk.Context, trk transfer.Keeper, cu exported.ModuleAccountI) *testCU {
+	t := &testCU{ModuleAccountI: cu, ctx: ctx, trk: trk}
+	t.GetCoins()
+	return t
+}
+
+func (t *testCU) SetCoins(coins sdk.Coins) error {
+	curCoins := t.trk.GetAllBalance(t.ctx, t.ModuleAccountI.GetAddress())
+	t.trk.SubCoins(t.ctx, t.ModuleAccountI.GetAddress(), curCoins)
+	t.trk.AddCoins(t.ctx, t.ModuleAccountI.GetAddress(), coins)
+	newCoins := coins
+	t.coinCache = &newCoins
+	return nil
+}
+
+func (t *testCU) GetCoins() sdk.Coins {
+	if t.coinCache == nil {
+		c := t.trk.GetAllBalance(t.ctx, t.ModuleAccountI.GetAddress())
+		t.coinCache = &c
+	}
+
+	return *t.coinCache
+}
+
 //_______________________________________________________________________________________
 
 // intended to be used with require/assert:  require.True(ValEq(...))
@@ -71,13 +103,15 @@ func MakeTestCodec() *codec.Codec {
 	cdc.RegisterConcrete(types.MsgEditValidator{}, "test/staking/EditValidator", nil)
 	cdc.RegisterConcrete(types.MsgUndelegate{}, "test/staking/Undelegate", nil)
 	cdc.RegisterConcrete(types.MsgBeginRedelegate{}, "test/staking/BeginRedelegate", nil)
+	cdc.RegisterConcrete(testCU{}, "test/staking/testCU", nil)
 
 	// Register AppAccount
-	cdc.RegisterInterface((*custodianunit.CU)(nil), nil)
-	cdc.RegisterConcrete(&custodianunit.BaseCU{}, "test/staking/BaseCU", nil)
+	//cdc.RegisterInterface((*custodianunit.CU)(nil), nil)
+	//cdc.RegisterConcrete(&custodianunit.BaseCU{}, "test/staking/BaseCU", nil)
 	receipt.RegisterCodec(cdc)
 	supply.RegisterCodec(cdc)
 	codec.RegisterCrypto(cdc)
+	custodianunit.RegisterCodec(cdc)
 
 	return cdc
 }
@@ -86,6 +120,11 @@ func MakeTestCodec() *codec.Codec {
 // `initPower` is converted to an amount of tokens.
 // If `initPower` is 0, no addrs get created.
 func CreateTestInput(t *testing.T, isCheckTx bool, initPower int64) (sdk.Context, custodianunit.CUKeeper, Keeper, types.SupplyKeeper) {
+	ctx, ck, sk, stk, _ := CreateTestInputEx(t, isCheckTx, initPower)
+	return ctx, ck, sk, stk
+}
+
+func CreateTestInputEx(t *testing.T, isCheckTx bool, initPower int64) (sdk.Context, custodianunit.CUKeeper, Keeper, types.SupplyKeeper, transfer.Keeper) {
 	keyStaking := sdk.NewKVStoreKey(types.StoreKey)
 	tkeyStaking := sdk.NewTransientStoreKey(types.TStoreKey)
 	keyAcc := sdk.NewKVStoreKey(custodianunit.StoreKey)
@@ -102,6 +141,7 @@ func CreateTestInput(t *testing.T, isCheckTx bool, initPower int64) (sdk.Context
 	ms.MountStoreWithDB(keyParams, sdk.StoreTypeIAVL, db)
 	ms.MountStoreWithDB(tkeyParams, sdk.StoreTypeTransient, db)
 	ms.MountStoreWithDB(keySupply, sdk.StoreTypeIAVL, db)
+	ms.MountStoreWithDB(keyTransfer, sdk.StoreTypeIAVL, db)
 	err := ms.LoadLatestVersion()
 	require.Nil(t, err)
 
@@ -129,13 +169,12 @@ func CreateTestInput(t *testing.T, isCheckTx bool, initPower int64) (sdk.Context
 	cuKeeper := custodianunit.NewCUKeeper(
 		cdc,    // amino codec
 		keyAcc, // target store
-		nil,
 		pk.Subspace(custodianunit.DefaultParamspace),
 		custodianunit.ProtoBaseCU, // prototype
 	)
 
 	bk := transfer.NewBaseKeeper(cdc, keyTransfer,
-		cuKeeper, nil, nil, rk, nil, nil,
+		cuKeeper, nil, nil, nil, rk, nil, nil,
 		pk.Subspace(transfer.DefaultParamspace),
 		transfer.DefaultCodespace,
 		blacklistedAddrs,
@@ -155,10 +194,11 @@ func CreateTestInput(t *testing.T, isCheckTx bool, initPower int64) (sdk.Context
 	supplyKeeper.SetSupply(ctx, supply.NewSupply(totalSupply))
 
 	keeper := NewKeeper(cdc, keyStaking, tkeyStaking, supplyKeeper, pk.Subspace(DefaultParamspace), types.DefaultCodespace)
+	keeper.SetTransferKeeper(bk)
 	keeper.SetParams(ctx, types.DefaultParams())
 
 	// set module accounts
-	err = notBondedPool.SetCoins(totalSupply)
+	_, _, err = bk.AddCoins(ctx, notBondedPool.GetAddress(), totalSupply)
 	require.NoError(t, err)
 
 	supplyKeeper.SetModuleAccount(ctx, feeCollectorAcc)
@@ -173,11 +213,7 @@ func CreateTestInput(t *testing.T, isCheckTx bool, initPower int64) (sdk.Context
 		}
 	}
 
-	params := keeper.GetParams(ctx)
-	params.ElectionPeriod = 5
-	keeper.SetParams(ctx, params)
-
-	return ctx, cuKeeper, keeper, supplyKeeper
+	return ctx, cuKeeper, keeper, supplyKeeper, bk
 }
 
 func NewPubKey(pk string) (res crypto.PubKey) {

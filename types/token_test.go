@@ -7,13 +7,13 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestIsTokenTypeLegal(t *testing.T) {
-	assert.True(t, IsTokenTypeLegal(UtxoBased))
-	assert.True(t, IsTokenTypeLegal(AccountBased))
-	assert.True(t, IsTokenTypeLegal(AccountSharedBased))
-	assert.False(t, IsTokenTypeLegal(0))
-	assert.False(t, IsTokenTypeLegal(4))
-	assert.False(t, IsTokenTypeLegal(5))
+func TestIsTokenTypeValid(t *testing.T) {
+	assert.True(t, IsTokenTypeValid(UtxoBased))
+	assert.True(t, IsTokenTypeValid(AccountBased))
+	assert.True(t, IsTokenTypeValid(AccountSharedBased))
+	assert.False(t, IsTokenTypeValid(0))
+	assert.False(t, IsTokenTypeValid(4))
+	assert.False(t, IsTokenTypeValid(5))
 }
 
 func TestIsValidTokenName(t *testing.T) {
@@ -30,7 +30,6 @@ func TestIsValidTokenName(t *testing.T) {
 		{"bhCABC", false},
 		{" bh124", false},
 		{"_bh124", false},
-		{"bh123456789012345", false},
 		{"BhT", false},
 		{"bHT", false},
 		{"bh 123", false},
@@ -50,83 +49,60 @@ func TestIsValidTokenName(t *testing.T) {
 
 	for _, d := range testdata {
 
-		assert.Equal(t, d.valid, Symbol(d.name).IsValidTokenName(), d.name)
+		assert.Equal(t, d.valid, IsTokenNameValid(d.name), d.name)
 
-		if Symbol(d.name).IsValidTokenName() {
-			assert.Equal(t, strings.ToLower(d.name), Symbol(d.name).ToDenomName())
-			assert.Equal(t, d.name, Symbol(d.name).String())
+		if d.valid {
+			assert.Equal(t, strings.ToLower(d.name), d.name)
 			// must be valid denom
 			assert.Nil(t, validateDenom(d.name))
-			// symbol == DenomName // TODO remove symbol ,use DenomName
-			assert.Equal(t, d.name, Symbol(d.name).ToDenomName())
-		} else {
-			assert.Equal(t, "", Symbol(d.name).String())
 		}
 	}
 }
 
-func TestTokenString(t *testing.T) {
-	expected := "\n\tSymbol:btc\n\tIssuer:iss\n\tChain:\n\tTokenType:1\n\tIsSendEnabled:false\n\tIsDepositEnabled:false\n\tIsWithdrawalEnabled:false\n\tDecimals:8\n\tTotalSupply:<nil>\n\tCollectThreshold:100\n\tDepositThreshold:<nil>\n\tOpenFee:1000\n\tSysOpenFee:1100\n\tWithdrawalFee:2.000000000000000000\n\tMaxOpCUNumber:102\n\tSysTransferNum:10\n\tOpCUSysTransferNum:100\n\tGasLimit:100000000000000\n\tGasPrice:1\n\tConfirmations:1\n\tIsNonceBased:false\n\t"
-	d := TokenInfo{
-		Symbol:              "btc",
-		Issuer:              "iss",
-		Chain:               "mt",
-		TokenType:           UtxoBased,
-		IsSendEnabled:       false,
-		IsDepositEnabled:    false,
-		IsWithdrawalEnabled: false,
-		Decimals:            8,
-		CollectThreshold:    NewInt(100),
-		OpenFee:             NewInt(1000),
-		SysOpenFee:          NewInt(1100),
-		WithdrawalFeeRate:   NewDecWithPrec(2, 0),
-		MaxOpCUNumber:       102,
-		SysTransferNum:      NewInt(10),
-		OpCUSysTransferNum:  NewInt(100),
-		GasLimit:            NewIntWithDecimal(1, 14),
-		GasPrice:            NewInt(1),
-		Confirmations:       1,
-		IsNonceBased:        false,
-	}
-	assert.Equal(t, expected, d.String())
-}
-
-func TestTokenInfoIsValid(t *testing.T) {
-	tokenInfo := TokenInfo{
-		Symbol:              Symbol("btc"),
-		Issuer:              "",
-		Chain:               Symbol("btc"),
-		TokenType:           UtxoBased,
-		IsSendEnabled:       true,
-		IsDepositEnabled:    true,
-		IsWithdrawalEnabled: true,
-		Decimals:            8,
-		TotalSupply:         NewIntWithDecimal(21, 15),
-		CollectThreshold:    NewIntWithDecimal(2, 4),   // btc
-		OpenFee:             NewIntWithDecimal(28, 18), // nativeToken
-		SysOpenFee:          NewIntWithDecimal(28, 18), // nativeToken
-		WithdrawalFeeRate:   NewDecWithPrec(2, 0),      // gas * 10  btc
-		MaxOpCUNumber:       10,
-		SysTransferNum:      NewInt(3),
-		OpCUSysTransferNum:  NewInt(30),
-		GasLimit:            NewInt(1),
-		GasPrice:            NewInt(1000),
-		DepositThreshold:    NewIntWithDecimal(2, 3),
+func TestIBCTokenInfoIsValid(t *testing.T) {
+	tokenInfo := IBCToken{
+		BaseToken: BaseToken{
+			Name:        "btc",
+			Symbol:      "btc",
+			Issuer:      "",
+			Chain:       "btc",
+			SendEnabled: true,
+			Decimals:    8,
+			TotalSupply: NewIntWithDecimal(21, 15),
+		},
+		TokenType:          UtxoBased,
+		DepositEnabled:     true,
+		WithdrawalEnabled:  true,
+		CollectThreshold:   NewIntWithDecimal(2, 4),   // btc
+		OpenFee:            NewIntWithDecimal(28, 18), // nativeToken
+		SysOpenFee:         NewIntWithDecimal(28, 18), // nativeToken
+		WithdrawalFeeRate:  NewDecWithPrec(2, 0),      // gas * 10  btc
+		MaxOpCUNumber:      10,
+		SysTransferNum:     NewInt(3),
+		OpCUSysTransferNum: NewInt(30),
+		GasLimit:           NewInt(1),
+		GasPrice:           NewInt(1000),
+		DepositThreshold:   NewIntWithDecimal(2, 3),
 	}
 
 	assert.True(t, tokenInfo.IsValid())
 
-	//symbol is illegal
-	tokenInfo.Symbol = Symbol("Btc")
+	// name is illegal
+	tokenInfo.Name = "Btc"
+	assert.False(t, tokenInfo.IsValid())
+
+	// symbol is illegal
+	tokenInfo.Name = "btc"
+	tokenInfo.Symbol = "b tc"
 	assert.False(t, tokenInfo.IsValid())
 
 	//chain is illegal
-	tokenInfo.Symbol = Symbol("btc")
-	tokenInfo.Chain = Symbol("BTC")
+	tokenInfo.Symbol = "btc"
+	tokenInfo.Chain = "b tc"
 	assert.False(t, tokenInfo.IsValid())
 
 	//tokentype is illegal
-	tokenInfo.Chain = Symbol("btc")
+	tokenInfo.Chain = "btc"
 	tokenInfo.TokenType = 9
 	assert.False(t, tokenInfo.IsValid())
 

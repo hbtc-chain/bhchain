@@ -13,26 +13,28 @@ func addProposal(symbol, chain string, tokenType sdk.TokenType) types.AddTokenPr
 	return types.AddTokenProposal{
 		Title:       "Test",
 		Description: "description",
-		TokenInfo: sdk.TokenInfo{
-			Symbol:              sdk.Symbol(symbol),
-			Issuer:              "",
-			Chain:               sdk.Symbol(chain),
-			TokenType:           tokenType,
-			IsSendEnabled:       true,
-			IsDepositEnabled:    true,
-			IsWithdrawalEnabled: true,
-			Decimals:            8,
-			TotalSupply:         sdk.NewIntWithDecimal(21, 15),
-			CollectThreshold:    sdk.NewIntWithDecimal(2, 4),   // btc
-			OpenFee:             sdk.NewIntWithDecimal(28, 18), // nativeToken
-			SysOpenFee:          sdk.NewIntWithDecimal(28, 18), // nativeToken
-			WithdrawalFeeRate:   sdk.NewDecWithPrec(2, 0),      // gas * 10  btc
-			MaxOpCUNumber:       10,
-			SysTransferNum:      sdk.NewInt(3),
-			OpCUSysTransferNum:  sdk.NewInt(30),
-			GasLimit:            sdk.NewInt(1),
-			GasPrice:            sdk.NewInt(1000),
-			DepositThreshold:    sdk.NewIntWithDecimal(2, 3),
+		TokenInfo: &sdk.IBCToken{
+			BaseToken: sdk.BaseToken{
+				Symbol:      sdk.Symbol(symbol),
+				Issuer:      "",
+				Chain:       sdk.Symbol(chain),
+				SendEnabled: true,
+				Decimals:    8,
+				TotalSupply: sdk.NewIntWithDecimal(21, 15),
+			},
+			TokenType:          tokenType,
+			DepositEnabled:     true,
+			WithdrawalEnabled:  true,
+			CollectThreshold:   sdk.NewIntWithDecimal(2, 4),   // btc
+			OpenFee:            sdk.NewIntWithDecimal(28, 18), // nativeToken
+			SysOpenFee:         sdk.NewIntWithDecimal(28, 18), // nativeToken
+			WithdrawalFeeRate:  sdk.NewDecWithPrec(2, 0),      // gas * 10  btc
+			MaxOpCUNumber:      10,
+			SysTransferNum:     sdk.NewInt(3),
+			OpCUSysTransferNum: sdk.NewInt(30),
+			GasLimit:           sdk.NewInt(1),
+			GasPrice:           sdk.NewInt(1000),
+			DepositThreshold:   sdk.NewIntWithDecimal(2, 3),
 		},
 	}
 }
@@ -43,14 +45,6 @@ func changeProposal(symbol string, changes []types.ParamChange) types.TokenParam
 		Description: "description",
 		Symbol:      symbol,
 		Changes:     changes,
-	}
-}
-
-func disableProposal(symbol string) types.DisableTokenProposal {
-	return types.DisableTokenProposal{
-		Title:       "Test",
-		Description: "description",
-		Symbol:      symbol,
 	}
 }
 
@@ -67,8 +61,8 @@ func TestAddTokenProposalPassed(t *testing.T) {
 	require.Equal(t, 1, len(res.Events))
 	require.Equal(t, types.EventTypeExecuteAddTokenProposal, res.Events[0].Type)
 
-	tokenInfo := keeper.GetTokenInfo(ctx, "ebtc")
-	require.Equal(t, tp.TokenInfo, *tokenInfo)
+	tokenInfo := keeper.GetToken(ctx, parseSymbolFromProposalResp(res))
+	require.Equal(t, tp.TokenInfo, tokenInfo)
 }
 
 func TestAddTokenProposalFailed(t *testing.T) {
@@ -78,26 +72,29 @@ func TestAddTokenProposalFailed(t *testing.T) {
 	ctx.WithBlockHeight(10)
 
 	//symbol != chain, chain does not exist
-	tp := addProposal("ebtc", "eos", sdk.AccountBased)
+	tp := addProposal("obtc", "eos", sdk.AccountBased)
 	hdlr := NewTokenProposalHandler(keeper)
 	res := hdlr(ctx, tp)
+
 	require.Equal(t, sdk.CodeInvalidSymbol, res.Code)
 	require.Equal(t, 0, len(res.Events))
-	require.Contains(t, res.Log, "token ebtc's chain eos does not exist")
+	require.Contains(t, res.Log, "chain eos does not exist")
 
 	//duplicated adding
-	tp = addProposal("ebtc", "eth", sdk.AccountBased)
+	tp = addProposal("xbtc", "eth", sdk.AccountBased)
 	hdlr = NewTokenProposalHandler(keeper)
 	res = hdlr(ctx, tp)
 	require.Equal(t, sdk.CodeOK, res.Code)
 	require.Equal(t, 1, len(res.Events))
 	require.Equal(t, types.EventTypeExecuteAddTokenProposal, res.Events[0].Type)
-	tokenInfo := keeper.GetTokenInfo(ctx, "ebtc")
-	require.Equal(t, tp.TokenInfo, *tokenInfo)
+	sb := parseSymbolFromProposalResp(res)
+
+	tokenInfo := keeper.GetToken(ctx, sb)
+	require.Equal(t, tp.TokenInfo, tokenInfo)
 
 	ctx.WithBlockHeight(20)
 	res = hdlr(ctx, tp)
-	require.Equal(t, sdk.CodeInvalidSymbol, res.Code)
+	require.Equal(t, sdk.CodeSymbolAlreadyExist, res.Code)
 }
 
 func TestTokenParamsChangeProposalPassed(t *testing.T) {
@@ -106,21 +103,22 @@ func TestTokenParamsChangeProposalPassed(t *testing.T) {
 	keeper := input.tk
 	ctx.WithBlockHeight(10)
 
-	ap := addProposal("ebtc", "eth", sdk.AccountBased)
+	ap := addProposal("xbtc", "eth", sdk.AccountBased)
 	hdlr := NewTokenProposalHandler(keeper)
 	res := hdlr(ctx, ap)
 	require.Equal(t, sdk.CodeOK, res.Code)
 	require.Equal(t, 1, len(res.Events))
 	require.Equal(t, types.EventTypeExecuteAddTokenProposal, res.Events[0].Type)
+	sb := parseSymbolFromProposalResp(res)
 
-	tokenInfo := keeper.GetTokenInfo(ctx, "ebtc")
-	require.Equal(t, ap.TokenInfo, *tokenInfo)
+	tokenInfo := keeper.GetIBCToken(ctx, parseSymbolFromProposalResp(res))
+	require.Equal(t, ap.TokenInfo, tokenInfo)
 
 	ctx = ctx.WithEventManager(sdk.NewEventManager())
 	changes := []types.ParamChange{}
-	changes = append(changes, types.NewParamChange(sdk.KeyIsSendEnabled, "false"))
-	changes = append(changes, types.NewParamChange(sdk.KeyIsDepositEnabled, "false"))
-	changes = append(changes, types.NewParamChange(sdk.KeyIsWithdrawalEnabled, "false"))
+	changes = append(changes, types.NewParamChange(sdk.KeySendEnabled, "false"))
+	changes = append(changes, types.NewParamChange(sdk.KeyDepositEnabled, "false"))
+	changes = append(changes, types.NewParamChange(sdk.KeyWithdrawalEnabled, "false"))
 	changes = append(changes, types.NewParamChange(sdk.KeyCollectThreshold, `"21000000000000000"`))
 	changes = append(changes, types.NewParamChange(sdk.KeyDepositThreshold, `"11000000000000000"`))
 	changes = append(changes, types.NewParamChange(sdk.KeyOpenFee, `"300"`))
@@ -131,18 +129,18 @@ func TestTokenParamsChangeProposalPassed(t *testing.T) {
 	changes = append(changes, types.NewParamChange(sdk.KeyOpCUSysTransferNum, `"10"`))
 	changes = append(changes, types.NewParamChange(sdk.KeyGasLimit, `"90000"`))
 
-	cp := changeProposal("ebtc", changes)
+	cp := changeProposal(sb.String(), changes)
 	res = hdlr(ctx, cp)
 	require.Equal(t, sdk.CodeOK, res.Code)
 	require.Equal(t, 1, len(res.Events))
 	require.Equal(t, types.EventTypeExecuteTokenParamsChangeProposal, res.Events[0].Type)
 	require.Equal(t, len(changes)*2, len(res.Events[0].Attributes))
-	require.Equal(t, sdk.KeyIsSendEnabled, string(res.Events[0].Attributes[0].Value))
+	require.Equal(t, sdk.KeySendEnabled, string(res.Events[0].Attributes[0].Value))
 
-	tokenInfo = keeper.GetTokenInfo(ctx, "ebtc")
-	require.Equal(t, false, tokenInfo.IsSendEnabled)
-	require.Equal(t, false, tokenInfo.IsDepositEnabled)
-	require.Equal(t, false, tokenInfo.IsWithdrawalEnabled)
+	tokenInfo = keeper.GetIBCToken(ctx, sb)
+	require.Equal(t, false, tokenInfo.SendEnabled)
+	require.Equal(t, false, tokenInfo.DepositEnabled)
+	require.Equal(t, false, tokenInfo.WithdrawalEnabled)
 	require.Equal(t, sdk.NewInt(21000000000000000), tokenInfo.CollectThreshold)
 	require.Equal(t, sdk.NewInt(11000000000000000), tokenInfo.DepositThreshold)
 	require.Equal(t, sdk.NewInt(300), tokenInfo.OpenFee)
@@ -164,73 +162,37 @@ func TestTokenParamsChangeProposalFailed(t *testing.T) {
 	ap := addProposal("ebtc", "eth", sdk.AccountBased)
 	hdlr := NewTokenProposalHandler(keeper)
 	res := hdlr(ctx, ap)
+	sb := parseSymbolFromProposalResp(res)
+
 	require.Equal(t, sdk.CodeOK, res.Code)
 	require.Equal(t, 1, len(res.Events))
 	require.Equal(t, types.EventTypeExecuteAddTokenProposal, res.Events[0].Type)
-	tokenInfo := keeper.GetTokenInfo(ctx, "ebtc")
-	require.Equal(t, ap.TokenInfo, *tokenInfo)
+	tokenInfo := keeper.GetToken(ctx, sb)
+	require.Equal(t, ap.TokenInfo, tokenInfo)
 
 	ctx = ctx.WithEventManager(sdk.NewEventManager())
 	changes := []types.ParamChange{}
 	changes = append(changes, types.NewParamChange("collect", `"21000000000000000"`))
 
-	cp := changeProposal("ebtc", changes)
+	cp := changeProposal(sb.String(), changes)
 	res = hdlr(ctx, cp)
 	require.NotEqual(t, sdk.CodeOK, res.Code)
 	require.Equal(t, 0, len(res.Events))
 
 	//tokenInfo unchanged
-	tokenInfo = keeper.GetTokenInfo(ctx, "ebtc")
-	require.Equal(t, ap.TokenInfo, *tokenInfo)
+	tokenInfo = keeper.GetIBCToken(ctx, sb)
+	require.Equal(t, ap.TokenInfo, tokenInfo)
 }
 
-func TestDeleteTokenProposalPassed(t *testing.T) {
-	input := setupUnitTestEnv()
-	ctx := input.ctx
-	keeper := input.tk
-	ctx.WithBlockHeight(10)
-
-	ap := addProposal("ebtc", "eth", sdk.AccountBased)
-	hdlr := NewTokenProposalHandler(keeper)
-	res := hdlr(ctx, ap)
-	require.Equal(t, sdk.CodeOK, res.Code)
-	require.Equal(t, 1, len(res.Events))
-	require.Equal(t, types.EventTypeExecuteAddTokenProposal, res.Events[0].Type)
-	tokenInfo := keeper.GetTokenInfo(ctx, "ebtc")
-	require.Equal(t, ap.TokenInfo, *tokenInfo)
-
-	ctx = ctx.WithEventManager(sdk.NewEventManager())
-	dp := disableProposal("ebtc")
-	res = hdlr(ctx, dp)
-	require.Equal(t, sdk.CodeOK, res.Code)
-	require.Equal(t, 1, len(res.Events))
-	require.Equal(t, types.EventTypeExecuteDisableTokenProposal, res.Events[0].Type)
-	tokenInfo = keeper.GetTokenInfo(ctx, "ebtc")
-	require.NotNil(t, tokenInfo)
-	require.Equal(t, false, tokenInfo.IsWithdrawalEnabled)
-	require.Equal(t, false, tokenInfo.IsSendEnabled)
-	require.Equal(t, false, tokenInfo.IsDepositEnabled)
-}
-
-func TestDeleteTokenProposalFailed(t *testing.T) {
-	input := setupUnitTestEnv()
-	ctx := input.ctx
-	keeper := input.tk
-	ctx.WithBlockHeight(10)
-
-	ap := addProposal("ebtc", "eth", sdk.AccountBased)
-	hdlr := NewTokenProposalHandler(keeper)
-	res := hdlr(ctx, ap)
-	require.Equal(t, sdk.CodeOK, res.Code)
-	require.Equal(t, 1, len(res.Events))
-	require.Equal(t, types.EventTypeExecuteAddTokenProposal, res.Events[0].Type)
-	tokenInfo := keeper.GetTokenInfo(ctx, "ebtc")
-	require.Equal(t, ap.TokenInfo, *tokenInfo)
-
-	ctx = ctx.WithEventManager(sdk.NewEventManager())
-	dp := disableProposal("ebt")
-	res = hdlr(ctx, dp)
-	require.Equal(t, sdk.CodeInvalidSymbol, res.Code)
-	require.Equal(t, 0, len(res.Events))
-	require.Contains(t, res.Log, "does not exist")
+func parseSymbolFromProposalResp(res sdk.Result) sdk.Symbol {
+	for _, event := range res.Events {
+		if event.Type == types.EventTypeExecuteAddTokenProposal {
+			for _, attribute := range event.Attributes {
+				if string(attribute.Key) == types.AttributeKeyToken {
+					return sdk.Symbol(attribute.Value)
+				}
+			}
+		}
+	}
+	return sdk.Symbol("")
 }

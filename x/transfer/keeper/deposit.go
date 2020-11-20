@@ -20,17 +20,13 @@ func (keeper BaseKeeper) Deposit(ctx sdk.Context, fromCUAddr, toCUAddr sdk.CUAdd
 	if fromCU.GetCUType() == sdk.CUTypeOp {
 		return sdk.ErrInvalidTx(fmt.Sprintf("fromCU %v is opcu", fromCUAddr)).Result()
 	}
-	toCU := keeper.ck.GetCU(ctx, toCUAddr)
-	if toCU == nil {
-		return sdk.ErrInvalidAccount(toCUAddr.String()).Result()
-	}
 
-	if !keeper.tk.IsTokenSupported(ctx, symbol) {
+	tokenInfo := keeper.tk.GetIBCToken(ctx, symbol)
+	if tokenInfo == nil {
 		return sdk.ErrUnSupportToken(symbol.String()).Result()
 	}
-	tokenInfo := keeper.tk.GetTokenInfo(ctx, symbol)
 	chain := tokenInfo.Chain.String()
-	if !tokenInfo.IsDepositEnabled || !tokenInfo.IsSendEnabled || !keeper.GetSendEnabled(ctx) {
+	if !tokenInfo.DepositEnabled || !tokenInfo.SendEnabled || !keeper.IsSendEnabled(ctx) {
 		return sdk.ErrTransactionIsNotEnabled(fmt.Sprintf("%v's deposit is not enabled temporary", symbol)).Result()
 	}
 
@@ -47,14 +43,20 @@ func (keeper BaseKeeper) Deposit(ctx sdk.Context, fromCUAddr, toCUAddr sdk.CUAdd
 		return sdk.ErrInvalidAddress(fmt.Sprintf("%s is an invalid address", toAddr)).Result()
 	}
 
-	asset := toCU.GetAssetByAddr(symbol.String(), canonicalToAddr)
+	toCUAst := keeper.ik.GetCUIBCAsset(ctx, toCUAddr)
+	if toCUAst == nil {
+		toCUAst = keeper.ik.NewCUIBCAssetWithAddress(ctx, sdk.CUTypeUser, toCUAddr)
+		keeper.ik.SetCUIBCAsset(ctx, toCUAst)
+	}
+
+	asset := toCUAst.GetAssetByAddr(symbol.String(), canonicalToAddr)
 	if asset == sdk.NilAsset {
-		asset = toCU.GetAssetByAddr(chain, canonicalToAddr)
+		asset = toCUAst.GetAssetByAddr(chain, canonicalToAddr)
 		if symbol.String() != chain && asset != sdk.NilAsset {
-			_ = toCU.SetAssetAddress(symbol.String(), canonicalToAddr, asset.Epoch)
-			keeper.ck.SetCU(ctx, toCU)
+			_ = toCUAst.SetAssetAddress(symbol.String(), canonicalToAddr, asset.Epoch)
+			keeper.ik.SetCUIBCAsset(ctx, toCUAst)
 		} else {
-			return sdk.ErrInvalidTx(fmt.Sprintf("Deposit addr %s does not belong to CU %s", canonicalToAddr, toCU.GetAddress().String())).Result()
+			return sdk.ErrInvalidTx(fmt.Sprintf("Deposit addr %s does not belong to CU %s", canonicalToAddr, toCUAst.GetAddress().String())).Result()
 		}
 	}
 
@@ -62,8 +64,8 @@ func (keeper BaseKeeper) Deposit(ctx sdk.Context, fromCUAddr, toCUAddr sdk.CUAdd
 		return sdk.ErrInvalidOrder(fmt.Sprintf("order %v already exists", orderID)).Result()
 	}
 
-	if keeper.ck.IsDepositExist(ctx, symbol.String(), toCUAddr, hash, index) {
-		return sdk.ErrInvalidTx(fmt.Sprintf("deposit %v %v %v %v item already exist", symbol, toCU, hash, index)).Result()
+	if keeper.ik.IsDepositExist(ctx, symbol.String(), toCUAddr, hash, index) {
+		return sdk.ErrInvalidTx(fmt.Sprintf("deposit %v %v %v %v item already exist", symbol, toCUAddr, hash, index)).Result()
 	}
 
 	//ProcessOrder should be optimized.
@@ -85,7 +87,7 @@ func (keeper BaseKeeper) Deposit(ctx sdk.Context, fromCUAddr, toCUAddr sdk.CUAdd
 	var flows []sdk.Flow
 	flows = append(flows, keeper.rk.NewOrderFlow(symbol, toCUAddr, orderID, sdk.OrderTypeDeposit, sdk.OrderStatusBegin))
 	var depositType = sdk.DepositTypeCU
-	if toCU.GetCUType() == sdk.CUTypeOp {
+	if toCUAst.GetCUType() == sdk.CUTypeOp {
 		depositType = sdk.DepositTypeOPCU
 	}
 	flows = append(flows, keeper.rk.NewDepositFlow(toCUAddr.String(), canonicalToAddr, symbol.String(), hash, orderID, memo, index, amt, depositType, asset.Epoch))
@@ -156,12 +158,12 @@ func (keeper BaseKeeper) confirmDepositOrder(ctx sdk.Context, order *sdk.OrderCo
 		return flows, nil
 	}
 
-	toCU := keeper.ck.GetCU(ctx, order.CollectFromCU)
+	toCUAst := keeper.ik.GetCUIBCAsset(ctx, order.CollectFromCU)
 	collectAmt := order.Amount
 
 	depositItemStatus := sdk.DepositItemStatusUnCollected
 	haveWaitCollectItem := false
-	dlt := keeper.ck.GetDepositList(ctx, order.Symbol, order.CollectFromCU)
+	dlt := keeper.ik.GetDepositList(ctx, order.Symbol, order.CollectFromCU)
 	for _, item := range dlt {
 		if item.GetStatus() == sdk.DepositItemStatusWaitCollect {
 			haveWaitCollectItem = true
@@ -169,15 +171,15 @@ func (keeper BaseKeeper) confirmDepositOrder(ctx sdk.Context, order *sdk.OrderCo
 		}
 	}
 
-	if toCU.GetCUType() == sdk.CUTypeOp {
+	if toCUAst.GetCUType() == sdk.CUTypeOp {
 		//update order status
 		order.SetOrderStatus(sdk.OrderStatusFinish)
 		depositItemStatus = sdk.DepositItemStatusConfirmed
 	} else {
-		tokenInfo := keeper.tk.GetTokenInfo(ctx, sdk.Symbol(order.Symbol))
+		tokenInfo := keeper.tk.GetIBCToken(ctx, sdk.Symbol(order.Symbol))
 		gasFee := tokenInfo.GasPrice.Mul(tokenInfo.GasLimit)
 
-		if toCU.GetGasRemained(tokenInfo.Chain.String(), order.CollectFromAddress).GTE(gasFee) {
+		if toCUAst.GetGasRemained(tokenInfo.Chain.String(), order.CollectFromAddress).GTE(gasFee) {
 			//if enough gas for collect, set deposit status to wait collect
 			depositItemStatus = sdk.DepositItemStatusWaitCollect
 		} else {
@@ -193,10 +195,15 @@ func (keeper BaseKeeper) confirmDepositOrder(ctx sdk.Context, order *sdk.OrderCo
 				if haveWaitCollectItem {
 					depositItemStatus = sdk.DepositItemStatusWaitCollect
 				} else {
-					if toCU.GetCoins().AmountOf(tokenInfo.Chain.String()).GTE(tokenInfo.CollectFee().Amount) {
+					collectFee := tokenInfo.CollectFee()
+					if keeper.GetBalance(ctx, toCUAst.GetAddress(), tokenInfo.Chain.String()).GTE(collectFee.Amount) {
 						depositItemStatus = sdk.DepositItemStatusWaitCollect
-						toCU.SubCoins(sdk.NewCoins(tokenInfo.CollectFee()))
-						order.CostFee = tokenInfo.CollectFee().Amount
+						_, flow, err := keeper.SubCoin(ctx, toCUAst.GetAddress(), collectFee)
+						if err != nil {
+							return nil, err
+						}
+						flows = append(flows, flow)
+						order.CostFee = collectFee.Amount
 					}
 				}
 			}
@@ -207,25 +214,20 @@ func (keeper BaseKeeper) confirmDepositOrder(ctx sdk.Context, order *sdk.OrderCo
 
 	//Add to deposit item
 	depositItem, _ := sdk.NewDepositItem(order.Txhash, order.Index, order.Amount, order.CollectFromAddress, order.Memo, depositItemStatus)
-	err := keeper.ck.SaveDeposit(ctx, order.Symbol, order.CollectFromCU, depositItem)
+	err := keeper.ik.SaveDeposit(ctx, order.Symbol, order.CollectFromCU, depositItem)
 	if err != nil {
 		return nil, err
 	}
 
-	coins := sdk.NewCoins(sdk.NewCoin(order.Symbol, collectAmt))
 	if depositItemStatus == sdk.DepositItemStatusWaitCollect {
-		toCU.AddCoins(coins)
+		_, flow, err := keeper.AddCoin(ctx, toCUAst.GetAddress(), sdk.NewCoin(order.Symbol, collectAmt))
+		if err != nil {
+			return nil, err
+		}
+		flows = append(flows, flow)
 	}
 
-	toCU.AddAssetCoins(sdk.NewCoins(sdk.NewCoin(order.Symbol, order.Amount)))
-
-	keeper.ck.SetCU(ctx, toCU)
-
-	//save balanceFlows
-	for _, balanceFlow := range toCU.GetBalanceFlows() {
-		flows = append(flows, balanceFlow)
-	}
-
-	toCU.ResetBalanceFlows()
+	toCUAst.AddAssetCoins(sdk.NewCoins(sdk.NewCoin(order.Symbol, order.Amount)))
+	keeper.ik.SetCUIBCAsset(ctx, toCUAst)
 	return flows, nil
 }

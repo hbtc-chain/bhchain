@@ -16,6 +16,7 @@ func InitGenesis(ctx sdk.Context, keeper Keeper, supplyKeeper types.SupplyKeeper
 	keeper.SetBaseProposerReward(ctx, data.BaseProposerReward)
 	keeper.SetBonusProposerReward(ctx, data.BonusProposerReward)
 	keeper.SetWithdrawAddrEnabled(ctx, data.WithdrawAddrEnabled)
+	keeper.SetKeyNodeReward(ctx, data.KeyNodeReward)
 
 	for _, dwi := range data.DelegatorWithdrawInfos {
 		keeper.SetDelegatorWithdrawAddr(ctx, dwi.DelegatorAddress, dwi.WithdrawAddress)
@@ -50,8 +51,9 @@ func InitGenesis(ctx sdk.Context, keeper Keeper, supplyKeeper types.SupplyKeeper
 		panic(fmt.Sprintf("%s module CU has not been set", types.ModuleName))
 	}
 
-	if moduleAcc.GetCoins().IsZero() {
-		if err := moduleAcc.SetCoins(moduleHoldingsInt); err != nil {
+	tk := keeper.GetTransferKeeper()
+	if tk.GetAllBalance(ctx, moduleAcc.GetAddress()).IsZero() {
+		if _, _, err := tk.AddCoins(ctx, moduleAcc.GetAddress(), moduleHoldingsInt); err != nil {
 			panic(err)
 		}
 		supplyKeeper.SetModuleAccount(ctx, moduleAcc)
@@ -65,6 +67,8 @@ func ExportGenesis(ctx sdk.Context, keeper Keeper) types.GenesisState {
 	baseProposerRewards := keeper.GetBaseProposerReward(ctx)
 	bonusProposerRewards := keeper.GetBonusProposerReward(ctx)
 	withdrawAddrEnabled := keeper.GetWithdrawAddrEnabled(ctx)
+	keyNodeReward := keeper.GetKeyNodeReward(ctx)
+
 	dwi := make([]types.DelegatorWithdrawInfo, 0)
 	keeper.IterateDelegatorWithdrawAddrs(ctx, func(del sdk.CUAddress, addr sdk.CUAddress) (stop bool) {
 		dwi = append(dwi, types.DelegatorWithdrawInfo{
@@ -139,5 +143,5 @@ func ExportGenesis(ctx sdk.Context, keeper Keeper) types.GenesisState {
 		},
 	)
 	return types.NewGenesisState(feePool, communityTax, baseProposerRewards, bonusProposerRewards, withdrawAddrEnabled,
-		dwi, pp, outstanding, acc, his, cur, dels, slashes)
+		dwi, pp, outstanding, acc, his, cur, dels, slashes, keyNodeReward)
 }

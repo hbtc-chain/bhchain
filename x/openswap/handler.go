@@ -2,6 +2,7 @@ package openswap
 
 import (
 	"fmt"
+	"strconv"
 
 	sdk "github.com/hbtc-chain/bhchain/types"
 	"github.com/hbtc-chain/bhchain/x/openswap/types"
@@ -12,6 +13,14 @@ func NewHandler(k Keeper) sdk.Handler {
 		ctx = ctx.WithEventManager(sdk.NewEventManager())
 
 		switch msg := msg.(type) {
+		case types.MsgCreateDex:
+			return handleMsgCreateDex(ctx, k, msg)
+		case types.MsgEditDex:
+			return handleMsgEditDex(ctx, k, msg)
+		case types.MsgCreateTradingPair:
+			return handleMsgCreateTradingPair(ctx, k, msg)
+		case types.MsgEditTradingPair:
+			return handleMsgEditTradingPair(ctx, k, msg)
 		case types.MsgAddLiquidity:
 			return handleMsgAddLiquidity(ctx, k, msg)
 		case types.MsgRemoveLiquidity:
@@ -33,6 +42,150 @@ func NewHandler(k Keeper) sdk.Handler {
 	}
 }
 
+func handleMsgCreateDex(ctx sdk.Context, k Keeper, msg types.MsgCreateDex) sdk.Result {
+	dex := &types.Dex{
+		Name:           msg.Name,
+		Owner:          msg.From,
+		IncomeReceiver: msg.IncomeReceiver,
+	}
+	dex = k.SaveDex(ctx, dex)
+	ctx.EventManager().EmitEvents(sdk.Events{
+		sdk.NewEvent(types.EventTypeCreateDex,
+			sdk.NewAttribute(types.AttributeKeyDexID, strconv.Itoa(int(dex.ID)))),
+	})
+
+	result := sdk.Result{}
+	result.Events = append(result.Events, ctx.EventManager().Events()...)
+	return result
+}
+
+func handleMsgEditDex(ctx sdk.Context, k Keeper, msg types.MsgEditDex) sdk.Result {
+	dex := k.GetDex(ctx, msg.DexID)
+	if dex == nil {
+		return sdk.ErrInvalidTx(fmt.Sprintf("dex id %d not found", msg.DexID)).Result()
+	}
+	if !dex.Owner.Equals(msg.From) {
+		return sdk.ErrInvalidTx(fmt.Sprintf("dex %d belongs to %s, not %s", msg.DexID, dex.Owner.String(), msg.From.String())).Result()
+	}
+	if msg.Name != "" {
+		dex.Name = msg.Name
+	}
+	if msg.IncomeReceiver != nil {
+		dex.IncomeReceiver = *msg.IncomeReceiver
+	}
+
+	k.SaveDex(ctx, dex)
+	ctx.EventManager().EmitEvents(sdk.Events{
+		sdk.NewEvent(types.EventTypeEditDex,
+			sdk.NewAttribute(types.AttributeKeyDexID, strconv.Itoa(int(dex.ID)))),
+	})
+
+	result := sdk.Result{}
+	result.Events = append(result.Events, ctx.EventManager().Events()...)
+	return result
+}
+
+func handleMsgCreateTradingPair(ctx sdk.Context, k Keeper, msg types.MsgCreateTradingPair) sdk.Result {
+	dex := k.GetDex(ctx, msg.DexID)
+	if dex == nil {
+		return sdk.ErrInvalidTx(fmt.Sprintf("dex id %d not found", msg.DexID)).Result()
+	}
+	if !dex.Owner.Equals(msg.From) {
+		return sdk.ErrInvalidTx(fmt.Sprintf("dex %d belongs to %s, not %s", msg.DexID, dex.Owner.String(), msg.From.String())).Result()
+	}
+	tokenA, tokenB := k.SortToken(msg.TokenA, msg.TokenB)
+	if k.GetTradingPair(ctx, msg.DexID, tokenA, tokenB) != nil {
+		return sdk.ErrInvalidTx(fmt.Sprintf("%s-%s trading pair already exists in dex %d",
+			tokenA, tokenB, msg.DexID)).Result()
+	}
+	if result := k.CheckSymbol(ctx, tokenA); !result.IsOK() {
+		return result
+	}
+	if result := k.CheckSymbol(ctx, tokenB); !result.IsOK() {
+		return result
+	}
+
+	if msg.IsPublic && msg.RefererRewardRate.LT(k.RefererTransactionBonusRate(ctx)) {
+		return sdk.ErrInvalidTx(fmt.Sprintf("public pair's referer reward rate must be larger than %s",
+			k.RefererTransactionBonusRate(ctx))).Result()
+	}
+
+	lpRewardRate := msg.LPRewardRate
+	if msg.IsPublic {
+		lpRewardRate = k.LpRewardRate(ctx)
+	}
+	if lpRewardRate.Add(msg.RefererRewardRate).Add(k.RepurchaseRate(ctx)).GT(k.MaxFeeRate(ctx)) {
+		return sdk.ErrInvalidTx("sum of lp reward rate and referer reward rate is too large").Result()
+	}
+	pair := types.NewCustomTradingPair(msg.DexID, tokenA, tokenB, msg.IsPublic, msg.LPRewardRate, msg.RefererRewardRate)
+	k.SaveTradingPair(ctx, pair)
+	ctx.EventManager().EmitEvents(sdk.Events{
+		sdk.NewEvent(types.EventTypeCreateTradingPair,
+			sdk.NewAttribute(types.AttributeKeyDexID, strconv.Itoa(int(dex.ID))),
+			sdk.NewAttribute(types.AttributeKeyTokenA, tokenA.String()),
+			sdk.NewAttribute(types.AttributeKeyTokenB, tokenB.String()),
+		),
+	})
+
+	result := sdk.Result{}
+	result.Events = append(result.Events, ctx.EventManager().Events()...)
+	return result
+}
+
+func handleMsgEditTradingPair(ctx sdk.Context, k Keeper, msg types.MsgEditTradingPair) sdk.Result {
+	dex := k.GetDex(ctx, msg.DexID)
+	if dex == nil {
+		return sdk.ErrInvalidTx(fmt.Sprintf("dex id %d not found", msg.DexID)).Result()
+	}
+	if !dex.Owner.Equals(msg.From) {
+		return sdk.ErrInvalidTx(fmt.Sprintf("dex %d belongs to %s, not %s", msg.DexID, dex.Owner.String(), msg.From.String())).Result()
+	}
+	tokenA, tokenB := k.SortToken(msg.TokenA, msg.TokenB)
+	pair := k.GetTradingPair(ctx, msg.DexID, tokenA, tokenB)
+	if pair == nil {
+		return sdk.ErrInvalidTx(fmt.Sprintf("%s-%s trading pair does not exist in dex %d",
+			tokenA, tokenB, msg.DexID)).Result()
+	}
+
+	if msg.IsPublic != nil {
+		if !pair.IsPublic && pair.TotalLiquidity.IsPositive() {
+			return sdk.ErrInvalidTx("cannot set pair public after adding liquidity").Result()
+		}
+		pair.IsPublic = *msg.IsPublic
+	}
+	if msg.LPRewardRate != nil {
+		pair.LPRewardRate = *msg.LPRewardRate
+	}
+	if msg.RefererRewardRate != nil {
+		pair.RefererRewardRate = *msg.RefererRewardRate
+	}
+	if pair.IsPublic && pair.RefererRewardRate.LT(k.RefererTransactionBonusRate(ctx)) {
+		return sdk.ErrInvalidTx(fmt.Sprintf("public pair's referer reward rate must be larger than %s",
+			k.RefererTransactionBonusRate(ctx))).Result()
+	}
+	lpRewardRate := pair.LPRewardRate
+	if pair.IsPublic {
+		lpRewardRate = k.LpRewardRate(ctx)
+	}
+	if lpRewardRate.Add(pair.RefererRewardRate).Add(k.RepurchaseRate(ctx)).GT(k.MaxFeeRate(ctx)) {
+		return sdk.ErrInvalidTx("sum of lp reward rate and referer reward rate is too large").Result()
+	}
+
+	k.SaveTradingPair(ctx, pair)
+
+	ctx.EventManager().EmitEvents(sdk.Events{
+		sdk.NewEvent(types.EventTypeEditTradingPair,
+			sdk.NewAttribute(types.AttributeKeyDexID, strconv.Itoa(int(dex.ID))),
+			sdk.NewAttribute(types.AttributeKeyTokenA, tokenA.String()),
+			sdk.NewAttribute(types.AttributeKeyTokenB, tokenB.String()),
+		),
+	})
+
+	result := sdk.Result{}
+	result.Events = append(result.Events, ctx.EventManager().Events()...)
+	return result
+}
+
 func handleMsgAddLiquidity(ctx sdk.Context, k Keeper, msg types.MsgAddLiquidity) sdk.Result {
 	if result := k.CheckSymbol(ctx, msg.TokenA); !result.IsOK() {
 		return result
@@ -43,7 +196,7 @@ func handleMsgAddLiquidity(ctx sdk.Context, k Keeper, msg types.MsgAddLiquidity)
 	if msg.ExpiredAt > 0 && ctx.BlockTime().Unix() >= msg.ExpiredAt {
 		return sdk.ErrInvalidTx("expired tx").Result()
 	}
-	return k.AddLiquidity(ctx, msg.From, msg.TokenA, msg.TokenB, msg.MinTokenAAmount, msg.MinTokenBAmount)
+	return k.AddLiquidity(ctx, msg.From, msg.DexID, msg.TokenA, msg.TokenB, msg.MaxTokenAAmount, msg.MaxTokenBAmount)
 }
 
 func handleMsgRemoveLiquidity(ctx sdk.Context, k Keeper, msg types.MsgRemoveLiquidity) sdk.Result {
@@ -56,7 +209,7 @@ func handleMsgRemoveLiquidity(ctx sdk.Context, k Keeper, msg types.MsgRemoveLiqu
 	if msg.ExpiredAt > 0 && ctx.BlockTime().Unix() >= msg.ExpiredAt {
 		return sdk.ErrInvalidTx("expired tx").Result()
 	}
-	return k.RemoveLiquidity(ctx, msg.From, msg.TokenA, msg.TokenB, msg.Liquidity)
+	return k.RemoveLiquidity(ctx, msg.From, msg.DexID, msg.TokenA, msg.TokenB, msg.Liquidity)
 }
 
 func handleMsgSwapExactIn(ctx sdk.Context, k Keeper, msg types.MsgSwapExactIn) sdk.Result {
@@ -68,12 +221,22 @@ func handleMsgSwapExactIn(ctx sdk.Context, k Keeper, msg types.MsgSwapExactIn) s
 	if msg.ExpiredAt > 0 && ctx.BlockTime().Unix() >= msg.ExpiredAt {
 		return sdk.ErrInvalidTx("expired tx").Result()
 	}
-	referer := k.GetReferer(ctx, msg.From)
-	if referer == nil {
-		referer = msg.Referer
-		k.BindReferer(ctx, msg.From, referer)
+
+	var referer sdk.CUAddress
+	if msg.DexID != 0 {
+		dex := k.GetDex(ctx, msg.DexID)
+		if dex == nil {
+			return sdk.ErrInvalidTx(fmt.Sprintf("dex id %d not found", msg.DexID)).Result()
+		}
+		referer = dex.IncomeReceiver
+	} else {
+		referer = k.GetReferer(ctx, msg.From)
+		if referer == nil {
+			referer = msg.Referer
+			k.BindReferer(ctx, msg.From, referer)
+		}
 	}
-	return k.SwapExactIn(ctx, msg.From, referer, msg.Receiver, msg.AmountIn, msg.MinAmountOut, msg.SwapPath)
+	return k.SwapExactIn(ctx, msg.DexID, msg.From, referer, msg.Receiver, msg.AmountIn, msg.MinAmountOut, msg.SwapPath)
 }
 
 func handleMsgSwapExactOut(ctx sdk.Context, k Keeper, msg types.MsgSwapExactOut) sdk.Result {
@@ -85,12 +248,22 @@ func handleMsgSwapExactOut(ctx sdk.Context, k Keeper, msg types.MsgSwapExactOut)
 	if msg.ExpiredAt > 0 && ctx.BlockTime().Unix() >= msg.ExpiredAt {
 		return sdk.ErrInvalidTx("expired tx").Result()
 	}
-	referer := k.GetReferer(ctx, msg.From)
-	if referer == nil {
-		referer = msg.Referer
-		k.BindReferer(ctx, msg.From, referer)
+
+	var referer sdk.CUAddress
+	if msg.DexID != 0 {
+		dex := k.GetDex(ctx, msg.DexID)
+		if dex == nil {
+			return sdk.ErrInvalidTx(fmt.Sprintf("dex id %d not found", msg.DexID)).Result()
+		}
+		referer = dex.IncomeReceiver
+	} else {
+		referer = k.GetReferer(ctx, msg.From)
+		if referer == nil {
+			referer = msg.Referer
+			k.BindReferer(ctx, msg.From, referer)
+		}
 	}
-	return k.SwapExactOut(ctx, msg.From, referer, msg.Receiver, msg.AmountOut, msg.MaxAmountIn, msg.SwapPath)
+	return k.SwapExactOut(ctx, msg.DexID, msg.From, referer, msg.Receiver, msg.AmountOut, msg.MaxAmountIn, msg.SwapPath)
 }
 
 func handleMsgLimitSwap(ctx sdk.Context, k Keeper, msg types.MsgLimitSwap) sdk.Result {
@@ -107,12 +280,22 @@ func handleMsgLimitSwap(ctx sdk.Context, k Keeper, msg types.MsgLimitSwap) sdk.R
 	if order != nil {
 		return sdk.ErrInvalidTx(fmt.Sprintf("order %s already exists", msg.OrderID)).Result()
 	}
-	referer := k.GetReferer(ctx, msg.From)
-	if referer == nil {
-		referer = msg.Referer
-		k.BindReferer(ctx, msg.From, referer)
+
+	var referer sdk.CUAddress
+	if msg.DexID != 0 {
+		dex := k.GetDex(ctx, msg.DexID)
+		if dex == nil {
+			return sdk.ErrInvalidTx(fmt.Sprintf("dex id %d not found", msg.DexID)).Result()
+		}
+		referer = dex.IncomeReceiver
+	} else {
+		referer = k.GetReferer(ctx, msg.From)
+		if referer == nil {
+			referer = msg.Referer
+			k.BindReferer(ctx, msg.From, referer)
+		}
 	}
-	return k.LimitSwap(ctx, msg.OrderID, msg.From, referer, msg.Receiver, msg.AmountIn, msg.Price,
+	return k.LimitSwap(ctx, msg.DexID, msg.OrderID, msg.From, referer, msg.Receiver, msg.AmountIn, msg.Price,
 		msg.BaseSymbol, msg.QuoteSymbol, msg.Side, msg.ExpiredAt)
 }
 
@@ -121,5 +304,5 @@ func handleMsgCancelLimitSwap(ctx sdk.Context, k Keeper, msg types.MsgCancelLimi
 }
 
 func handleMsgClaimEarning(ctx sdk.Context, k Keeper, msg types.MsgClaimEarning) sdk.Result {
-	return k.ClaimEarning(ctx, msg.From, msg.TokenA, msg.TokenB)
+	return k.ClaimEarning(ctx, msg.From, msg.DexID, msg.TokenA, msg.TokenB)
 }

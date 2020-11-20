@@ -6,7 +6,8 @@ import (
 
 	"github.com/hbtc-chain/bhchain/chainnode"
 	"github.com/hbtc-chain/bhchain/x/evidence"
-	"github.com/hbtc-chain/bhchain/x/hrc20"
+
+	"github.com/hbtc-chain/bhchain/x/hrc10"
 	"github.com/hbtc-chain/bhchain/x/mapping"
 	"github.com/hbtc-chain/bhchain/x/receipt"
 	"github.com/hbtc-chain/bhchain/x/token"
@@ -27,6 +28,7 @@ import (
 	"github.com/hbtc-chain/bhchain/x/genaccounts"
 	"github.com/hbtc-chain/bhchain/x/genutil"
 	"github.com/hbtc-chain/bhchain/x/gov"
+	"github.com/hbtc-chain/bhchain/x/ibcasset"
 	"github.com/hbtc-chain/bhchain/x/keygen"
 	mappingclient "github.com/hbtc-chain/bhchain/x/mapping/client"
 	"github.com/hbtc-chain/bhchain/x/mint"
@@ -37,6 +39,7 @@ import (
 	paramsclient "github.com/hbtc-chain/bhchain/x/params/client"
 	"github.com/hbtc-chain/bhchain/x/slashing"
 	"github.com/hbtc-chain/bhchain/x/staking"
+	stakingclient "github.com/hbtc-chain/bhchain/x/staking/client"
 	"github.com/hbtc-chain/bhchain/x/supply"
 	"github.com/hbtc-chain/bhchain/x/transfer"
 	"github.com/hbtc-chain/bhchain/x/upgrade"
@@ -59,14 +62,16 @@ var (
 		genaccounts.AppModuleBasic{},
 		genutil.AppModuleBasic{},
 		custodianunit.AppModuleBasic{},
+		ibcasset.AppModuleBasic{},
 		transfer.AppModuleBasic{},
 		staking.AppModuleBasic{},
 		mint.AppModuleBasic{},
 		distr.AppModuleBasic{},
 		gov.NewAppModuleBasic(paramsclient.ProposalHandler, distr.ProposalHandler,
 			token.AddTokenProposalHandler, token.TokenParamsChangeProposalHandler,
-			token.DisableTokenProposalHandler, upgradeclient.PostProposalHandler,
-			upgradeclient.CancelProposalHandler, mappingclient.AddMappingProposalHandler, mappingclient.SwitchMappingProposalHandler),
+			upgradeclient.PostProposalHandler, upgradeclient.CancelProposalHandler,
+			mappingclient.AddMappingProposalHandler, mappingclient.SwitchMappingProposalHandler,
+			stakingclient.UpdateKeyNodesProposalHandler),
 		params.AppModuleBasic{},
 		crisis.AppModuleBasic{},
 		slashing.AppModuleBasic{},
@@ -75,7 +80,7 @@ var (
 		receipt.AppModuleBasic{},
 		order.AppModuleBasic{},
 		keygen.AppModuleBasic{},
-		hrc20.AppModuleBasic{},
+		hrc10.AppModuleBasic{},
 		mapping.AppModuleBasic{},
 		evidence.AppModuleBasic{},
 		openswap.AppModuleBasic{},
@@ -90,7 +95,7 @@ var (
 		staking.BondedPoolName:         {supply.Burner, supply.Staking},
 		staking.NotBondedPoolName:      {supply.Burner, supply.Staking},
 		gov.ModuleName:                 {supply.Burner},
-		hrc20.ModuleName:               {supply.Minter, supply.Burner},
+		hrc10.ModuleName:               {supply.Minter, supply.Burner},
 		openswap.ModuleName:            {supply.Minter, supply.Burner},
 	}
 )
@@ -117,7 +122,8 @@ type bhexapp struct {
 
 	// keepers
 	cuKeeper       custodianunit.CUKeeper
-	transferKeeper transfer.Keeper
+	transferKeeper *transfer.BaseKeeper
+	ibcassetKeeper ibcasset.Keeper
 	supplyKeeper   *supply.Keeper
 	stakingKeeper  staking.Keeper
 	slashingKeeper slashing.Keeper
@@ -130,7 +136,7 @@ type bhexapp struct {
 	receiptKeeper  receipt.Keeper
 	orderKeeper    order.Keeper
 	keygenKeeper   keygen.Keeper
-	hrc20Keeper    hrc20.Keeper
+	hrc10Keeper    hrc10.Keeper
 	openswapKeeper openswap.Keeper
 	mappingKeeper  mapping.Keeper
 	evidenceKeeper evidence.Keeper
@@ -152,10 +158,10 @@ func Newbhexapp(
 	bApp.SetCommitMultiStoreTracer(traceStore)
 	bApp.SetAppVersion(version.Version)
 
-	keys := sdk.NewKVStoreKeys(bam.MainStoreKey, custodianunit.StoreKey, staking.StoreKey,
+	keys := sdk.NewKVStoreKeys(bam.MainStoreKey, custodianunit.StoreKey, staking.StoreKey, ibcasset.StoreKey,
 		supply.StoreKey, mint.StoreKey, distr.StoreKey, slashing.StoreKey, transfer.StoreKey,
 		gov.StoreKey, params.StoreKey, token.StoreKey, receipt.StoreKey, otypes.StoreKey, keygen.StoreKey,
-		hrc20.StoreKey, openswap.StoreKey, mapping.StoreKey, evidence.StoreKey, upgrade.StoreKey)
+		hrc10.StoreKey, openswap.StoreKey, mapping.StoreKey, evidence.StoreKey, upgrade.StoreKey)
 	tkeys := sdk.NewTransientStoreKeys(staking.TStoreKey, params.TStoreKey)
 
 	app := &bhexapp{
@@ -176,53 +182,43 @@ func Newbhexapp(
 	slashingSubspace := app.paramsKeeper.Subspace(slashing.DefaultParamspace)
 	govSubspace := app.paramsKeeper.Subspace(gov.DefaultParamspace)
 	crisisSubspace := app.paramsKeeper.Subspace(crisis.DefaultParamspace)
-	tokenSubspace := app.paramsKeeper.Subspace(token.DefaultParamspace)
 	//receiptSubspace := app.paramsKeeper.Subspace(receipt.DefaultParamspace)
 	orderSubspace := app.paramsKeeper.Subspace(otypes.DefaultParamspace)
 	//keygenSubspace := app.paramsKeeper.Subspace(keygen.DefaultParamspace)
-	hrc20Subspace := app.paramsKeeper.Subspace(hrc20.DefaultParamspace)
+	hrc10Subspace := app.paramsKeeper.Subspace(hrc10.DefaultParamspace)
 	mappingSubspace := app.paramsKeeper.Subspace(mapping.DefaultParamspace)
 	openswapSubspace := app.paramsKeeper.Subspace(openswap.DefaultParamspace)
 	evidenceSubspace := app.paramsKeeper.Subspace(evidence.DefaultParamspace)
 
 	// add keepers
-	app.tokenKeeper = token.NewKeeper(keys[token.StoreKey], app.cdc, tokenSubspace)
+	app.tokenKeeper = token.NewKeeper(keys[token.StoreKey], app.cdc)
 	app.receiptKeeper = *receipt.NewKeeper(app.cdc)
 	app.orderKeeper = order.NewKeeper(app.cdc, keys[otypes.StoreKey], orderSubspace)
-	app.cuKeeper = custodianunit.NewCUKeeper(app.cdc, keys[custodianunit.StoreKey], &app.tokenKeeper, authSubspace, custodianunit.ProtoBaseCU)
+	app.cuKeeper = custodianunit.NewCUKeeper(app.cdc, keys[custodianunit.StoreKey], authSubspace, custodianunit.ProtoBaseCU)
 	app.supplyKeeper = supply.NewKeeper(app.cdc, keys[supply.StoreKey], app.cuKeeper, nil, maccPerms)
 	stakingKeeper := staking.NewKeeper(app.cdc, keys[staking.StoreKey], tkeys[staking.TStoreKey],
 		app.supplyKeeper, stakingSubspace, staking.DefaultCodespace)
+	app.ibcassetKeeper = ibcasset.NewKeeper(app.cdc, keys[ibcasset.StoreKey], app.cuKeeper, &app.tokenKeeper, ibcasset.ProtoBaseCUIBCAsset)
+	app.transferKeeper = transfer.NewBaseKeeper(app.cdc, keys[transfer.StoreKey], app.cuKeeper, app.ibcassetKeeper, &app.tokenKeeper, &app.orderKeeper, &app.receiptKeeper, &stakingKeeper, cn, transferSubspace, transfer.DefaultCodespace, app.ModuleAccountAddrs())
+	stakingKeeper.SetTransferKeeper(app.transferKeeper)
 	app.mintKeeper = mint.NewKeeper(app.cdc, keys[mint.StoreKey], mintSubspace, &stakingKeeper, app.supplyKeeper, custodianunit.FeeCollectorName)
 	app.distrKeeper = distr.NewKeeper(app.cdc, keys[distr.StoreKey], distrSubspace, &stakingKeeper,
-		app.supplyKeeper, distr.DefaultCodespace, custodianunit.FeeCollectorName, app.ModuleAccountAddrs())
+		app.supplyKeeper, app.transferKeeper, distr.DefaultCodespace, custodianunit.FeeCollectorName, app.ModuleAccountAddrs())
 	app.slashingKeeper = slashing.NewKeeper(app.cdc, keys[slashing.StoreKey], &stakingKeeper,
 		slashingSubspace, slashing.DefaultCodespace)
 	app.crisisKeeper = crisis.NewKeeper(crisisSubspace, invCheckPeriod, app.supplyKeeper, custodianunit.FeeCollectorName)
-	app.keygenKeeper = keygen.NewKeeper(keys[keygen.StoreKey], app.cdc, &app.tokenKeeper, app.cuKeeper, &app.orderKeeper, &app.receiptKeeper, &stakingKeeper, app.distrKeeper, cn)
-	app.transferKeeper = transfer.NewBaseKeeper(app.cdc, keys[transfer.StoreKey], app.cuKeeper, &app.tokenKeeper, &app.orderKeeper, &app.receiptKeeper, &stakingKeeper, cn, transferSubspace, transfer.DefaultCodespace, app.ModuleAccountAddrs())
+	app.keygenKeeper = keygen.NewKeeper(keys[keygen.StoreKey], app.cdc, &app.tokenKeeper, app.cuKeeper, app.ibcassetKeeper, &app.orderKeeper, &app.receiptKeeper, &stakingKeeper, app.distrKeeper, app.transferKeeper, cn)
 	app.tokenKeeper.SetStakingKeeper(&stakingKeeper)
 
-	app.hrc20Keeper = hrc20.NewKeeper(app.cdc, keys[hrc20.StoreKey], hrc20Subspace, &app.tokenKeeper, app.cuKeeper, app.distrKeeper, app.supplyKeeper, &app.receiptKeeper)
-	app.mappingKeeper = mapping.NewKeeper(keys[mapping.StoreKey], app.cdc, &app.tokenKeeper, app.cuKeeper, &app.receiptKeeper, mappingSubspace)
+	app.hrc10Keeper = hrc10.NewKeeper(app.cdc, keys[hrc10.StoreKey], hrc10Subspace, &app.tokenKeeper,  app.distrKeeper, app.supplyKeeper, &app.receiptKeeper, app.transferKeeper)
+	app.mappingKeeper = mapping.NewKeeper(keys[mapping.StoreKey], app.cdc, &app.tokenKeeper, app.cuKeeper, &app.receiptKeeper, app.transferKeeper, mappingSubspace)
 	app.evidenceKeeper = evidence.NewKeeper(app.cdc, keys[evidence.StoreKey], evidenceSubspace, &stakingKeeper)
 
 	app.transferKeeper.SetEvidenceKeeper(app.evidenceKeeper)
 	app.tokenKeeper.SetEvidenceKeeper(app.evidenceKeeper)
 
 	app.upgradeKeeper = upgrade.NewKeeper(skipUpgradeHeights, keys[upgrade.StoreKey], app.cdc, home)
-	app.openswapKeeper = openswap.NewKeeper(app.cdc, keys[openswap.StoreKey], &app.tokenKeeper, app.cuKeeper, &app.receiptKeeper, app.supplyKeeper, app.transferKeeper, openswapSubspace)
-	// register the proposal types
-	govRouter := gov.NewRouter()
-	govRouter.AddRoute(gov.RouterKey, gov.ProposalHandler).
-		AddRoute(params.RouterKey, params.NewParamChangeProposalHandler(app.paramsKeeper)).
-		AddRoute(distr.RouterKey, distr.NewCommunityPoolSpendProposalHandler(app.distrKeeper)).
-		AddRoute(token.RouterKey, token.NewTokenProposalHandler(app.tokenKeeper)).
-		AddRoute(upgrade.RouterKey, upgrade.NewSoftwareUpgradeProposalHandler(app.upgradeKeeper)).
-		AddRoute(mapping.RouterKey, mapping.NewMappingProposalHandler(app.mappingKeeper))
-	app.govKeeper = gov.NewKeeper(app.cdc, keys[gov.StoreKey], app.paramsKeeper, govSubspace,
-		app.supplyKeeper, &stakingKeeper, app.distrKeeper, gov.DefaultCodespace, govRouter)
-
+	app.openswapKeeper = openswap.NewKeeper(app.cdc, keys[openswap.StoreKey], &app.tokenKeeper, &app.receiptKeeper, app.supplyKeeper, app.transferKeeper, openswapSubspace)
 	app.cuKeeper.SetStakingKeeper(stakingKeeper)
 
 	// register the staking hooks
@@ -232,16 +228,28 @@ func Newbhexapp(
 			app.distrKeeper.Hooks(),
 			app.slashingKeeper.Hooks(),
 			app.keygenKeeper.Hooks(),
-			app.cuKeeper.Hooks(),
+			app.ibcassetKeeper.Hooks(),
 		),
 	)
+
+	// register the proposal types
+	govRouter := gov.NewRouter()
+	govRouter.AddRoute(gov.RouterKey, gov.ProposalHandler).
+		AddRoute(params.RouterKey, params.NewParamChangeProposalHandler(app.paramsKeeper)).
+		AddRoute(distr.RouterKey, distr.NewCommunityPoolSpendProposalHandler(app.distrKeeper)).
+		AddRoute(token.RouterKey, token.NewTokenProposalHandler(app.tokenKeeper)).
+		AddRoute(upgrade.RouterKey, upgrade.NewSoftwareUpgradeProposalHandler(app.upgradeKeeper)).
+		AddRoute(mapping.RouterKey, mapping.NewMappingProposalHandler(app.mappingKeeper)).
+		AddRoute(staking.RouterKey, staking.NewStakingProposalHandler(app.stakingKeeper))
+	app.govKeeper = gov.NewKeeper(app.cdc, keys[gov.StoreKey], app.paramsKeeper, govSubspace,
+		app.supplyKeeper, &stakingKeeper, app.distrKeeper, app.transferKeeper, gov.DefaultCodespace, govRouter)
 
 	app.supplyKeeper.SetTransferKeeper(app.transferKeeper)
 
 	// NOTE: Any module instantiated in the module manager that is later modified
 	// must be passed by reference here.
 	app.mm = module.NewManager(
-		genaccounts.NewAppModule(app.cuKeeper),
+		genaccounts.NewAppModule(app.cuKeeper, app.transferKeeper),
 		genutil.NewAppModule(app.cuKeeper, app.stakingKeeper, app.BaseApp.DeliverTx),
 		custodianunit.NewAppModule(app.cuKeeper),
 		crisis.NewAppModule(&app.crisisKeeper),
@@ -256,7 +264,8 @@ func Newbhexapp(
 		order.NewAppModule(app.orderKeeper),
 		keygen.NewAppModule(app.keygenKeeper, &app.tokenKeeper, app.cuKeeper, &app.orderKeeper, &app.receiptKeeper, cn),
 		transfer.NewAppModule(app.transferKeeper, app.cuKeeper, &app.tokenKeeper, &app.orderKeeper, &app.receiptKeeper, cn),
-		hrc20.NewAppModule(app.hrc20Keeper),
+		ibcasset.NewAppModule(app.ibcassetKeeper, app.cuKeeper),
+		hrc10.NewAppModule(app.hrc10Keeper),
 		openswap.NewAppModule(app.openswapKeeper),
 		mapping.NewAppModule(app.mappingKeeper),
 		evidence.NewAppModule(app.evidenceKeeper),
@@ -273,8 +282,8 @@ func Newbhexapp(
 	// properly initialized with tokens from genesis accounts.
 	app.mm.SetOrderInitGenesis(
 		genaccounts.ModuleName, otypes.ModuleName, receipt.ModuleName, token.ModuleName, keygen.ModuleName, distr.ModuleName, staking.ModuleName,
-		custodianunit.ModuleName, transfer.ModuleName, slashing.ModuleName, gov.ModuleName,
-		mint.ModuleName, supply.ModuleName, crisis.ModuleName, genutil.ModuleName, hrc20.ModuleName, mapping.ModuleName, openswap.ModuleName,
+		custodianunit.ModuleName, transfer.ModuleName, slashing.ModuleName, gov.ModuleName, ibcasset.ModuleName,
+		mint.ModuleName, supply.ModuleName, crisis.ModuleName, genutil.ModuleName, hrc10.ModuleName, mapping.ModuleName, openswap.ModuleName,
 		evidence.ModuleName)
 
 	app.mm.RegisterInvariants(&app.crisisKeeper)
@@ -288,6 +297,7 @@ func Newbhexapp(
 	app.SetInitChainer(app.InitChainer)
 	app.SetBeginBlocker(app.BeginBlocker)
 	app.SetAnteHandler(custodianunit.NewAnteHandler(app.cuKeeper, app.supplyKeeper, app.stakingKeeper, custodianunit.DefaultSigVerificationGasConsumer))
+	app.SetGasRefundHandler(custodianunit.NewGasRefundHandler(app.supplyKeeper))
 	app.SetEndBlocker(app.EndBlocker)
 
 	if loadLatest {

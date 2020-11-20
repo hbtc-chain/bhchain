@@ -2,18 +2,11 @@ package types
 
 import (
 	sdk "github.com/hbtc-chain/bhchain/types"
-	"github.com/hbtc-chain/bhchain/x/custodianunit/exported"
 	supplyI "github.com/hbtc-chain/bhchain/x/supply/exported"
 )
 
 type TokenKeeper interface {
-	GetTokenInfo(ctx sdk.Context, symbol sdk.Symbol) *sdk.TokenInfo
-}
-
-type CUKeeper interface {
-	GetCU(ctx sdk.Context, addr sdk.CUAddress) exported.CustodianUnit
-	GetOrNewCU(context sdk.Context, cuType sdk.CUType, addresses sdk.CUAddress) exported.CustodianUnit
-	SetCU(ctx sdk.Context, acc exported.CustodianUnit)
+	GetToken(ctx sdk.Context, symbol sdk.Symbol) sdk.Token
 }
 
 type ReceiptKeeper interface {
@@ -31,5 +24,12 @@ type SupplyKeeper interface {
 }
 
 type TransferKeeper interface {
+	GetAllBalance(ctx sdk.Context, addr sdk.CUAddress) sdk.Coins
 	AddCoins(ctx sdk.Context, addr sdk.CUAddress, amt sdk.Coins) (sdk.Coins, []sdk.Flow, sdk.Error)
+	AddCoin(ctx sdk.Context, addr sdk.CUAddress, amt sdk.Coin) (sdk.Coin, sdk.Flow, sdk.Error)
+	SubCoins(ctx sdk.Context, addr sdk.CUAddress, amt sdk.Coins) (sdk.Coins, []sdk.Flow, sdk.Error)
+	SubCoin(ctx sdk.Context, addr sdk.CUAddress, amt sdk.Coin) (sdk.Coin, sdk.Flow, sdk.Error)
+	SubCoinHold(ctx sdk.Context, addr sdk.CUAddress, amt sdk.Coin) (sdk.Coin, sdk.Flow, sdk.Error)
+	LockCoin(ctx sdk.Context, addr sdk.CUAddress, amt sdk.Coin) ([]sdk.Flow, sdk.Error)
+	UnlockCoin(ctx sdk.Context, addr sdk.CUAddress, amt sdk.Coin) ([]sdk.Flow, sdk.Error)
 }

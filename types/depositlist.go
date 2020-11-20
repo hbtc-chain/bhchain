@@ -242,7 +242,7 @@ func findDupDeposit(dls DepositList) int {
 }
 
 // ----------------------------------------------------------------------
-type OpCUInfo struct {
+type OpCUAstInfo struct {
 	Symbol                    string          `json:"symbol"`
 	CuAddress                 string          `json:"cu_address"`
 	Locked                    bool            `json:"locked"`
@@ -257,7 +257,7 @@ type OpCUInfo struct {
 }
 
 // String implements fmt.Stringer
-func (oc *OpCUInfo) String() string {
+func (oc *OpCUAstInfo) String() string {
 	return fmt.Sprintf(`Account:
   Address:   %s
   ExtAddress: %s
@@ -267,9 +267,9 @@ func (oc *OpCUInfo) String() string {
 		oc.CuAddress, oc.MultisignAddress, oc.Locked, oc.GasReceived, oc.GasUsed)
 }
 
-type OpCUsInfo []OpCUInfo
+type OpCUsAstInfo []OpCUAstInfo
 
-func (cs OpCUsInfo) String() string {
+func (cs OpCUsAstInfo) String() string {
 	bsb := strings.Builder{}
 	for _, c := range cs {
 		bsb.WriteString(c.String())

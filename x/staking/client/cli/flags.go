@@ -27,11 +27,15 @@ const (
 
 	FlagMinSelfDelegation = "min-self-delegation"
 
-	FlagIsKeyNode = "key-node"
-
 	FlagGenesisFormat = "genesis-format"
 	FlagNodeID        = "node-id"
 	FlagIP            = "ip"
+
+	FlagEpochIndex  = "index"
+	FlagEpochHeight = "block"
+
+	FlagRemoveKeyNodes = "remove"
+	FlagAddKeyNodes    = "add"
 )
 
 // common flagsets to add to various functions
@@ -63,7 +67,6 @@ func init() {
 	FsCommissionCreate.String(FlagCommissionMaxRate, "", "The maximum commission rate percentage")
 	FsCommissionCreate.String(FlagCommissionMaxChangeRate, "", "The maximum commission change rate percentage (per day)")
 	FsMinSelfDelegation.String(FlagMinSelfDelegation, "", "The minimum self delegation required on the validator")
-	IsKeyNode.String(FlagIsKeyNode, "", "Whether to be keynode")
 	fsDescriptionEdit.String(FlagMoniker, types.DoNotModifyDesc, "The validator's name")
 	fsDescriptionEdit.String(FlagIdentity, types.DoNotModifyDesc, "The (optional) identity signature (ex. UPort or Keybase)")
 	fsDescriptionEdit.String(FlagWebsite, types.DoNotModifyDesc, "The validator's (optional) website")

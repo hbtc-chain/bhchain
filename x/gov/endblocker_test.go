@@ -1,6 +1,7 @@
 package gov
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
@@ -155,8 +156,17 @@ func TestTickPassedDepositPeriod(t *testing.T) {
 
 	res := govHandler(ctx, newProposalMsg)
 	require.True(t, res.IsOK())
-	var proposalID uint64
-	input.keeper.cdc.MustUnmarshalBinaryLengthPrefixed(res.Data, &proposalID)
+	var proposalID int64
+
+	for _, event := range res.Events {
+		if event.Type == "submit_proposal" {
+			for _, attribute := range event.Attributes {
+				if string(attribute.Key) == "proposal_id" {
+					proposalID, _ = strconv.ParseInt(string(attribute.Value), 10, 64)
+				}
+			}
+		}
+	}
 
 	inactiveQueue = input.keeper.InactiveProposalQueueIterator(ctx, ctx.BlockHeader().Time)
 	require.False(t, inactiveQueue.Valid())
@@ -170,7 +180,7 @@ func TestTickPassedDepositPeriod(t *testing.T) {
 	require.False(t, inactiveQueue.Valid())
 	inactiveQueue.Close()
 
-	newDepositMsg := NewMsgDeposit(input.addrs[1], proposalID, sdk.Coins{sdk.NewInt64Coin(sdk.DefaultBondDenom, 5)})
+	newDepositMsg := NewMsgDeposit(input.addrs[1], uint64(proposalID), sdk.Coins{sdk.NewInt64Coin(sdk.DefaultBondDenom, 5)})
 	res = govHandler(ctx, newDepositMsg)
 	require.True(t, res.IsOK())
 
@@ -201,14 +211,23 @@ func TestTickPassedVotingPeriod(t *testing.T) {
 
 	res := govHandler(ctx, newProposalMsg)
 	require.True(t, res.IsOK())
-	var proposalID uint64
-	input.keeper.cdc.MustUnmarshalBinaryLengthPrefixed(res.Data, &proposalID)
+	var proposalID int64
+
+	for _, event := range res.Events {
+		if event.Type == "submit_proposal" {
+			for _, attribute := range event.Attributes {
+				if string(attribute.Key) == "proposal_id" {
+					proposalID, _ = strconv.ParseInt(string(attribute.Value), 10, 64)
+				}
+			}
+		}
+	}
 
 	newHeader := ctx.BlockHeader()
 	newHeader.Time = ctx.BlockHeader().Time.Add(time.Duration(1) * time.Second)
 	ctx = ctx.WithBlockHeader(newHeader)
 
-	newDepositMsg := NewMsgDeposit(input.addrs[1], proposalID, proposalCoins)
+	newDepositMsg := NewMsgDeposit(input.addrs[1], uint64(proposalID), proposalCoins)
 	res = govHandler(ctx, newDepositMsg)
 	require.True(t, res.IsOK())
 
@@ -229,7 +248,7 @@ func TestTickPassedVotingPeriod(t *testing.T) {
 	proposal, ok := input.keeper.GetProposal(ctx, activeProposalID)
 	require.True(t, ok)
 	require.Equal(t, StatusVotingPeriod, proposal.Status)
-	depositsIterator := input.keeper.GetDepositsIterator(ctx, proposalID)
+	depositsIterator := input.keeper.GetDepositsIterator(ctx, uint64(proposalID))
 	require.True(t, depositsIterator.Valid())
 	depositsIterator.Close()
 	activeQueue.Close()
@@ -259,7 +278,7 @@ func TestProposalPassedEndblocker(t *testing.T) {
 
 	macc := input.keeper.GetGovernanceAccount(ctx)
 	require.NotNil(t, macc)
-	initialModuleAccCoins := macc.GetCoins()
+	initialModuleAccCoins := input.tk.GetAllBalance(ctx, macc.GetAddress())
 
 	proposal, err := input.keeper.SubmitProposal(ctx, testProposal(), 0)
 	require.NoError(t, err)
@@ -271,7 +290,7 @@ func TestProposalPassedEndblocker(t *testing.T) {
 
 	macc = input.keeper.GetGovernanceAccount(ctx)
 	require.NotNil(t, macc)
-	moduleAccCoins := macc.GetCoins()
+	moduleAccCoins := input.tk.GetAllBalance(ctx, macc.GetAddress())
 
 	deposits := initialModuleAccCoins.Add(proposal.TotalDeposit).Add(proposalCoins)
 	require.True(t, moduleAccCoins.IsEqual(deposits))
@@ -287,7 +306,7 @@ func TestProposalPassedEndblocker(t *testing.T) {
 
 	macc = input.keeper.GetGovernanceAccount(ctx)
 	require.NotNil(t, macc)
-	require.True(t, macc.GetCoins().IsEqual(initialModuleAccCoins))
+	require.True(t, input.tk.GetAllBalance(ctx, macc.GetAddress()).IsEqual(initialModuleAccCoins))
 }
 
 func TestEndBlockerProposalHandlerFailed(t *testing.T) {
@@ -360,7 +379,17 @@ func TestTickExpiriedDepositPeriodWithMultiDeposits(t *testing.T) {
 	res := govHandler(ctx, newProposalMsg)
 	require.True(t, res.IsOK())
 	var proposalID uint64
-	input.keeper.cdc.MustUnmarshalBinaryLengthPrefixed(res.Data, &proposalID)
+
+	for _, event := range res.Events {
+		if event.Type == "submit_proposal" {
+			for _, attribute := range event.Attributes {
+				if string(attribute.Key) == "proposal_id" {
+					id, _ := strconv.ParseInt(string(attribute.Value), 10, 64)
+					proposalID = uint64(id)
+				}
+			}
+		}
+	}
 
 	inactiveQueue = input.keeper.InactiveProposalQueueIterator(ctx, ctx.BlockHeader().Time)
 	require.False(t, inactiveQueue.Valid())
@@ -449,7 +478,7 @@ func TestTickExpiredVotingPeriod(t *testing.T) {
 
 	macc := input.keeper.GetGovernanceAccount(ctx)
 	require.NotNil(t, macc)
-	initialModuleAccCoins := macc.GetCoins()
+	initialModuleAccCoins := input.tk.GetAllBalance(ctx, macc.GetAddress())
 	require.Equal(t, sdk.Coins(nil), initialModuleAccCoins)
 
 	inactiveQueue := input.keeper.InactiveProposalQueueIterator(ctx, ctx.BlockHeader().Time)
@@ -465,7 +494,17 @@ func TestTickExpiredVotingPeriod(t *testing.T) {
 	res := govHandler(ctx, newProposalMsg)
 	require.True(t, res.IsOK())
 	var proposalID uint64
-	input.keeper.cdc.MustUnmarshalBinaryLengthPrefixed(res.Data, &proposalID)
+
+	for _, event := range res.Events {
+		if event.Type == "submit_proposal" {
+			for _, attribute := range event.Attributes {
+				if string(attribute.Key) == "proposal_id" {
+					id, _ := strconv.ParseInt(string(attribute.Value), 10, 64)
+					proposalID = uint64(id)
+				}
+			}
+		}
+	}
 
 	newHeader := ctx.BlockHeader()
 	newHeader.Time = ctx.BlockHeader().Time.Add(time.Duration(1) * time.Second)

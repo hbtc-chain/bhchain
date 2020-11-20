@@ -33,15 +33,6 @@ func NewHandler(keeper Keeper) sdk.Handler {
 func handleMsgMappingSwap(ctx sdk.Context, keeper Keeper, msg types.MsgMappingSwap) sdk.Result {
 	ctx.Logger().Info("handleMsgMappingSwap", "msg", msg)
 
-	fromCUAddr, err := sdk.CUAddressFromBase58(msg.From)
-	if err != nil {
-		return sdk.ErrInvalidAddr(fmt.Sprintf("invalid from CU:%v", msg.From)).Result()
-	}
-	fromCU := keeper.ck.GetCU(ctx, fromCUAddr)
-	if fromCU == nil {
-		return sdk.ErrInvalidAccount("from CU does not exist").Result()
-	}
-
 	mappingInfo := keeper.GetMappingInfo(ctx, msg.IssueSymbol)
 	if mappingInfo == nil {
 		return types.ErrMappingNotFound(DefaultCodespace, "mapping for issuer symbol is not found").Result()
@@ -50,48 +41,34 @@ func handleMsgMappingSwap(ctx sdk.Context, keeper Keeper, msg types.MsgMappingSw
 		return types.ErrInvalidSwapAmount(DefaultCodespace, "swap is disabled").Result()
 	}
 
-	if !keeper.tk.IsTokenSupported(ctx, mappingInfo.IssueSymbol) {
-		return sdk.ErrUnSupportToken(mappingInfo.IssueSymbol.String()).Result()
-	}
-	issueTokenInfo := keeper.tk.GetTokenInfo(ctx, mappingInfo.IssueSymbol)
+	issueTokenInfo := keeper.tk.GetToken(ctx, mappingInfo.IssueSymbol)
 	if issueTokenInfo == nil {
 		return sdk.ErrInvalidSymbol("issuer symbol does not exist").Result()
 	}
-	if !issueTokenInfo.IsSendEnabled {
+	if !issueTokenInfo.IsSendEnabled() {
 		return sdk.ErrInvalidSymbol("issuer symbol does not allow send").Result()
 	}
-	if !keeper.tk.IsTokenSupported(ctx, mappingInfo.TargetSymbol) {
-		return sdk.ErrUnSupportToken(mappingInfo.TargetSymbol.String()).Result()
-	}
-	targetTokenInfo := keeper.tk.GetTokenInfo(ctx, mappingInfo.TargetSymbol)
+	targetTokenInfo := keeper.tk.GetToken(ctx, mappingInfo.TargetSymbol)
 	if targetTokenInfo == nil {
 		return sdk.ErrInvalidSymbol("target symbol does not exist").Result()
 	}
-	if !targetTokenInfo.IsSendEnabled {
+	if !targetTokenInfo.IsSendEnabled() {
 		return sdk.ErrInvalidSymbol("target symbol does not allow send").Result()
 	}
 
 	issueChangeAmount := sdk.NewInt(0)
-	newCoins := sdk.NewCoins()
-	needCoins := sdk.NewCoins()
-	have := fromCU.GetCoins()
-	if msg.Coins.AmountOf(issueTokenInfo.Symbol.String()).IsPositive() {
+	var gotCoin, costCoin sdk.Coin
+	if msg.Coins.AmountOf(mappingInfo.IssueSymbol.String()).IsPositive() {
 		// swap from issue symbol
-		needAmount := msg.Coins.AmountOf(issueTokenInfo.Symbol.String())
-		if have.AmountOf(issueTokenInfo.Symbol.String()).LT(needAmount) {
-			return sdk.ErrInsufficientCoins("from CU does not have sufficient coins").Result()
-		}
-		newCoins = sdk.NewCoins(sdk.NewCoin(targetTokenInfo.Symbol.String(), needAmount))
-		needCoins = sdk.NewCoins(sdk.NewCoin(issueTokenInfo.Symbol.String(), needAmount))
+		needAmount := msg.Coins.AmountOf(mappingInfo.IssueSymbol.String())
+		gotCoin = sdk.NewCoin(mappingInfo.TargetSymbol.String(), needAmount)
+		costCoin = sdk.NewCoin(mappingInfo.IssueSymbol.String(), needAmount)
 		issueChangeAmount = needAmount.Neg()
-	} else if msg.Coins.AmountOf(targetTokenInfo.Symbol.String()).IsPositive() {
+	} else if msg.Coins.AmountOf(mappingInfo.TargetSymbol.String()).IsPositive() {
 		// swap from target symbol
-		issueChangeAmount = msg.Coins.AmountOf(targetTokenInfo.Symbol.String())
-		if have.AmountOf(targetTokenInfo.Symbol.String()).LT(issueChangeAmount) {
-			return sdk.ErrInsufficientCoins("from CU does not have sufficient coins").Result()
-		}
-		newCoins = sdk.NewCoins(sdk.NewCoin(issueTokenInfo.Symbol.String(), issueChangeAmount))
-		needCoins = sdk.NewCoins(sdk.NewCoin(targetTokenInfo.Symbol.String(), issueChangeAmount))
+		issueChangeAmount = msg.Coins.AmountOf(mappingInfo.TargetSymbol.String())
+		gotCoin = sdk.NewCoin(mappingInfo.IssueSymbol.String(), issueChangeAmount)
+		costCoin = sdk.NewCoin(mappingInfo.TargetSymbol.String(), issueChangeAmount)
 	} else {
 		return sdk.ErrInvalidCoins("coins do not match mapping").Result()
 	}
@@ -101,25 +78,26 @@ func handleMsgMappingSwap(ctx sdk.Context, keeper Keeper, msg types.MsgMappingSw
 	if !mappingInfo.IssuePool.IsPositive() || mappingInfo.IssuePool.GT(mappingInfo.TotalSupply) {
 		return types.ErrInvalidSwapAmount(DefaultCodespace, "invalid swap amount").Result()
 	}
-
-	fromCU.ResetBalanceFlows()
-	fromCU.SubCoins(needCoins)
-	fromCU.AddCoins(newCoins)
-
 	keeper.SetMappingInfo(ctx, mappingInfo)
-	keeper.ck.SetCU(ctx, fromCU)
 
 	var flows []sdk.Flow
-	for _, balanceFlow := range fromCU.GetBalanceFlows() {
-		flows = append(flows, balanceFlow)
+	_, flow, err := keeper.trk.SubCoin(ctx, msg.From, costCoin)
+	if err != nil {
+		return err.Result()
 	}
+	flows = append(flows, flow)
+
+	_, flow, err = keeper.trk.AddCoin(ctx, msg.From, gotCoin)
+	if err != nil {
+		return err.Result()
+	}
+	flows = append(flows, flow)
+
 	flows = append(flows, MappingBalanceFlow{
 		mappingInfo.IssueSymbol,
 		oldIssuePool,
 		issueChangeAmount.Neg(),
 	})
-
-	fromCU.ResetBalanceFlows()
 
 	receipt := keeper.rk.NewReceipt(sdk.CategoryTypeMapping, flows)
 	res := sdk.Result{}

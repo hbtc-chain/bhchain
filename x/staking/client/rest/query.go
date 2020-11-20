@@ -3,6 +3,7 @@ package rest
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gorilla/mux"
@@ -96,6 +97,11 @@ func registerQueryRoutes(cliCtx context.CLIContext, r *mux.Router) {
 	r.HandleFunc(
 		"/staking/parameters",
 		paramsHandlerFn(cliCtx),
+	).Methods("GET")
+
+	r.HandleFunc(
+		"/staking/epoch",
+		epochHandlerFn(cliCtx),
 	).Methods("GET")
 
 }
@@ -341,6 +347,33 @@ func paramsHandlerFn(cliCtx context.CLIContext) http.HandlerFunc {
 		}
 
 		res, height, err := cliCtx.QueryWithData("custom/staking/parameters", nil)
+		if err != nil {
+			rest.WriteErrorResponse(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		cliCtx = cliCtx.WithHeight(height)
+		rest.PostProcessResponse(w, cliCtx, res)
+	}
+}
+
+func epochHandlerFn(cliCtx context.CLIContext) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		cliCtx, ok := rest.ParseQueryHeightOrReturnBadRequest(w, cliCtx, r)
+		if !ok {
+			return
+		}
+		index, _ := strconv.ParseUint(r.FormValue("index"), 10, 64)
+		blockHeight, _ := strconv.ParseUint(r.FormValue("block"), 10, 64)
+
+		params := types.NewQueryEpochParams(index, blockHeight)
+		bz, err := cliCtx.Codec.MarshalJSON(params)
+		if err != nil {
+			rest.WriteErrorResponse(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		res, height, err := cliCtx.QueryWithData(fmt.Sprintf("custom/%s/%s", types.QuerierRoute, types.QueryEpoch), bz)
 		if err != nil {
 			rest.WriteErrorResponse(w, http.StatusInternalServerError, err.Error())
 			return

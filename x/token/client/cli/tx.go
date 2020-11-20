@@ -21,7 +21,7 @@ func GetCmdAddTokenProposal(cdc *codec.Codec) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add-token [proposal-file]",
 		Args:  cobra.ExactArgs(1),
-		Short: "Submit an add token proposal",
+		Short: "Submit an add ibc-token proposal",
 		Long: strings.TrimSpace(
 			fmt.Sprintf(`Submit a new token along with an initial deposit.
 The proposal details must be supplied via a JSON file.
@@ -34,14 +34,15 @@ Where proposal.json contains:
 {
   "title": "add token",
   "description": "add a new token in",
+  "votetime": "86400",
   "token_info":{
-  	"symbol": "usdt",
+  	"name": "usdt",
   	"issuer": "0xC9476A4919a7E5c7e1760b68F945971769D5c1D8",
   	"chain": "eth",
   	"type": "2",
-  	"is_send_enabled": true,
-  	"is_deposit_enabled": true,
-  	"is_withdrawal_enabled": true,
+  	"send_enabled": true,
+  	"deposit_enabled": true,
+  	"withdrawal_enabled": true,
   	"decimals": "6",
   	"total_supply": "30000000000000000",
   	"collect_threshold": "200000000",
@@ -109,17 +110,19 @@ Where proposal.json contains:
 {
   "title": "Token Param Change",
   "description": "token param change proposal",
+  "symbol": "eth",
+  "votetime": "86400",
   "changes": [
     {
-      "key": "is_send_enabled",
+      "key": "send_enabled",
       "value": true
     },
     {
-      "key": "is_deposit_enabled",
+      "key": "deposit_enabled",
       "value": false
     },
     {
-      "key": "is_withdrawal_enabled",
+      "key": "withdrawal_enabled",
       "value": false
     },
     {
@@ -181,59 +184,6 @@ Where proposal.json contains:
 			changes := proposal.Changes.ToParamChanges()
 			from := cliCtx.GetFromAddress()
 			content := types.NewTokenParamsChangeProposal(proposal.Title, proposal.Description, proposal.Symbol, changes)
-
-			msg := govtype.NewMsgSubmitProposal(content, proposal.Deposit, from, proposal.VoteTime)
-			if err := msg.ValidateBasic(); err != nil {
-				return err
-			}
-
-			return utils.GenerateOrBroadcastMsgs(cliCtx, txBldr, []sdk.Msg{msg})
-		},
-	}
-
-	return cmd
-}
-
-// GetCmdDisableTokenProposal implements the command to submit a DisableToken proposal
-func GetCmdDisableTokenProposal(cdc *codec.Codec) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "disable-token [proposal-file]",
-		Args:  cobra.ExactArgs(1),
-		Short: "Submit a disable token proposal",
-		Long: strings.TrimSpace(
-			fmt.Sprintf(`Submit a disable token proposal along with an initial deposit.
-The proposal details must be supplied via a JSON file.
-
-Example:
-$ %s tx gov submit-proposal disable-token <path/to/proposal.json> --from=<key_or_address>
-
-Where proposal.json contains:
-
-{
-  "title": "Disable Token",
-  "description": "disable token proposal",
-  "symbol": "testtoken",
-  "deposit": [
-    {
-      "denom": "hbc",
-      "amount": "100000"
-    }
-  ]
-}
-`, version.ClientName,
-			),
-		),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			txBldr := custodianunit.NewTxBuilderFromCLI().WithTxEncoder(utils.GetTxEncoder(cdc))
-			cliCtx := context.NewCLIContext().WithCodec(cdc)
-
-			proposal, err := ParseDisableTokenProposalJSON(cdc, args[0])
-			if err != nil {
-				return err
-			}
-
-			from := cliCtx.GetFromAddress()
-			content := types.NewDisableTokenProposal(proposal.Title, proposal.Description, proposal.Symbol)
 
 			msg := govtype.NewMsgSubmitProposal(content, proposal.Deposit, from, proposal.VoteTime)
 			if err := msg.ValidateBasic(); err != nil {

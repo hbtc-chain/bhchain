@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"bytes"
 	"fmt"
 
 	sdk "github.com/hbtc-chain/bhchain/types"
@@ -8,22 +9,22 @@ import (
 )
 
 func (keeper BaseKeeper) SysTransfer(ctx sdk.Context, fromCUAddr, toCUAddr sdk.CUAddress, toAddr, orderID, symbol string) sdk.Result {
-	if sdk.IsIllegalOrderID(orderID) {
-		return sdk.ErrInvalidTx(fmt.Sprintf("systransfer orderid:%v invalid", orderID)).Result()
+	if keeper.ok.IsExist(ctx, orderID) {
+		return sdk.ErrInvalidTx(fmt.Sprintf("order %v already exists", orderID)).Result()
 	}
 
-	fromCU := keeper.ck.GetCU(ctx, fromCUAddr)
-	if fromCU == nil {
+	fromCUAst := keeper.ik.GetCUIBCAsset(ctx, fromCUAddr)
+	if fromCUAst == nil {
 		return sdk.ErrInvalidAccount(fromCUAddr.String()).Result()
 	}
-	if fromCU.GetCUType() != sdk.CUTypeOp {
-		return sdk.ErrInvalidTx(fmt.Sprintf("systransfer from a non OP CU :%v", fromCUAddr)).Result()
+	if fromCUAst.GetCUType() != sdk.CUTypeOp {
+		return sdk.ErrInvalidTx(fmt.Sprintf("systransfer from a non OP CU :%v", fromCUAddr.String())).Result()
 	}
-	if fromCU.GetMigrationStatus() != sdk.MigrationFinish {
-		return sdk.ErrInvalidTx(fmt.Sprintf("systransfer from a migrating OP CU :%v", fromCUAddr)).Result()
+	if fromCUAst.GetMigrationStatus() != sdk.MigrationFinish {
+		return sdk.ErrInvalidTx(fmt.Sprintf("systransfer from a migrating OP CU :%v", fromCUAddr.String())).Result()
 	}
 
-	tokenInfo := keeper.tk.GetTokenInfo(ctx, sdk.Symbol(symbol))
+	tokenInfo := keeper.tk.GetIBCToken(ctx, sdk.Symbol(symbol))
 	if tokenInfo == nil {
 		return sdk.ErrUnSupportToken(symbol).Result()
 	}
@@ -32,35 +33,58 @@ func (keeper BaseKeeper) SysTransfer(ctx sdk.Context, fromCUAddr, toCUAddr sdk.C
 		return sdk.ErrInvalidTx(fmt.Sprintf("Not support systansfer chain's mainnet token")).Result()
 	}
 
-	toCU := keeper.ck.GetCU(ctx, toCUAddr)
-	if toCU == nil {
+	toCUAst := keeper.ik.GetCUIBCAsset(ctx, toCUAddr)
+	if toCUAst == nil {
 		return sdk.ErrInvalidAccount(toCUAddr.String()).Result()
 	}
 	valid, canonicalToAddr := keeper.cn.ValidAddress(chain, symbol, toAddr)
 	if !valid {
 		return sdk.ErrInvalidAddr(fmt.Sprintf("%v is not a valid address", toAddr)).Result()
 	}
-	toCUAsset := toCU.GetAssetByAddr(symbol, canonicalToAddr)
+	toCUAsset := toCUAst.GetAssetByAddr(symbol, canonicalToAddr)
 	if toCUAsset == sdk.NilAsset {
-		return sdk.ErrInvalidTx(fmt.Sprintf("%v does not belong to cu %v", toAddr, toCU.GetAddress().String())).Result()
+		return sdk.ErrInvalidTx(fmt.Sprintf("%v does not belong to cu %v", toAddr, toCUAst.GetAddress().String())).Result()
 	}
-	if toCU.GetCUType() == sdk.CUTypeOp && toCU.GetMigrationStatus() == sdk.MigrationFinish {
+	if toCUAst.GetCUType() == sdk.CUTypeOp && toCUAst.GetMigrationStatus() == sdk.MigrationFinish {
 		if toCUAsset.Epoch != keeper.sk.GetCurrentEpoch(ctx).Index {
 			return sdk.ErrInvalidTx("Cannot sys transfer to last epoch addr").Result()
 		}
 	}
 
 	if keeper.hasProcessingSysTransfer(ctx, toCUAddr, chain, canonicalToAddr) {
-		return sdk.ErrInvalidTx(fmt.Sprintf("To OPCU %v has processing sys transfer of %s", toCUAddr, chain)).Result()
+		return sdk.ErrInvalidTx(fmt.Sprintf("To OPCU %v has processing sys transfer of %s", toCUAddr.String(), chain)).Result()
 	}
 
 	//symbol check
-	if !tokenInfo.IsWithdrawalEnabled || !tokenInfo.IsSendEnabled || !keeper.GetSendEnabled(ctx) {
+	if !tokenInfo.WithdrawalEnabled || !tokenInfo.SendEnabled || !keeper.IsSendEnabled(ctx) {
 		return sdk.ErrTransactionIsNotEnabled(fmt.Sprintf("%v's systransfer is not enabled temporary", symbol)).Result()
 	}
 
-	if toCU.GetCUType() == sdk.CUTypeUser {
-		dlt := keeper.ck.GetDepositList(ctx, symbol, toCUAddr)
+	//chain check
+	curEpoch := keeper.sk.GetCurrentEpoch(ctx)
+	fromAddr := fromCUAst.GetAssetAddress(chain, curEpoch.Index)
+	sendable := fromCUAst.IsEnabledSendTx(chain, fromAddr)
+	if !sendable {
+		return sdk.ErrInternal(fmt.Sprintf("%v %v is not sendable", fromCUAddr, chain)).Result()
+	}
+
+	chainTokenInfo := keeper.tk.GetIBCToken(ctx, sdk.Symbol(chain))
+	if chainTokenInfo == nil {
+		return sdk.ErrUnSupportToken(symbol).Result()
+	}
+	if !chainTokenInfo.WithdrawalEnabled || !chainTokenInfo.SendEnabled {
+		return sdk.ErrTransactionIsNotEnabled(fmt.Sprintf("%v's systransfer is not enabled temporary", chain)).Result()
+	}
+
+	chainPrice := chainTokenInfo.GasPrice
+	gasFee := chainPrice.Mul(tokenInfo.GasLimit)
+	if !keeper.checkNeedSysTransfer(ctx, chain, canonicalToAddr, gasFee, toCUAst.GetCUType(), toCUAddr) {
+		return sdk.ErrInvalidTx(fmt.Sprintf("%s does not need systransfer", toCUAst.GetAddress())).Result()
+	}
+
+	var balanceFlows []sdk.Flow
+	if toCUAst.GetCUType() == sdk.CUTypeUser {
+		dlt := keeper.ik.GetDepositList(ctx, symbol, toCUAddr)
 		waitCollectNum := sdk.ZeroInt()
 		waitCollectItems := []sdk.DepositItem{}
 		for _, item := range dlt {
@@ -71,13 +95,16 @@ func (keeper BaseKeeper) SysTransfer(ctx sdk.Context, fromCUAddr, toCUAddr sdk.C
 		}
 
 		if waitCollectNum.GT(sdk.ZeroInt()) {
-			if toCU.GetCoins().AmountOf(tokenInfo.Chain.String()).LT(tokenInfo.CollectFee().Amount) {
-				return sdk.ErrInternal(fmt.Sprintf("collect fee %v %v is not match", toCU.GetCoins(), tokenInfo.CollectFee())).Result()
+			_, flow, err := keeper.AddCoin(ctx, toCUAddr, sdk.NewCoin(symbol, waitCollectNum))
+			if err != nil {
+				return err.Result()
 			}
-
-			toCU.AddCoins(sdk.NewCoins(sdk.NewCoin(symbol, waitCollectNum)))
-			toCU.SubCoins(sdk.NewCoins(tokenInfo.CollectFee()))
-			keeper.ck.SetCU(ctx, toCU)
+			balanceFlows = append(balanceFlows, flow)
+			_, flow, err = keeper.SubCoin(ctx, toCUAddr, tokenInfo.CollectFee())
+			if err != nil {
+				return err.Result()
+			}
+			balanceFlows = append(balanceFlows, flow)
 
 			waitCollectOrderIDs := keeper.getWaitCollectOrderIDs(ctx, toCUAddr.String(), symbol)
 			if len(waitCollectItems) <= 0 {
@@ -90,40 +117,14 @@ func (keeper BaseKeeper) SysTransfer(ctx sdk.Context, fromCUAddr, toCUAddr sdk.C
 			keeper.ok.SetOrder(ctx, order)
 
 			for _, item := range waitCollectItems {
-				_ = keeper.ck.SetDepositStatus(ctx, symbol, toCUAddr, item.Hash, item.Index, sdk.DepositItemStatusWaitCollect)
+				_ = keeper.ik.SetDepositStatus(ctx, symbol, toCUAddr, item.Hash, item.Index, sdk.DepositItemStatusWaitCollect)
 			}
 		}
 	}
 
-	//chain check
-	curEpoch := keeper.sk.GetCurrentEpoch(ctx)
-	fromAddr := fromCU.GetAssetAddress(chain, curEpoch.Index)
-	sendable := fromCU.IsEnabledSendTx(chain, fromAddr)
-	if !sendable {
-		return sdk.ErrInternal(fmt.Sprintf("%v %v is not sendable", fromCUAddr, chain)).Result()
-	}
-
-	chainTokenInfo := keeper.tk.GetTokenInfo(ctx, sdk.Symbol(chain))
-	if chainTokenInfo == nil {
-		return sdk.ErrUnSupportToken(symbol).Result()
-	}
-	if !chainTokenInfo.IsWithdrawalEnabled || !chainTokenInfo.IsSendEnabled {
-		return sdk.ErrTransactionIsNotEnabled(fmt.Sprintf("%v's systransfer is not enabled temporary", chain)).Result()
-	}
-
-	chainPrice := chainTokenInfo.GasPrice
-	gasFee := chainPrice.Mul(tokenInfo.GasLimit)
-	if !keeper.checkNeedSysTransfer(ctx, chain, canonicalToAddr, gasFee, toCU) {
-		return sdk.ErrInvalidTx(fmt.Sprintf("%s does not need systransfer", toCU.GetAddress())).Result()
-	}
-
-	if keeper.ok.IsExist(ctx, orderID) {
-		return sdk.ErrInvalidTx(fmt.Sprintf("order %v already exists", orderID)).Result()
-	}
-
 	var amount sdk.Int
-	if toCU.GetCUType() == sdk.CUTypeOp {
-		if toCU.GetMigrationStatus() == sdk.MigrationFinish {
+	if toCUAst.GetCUType() == sdk.CUTypeOp {
+		if toCUAst.GetMigrationStatus() == sdk.MigrationFinish {
 			amount = tokenInfo.OpCUSysTransferAmount()
 		} else {
 			amount = tokenInfo.GasPrice.Mul(tokenInfo.GasLimit)
@@ -134,7 +135,7 @@ func (keeper BaseKeeper) SysTransfer(ctx sdk.Context, fromCUAddr, toCUAddr sdk.C
 
 	//move (chain, amount) to assethold
 	need := sdk.NewCoins(sdk.NewCoin(chain, amount))
-	have := fromCU.GetAssetCoins()
+	have := fromCUAst.GetAssetCoins()
 
 	if have.AmountOf(chain).LT(amount) {
 		return sdk.ErrInsufficientCoins(fmt.Sprintf("actual have %v, need %v", have, need)).Result()
@@ -146,14 +147,17 @@ func (keeper BaseKeeper) SysTransfer(ctx sdk.Context, fromCUAddr, toCUAddr sdk.C
 	}
 	keeper.ok.SetOrder(ctx, sysTransferOrder)
 
-	fromCU.SetEnableSendTx(false, chain, fromAddr)
-	fromCU.SubAssetCoins(need)
-	fromCU.AddAssetCoinsHold(need)
-	keeper.ck.SetCU(ctx, fromCU)
+	if tokenInfo.IsNonceBased {
+		fromCUAst.SetEnableSendTx(false, chain, fromAddr)
+	}
+	fromCUAst.SubAssetCoins(need)
+	fromCUAst.AddAssetCoinsHold(need)
+	keeper.ik.SetCUIBCAsset(ctx, fromCUAst)
 
 	var flows []sdk.Flow
 	flows = append(flows, keeper.rk.NewOrderFlow(sdk.Symbol(symbol), sysTransferOrder.GetCUAddress(), sysTransferOrder.GetID(), sdk.OrderTypeSysTransfer, sdk.OrderStatusBegin))
 	flows = append(flows, keeper.rk.NewSysTransferFlow(orderID, fromCUAddr.String(), toCUAddr.String(), fromAddr, canonicalToAddr, symbol, amount))
+	flows = append(flows, balanceFlows...)
 	result := sdk.Result{}
 	receipt := keeper.rk.NewReceipt(sdk.CategoryTypeSysTransfer, flows)
 	keeper.rk.SaveReceiptToResult(receipt, &result)
@@ -161,8 +165,8 @@ func (keeper BaseKeeper) SysTransfer(ctx sdk.Context, fromCUAddr, toCUAddr sdk.C
 	ctx.EventManager().EmitEvents(sdk.Events{
 		sdk.NewEvent(
 			types.EventTypeSysTransfer,
-			sdk.NewAttribute(types.AttributeKeySender, fromCU.String()),
-			sdk.NewAttribute(types.AttributeKeyRecipient, toCU.String()),
+			sdk.NewAttribute(types.AttributeKeySender, fromAddr),
+			sdk.NewAttribute(types.AttributeKeyRecipient, toAddr),
 			sdk.NewAttribute(types.AttributeKeySymbol, symbol),
 			sdk.NewAttribute(types.AttributeKeyAmount, amount.String()),
 		),
@@ -171,7 +175,7 @@ func (keeper BaseKeeper) SysTransfer(ctx sdk.Context, fromCUAddr, toCUAddr sdk.C
 	return result
 }
 
-func (keeper BaseKeeper) SysTransferWaitSign(ctx sdk.Context, orderID, signHash string, rawData []byte) sdk.Result {
+func (keeper BaseKeeper) SysTransferWaitSign(ctx sdk.Context, orderID string, signHash []byte, rawData []byte) sdk.Result {
 	order := keeper.ok.GetOrder(ctx, orderID)
 	if order == nil {
 		return sdk.ErrNotFoundOrder(orderID).Result()
@@ -182,7 +186,7 @@ func (keeper BaseKeeper) SysTransferWaitSign(ctx sdk.Context, orderID, signHash 
 	}
 
 	fromCUAddr := order.GetCUAddress()
-	fromCU := keeper.ck.GetCU(ctx, fromCUAddr)
+	fromCUAst := keeper.ik.GetCUIBCAsset(ctx, fromCUAddr)
 
 	tokenInfo, err := keeper.checkSysTransferOrder(ctx, sysTransferOrder, sdk.OrderStatusBegin)
 	if err != nil {
@@ -192,7 +196,7 @@ func (keeper BaseKeeper) SysTransferWaitSign(ctx sdk.Context, orderID, signHash 
 	symbol := order.GetSymbol()
 	chain := tokenInfo.Chain.String()
 
-	chainTokenInfo := keeper.tk.GetTokenInfo(ctx, tokenInfo.Chain)
+	chainTokenInfo := keeper.tk.GetIBCToken(ctx, tokenInfo.Chain)
 	priceUpLimit := sdk.NewDecFromInt(chainTokenInfo.GasPrice).Mul(PriceUpLimitRatio)
 	priceLowLimit := sdk.NewDecFromInt(chainTokenInfo.GasPrice).Mul(PriceLowLimitRatio)
 
@@ -224,7 +228,7 @@ func (keeper BaseKeeper) SysTransferWaitSign(ctx sdk.Context, orderID, signHash 
 			return sdk.ErrInvalidTx(fmt.Sprintf("Unexpected withdrawal contract address:%v, expected:%v", tx.ContractAddress, chainTokenInfo.Issuer)).Result()
 		}
 
-		if string(hash) != signHash {
+		if !bytes.Equal(hash, signHash) {
 			return sdk.ErrInvalidTx(fmt.Sprintf("hash mismatch, expected:%v, have:%v", string(hash), signHash)).Result()
 		}
 
@@ -240,7 +244,7 @@ func (keeper BaseKeeper) SysTransferWaitSign(ctx sdk.Context, orderID, signHash 
 			return sdk.ErrInvalidTx(fmt.Sprintf("gas price is too low, actual:%v, lowlimit:%v", tx.GasPrice, priceLowLimit)).Result()
 		}
 
-		nonce := fromCU.GetNonce(chain, sysTransferOrder.FromAddress)
+		nonce := fromCUAst.GetNonce(chain, sysTransferOrder.FromAddress)
 		if nonce != tx.Nonce {
 			return sdk.ErrInvalidTx(fmt.Sprintf("tx nonce not equal, cu :%v, rawdata:%v", nonce, tx.Nonce)).Result()
 		}
@@ -248,7 +252,7 @@ func (keeper BaseKeeper) SysTransferWaitSign(ctx sdk.Context, orderID, signHash 
 		gasFee = tx.GasPrice.Mul(tx.GasLimit)
 		coins = sdk.NewCoins(sdk.NewCoin(chain, gasFee))
 
-		have := fromCU.GetAssetCoins()
+		have := fromCUAst.GetAssetCoins()
 		if have.AmountOf(chain).LT(gasFee) {
 			return sdk.ErrInsufficientCoins(fmt.Sprintf("actual have %v, need %v", have, coins)).Result()
 		}
@@ -258,9 +262,9 @@ func (keeper BaseKeeper) SysTransferWaitSign(ctx sdk.Context, orderID, signHash 
 	}
 
 	//move feecoins to onhold
-	fromCU.SubAssetCoins(coins)
-	fromCU.AddAssetCoinsHold(coins)
-	keeper.ck.SetCU(ctx, fromCU)
+	fromCUAst.SubAssetCoins(coins)
+	fromCUAst.AddAssetCoinsHold(coins)
+	keeper.ik.SetCUIBCAsset(ctx, fromCUAst)
 
 	sysTransferOrder.CostFee = gasFee //record the gasfee for future use, OrderSysTranfer has no GasPrice and GasLimit, use CostFee record
 	sysTransferOrder.Status = sdk.OrderStatusWaitSign
@@ -320,7 +324,7 @@ func (keeper BaseKeeper) SysTransferSignFinish(ctx sdk.Context, orderID string, 
 
 	var flows []sdk.Flow
 	flows = append(flows, keeper.rk.NewOrderFlow(sdk.Symbol(symbol), order.GetCUAddress(), orderID, sdk.OrderTypeSysTransfer, sdk.OrderStatusSignFinish))
-	flows = append(flows, keeper.rk.NewSysTransferSignFinishFlow(orderID, signedTx, txHash))
+	flows = append(flows, keeper.rk.NewSysTransferSignFinishFlow(orderID, signedTx))
 
 	result := sdk.Result{}
 	receipt := keeper.rk.NewReceipt(sdk.CategoryTypeSysTransfer, flows)
@@ -358,11 +362,12 @@ func (keeper BaseKeeper) SysTransferFinish(ctx sdk.Context, fromCUAddr sdk.CUAdd
 	chain := tokenInfo.Chain.String()
 	opCUAddr, _ := sdk.CUAddressFromBase58(sysTransferOrder.OpCUaddress)
 
-	opCU := keeper.ck.GetCU(ctx, opCUAddr)
+	opCUAst := keeper.ik.GetCUIBCAsset(ctx, opCUAddr)
 
 	toCUAddr, _ := sdk.CUAddressFromBase58(sysTransferOrder.ToCU)
-	toCU := keeper.ck.GetCU(ctx, toCUAddr)
+	toCUAst := keeper.ik.GetCUIBCAsset(ctx, toCUAddr)
 
+	var balanceFlows []sdk.Flow
 	switch tokenInfo.TokenType {
 	case sdk.UtxoBased:
 		return sdk.ErrInvalidTx("Not support UtxoBased systransfer temporary").Result()
@@ -373,29 +378,33 @@ func (keeper BaseKeeper) SysTransferFinish(ctx sdk.Context, fromCUAddr sdk.CUAdd
 		}
 		feeCoins := sdk.NewCoins(sdk.NewCoin(chain, sysTransferOrder.CostFee))
 		coins := sdk.NewCoins(sdk.NewCoin(chain, localTx.Amount))
-		opCU.SubAssetCoinsHold(coins.Add(feeCoins))
-		opCU.AddAssetCoins(sdk.NewCoins(sdk.NewCoin(chain, sysTransferOrder.CostFee.Sub(costFee))))
-		opCU.AddGasUsed(coins.Add(sdk.NewCoins(sdk.NewCoin(chain, costFee))))
+		opCUAst.SubAssetCoinsHold(coins.Add(feeCoins))
+		opCUAst.AddAssetCoins(sdk.NewCoins(sdk.NewCoin(chain, sysTransferOrder.CostFee.Sub(costFee))))
+		opCUAst.AddGasUsed(coins.Add(sdk.NewCoins(sdk.NewCoin(chain, costFee))))
 
 		//update order.CostFee
 		sysTransferOrder.CostFee = costFee
-		if toCU.GetCUType() == sdk.CUTypeUser {
-			toCU.AddGasReceived(sdk.NewCoins(sdk.NewCoin(chain, sysTransferOrder.Amount)))
-			toCU.AddGasRemained(chain, sysTransferOrder.ToAddress, sysTransferOrder.Amount)
+		if toCUAst.GetCUType() == sdk.CUTypeUser {
+			toCUAst.AddGasReceived(sdk.NewCoins(sdk.NewCoin(chain, sysTransferOrder.Amount)))
+			toCUAst.AddGasRemained(chain, sysTransferOrder.ToAddress, sysTransferOrder.Amount)
 			usedFee := costFee.Add(sysTransferOrder.Amount)
 			waitCollectOrderIDs := keeper.getWaitCollectOrderIDs(ctx, toCUAddr.String(), symbol)
 			if len(waitCollectOrderIDs) > 0 {
 				order := keeper.ok.GetOrder(ctx, waitCollectOrderIDs[0])
 				collectOrder := order.(*sdk.OrderCollect)
 				if collectOrder.CostFee.GT(usedFee) {
-					toCU.AddCoins(sdk.NewCoins(sdk.NewCoin(chain, collectOrder.CostFee.Sub(usedFee))))
+					_, flow, err := keeper.AddCoin(ctx, toCUAddr, sdk.NewCoin(chain, collectOrder.CostFee.Sub(usedFee)))
+					if err != nil {
+						return err.Result()
+					}
+					balanceFlows = append(balanceFlows, flow)
 					collectOrder.CostFee = usedFee
 					keeper.ok.SetOrder(ctx, order)
 				}
 
 			}
 		} else {
-			toCU.AddAssetCoins(sdk.NewCoins(sdk.NewCoin(chain, sysTransferOrder.Amount)))
+			toCUAst.AddAssetCoins(sdk.NewCoins(sdk.NewCoin(chain, sysTransferOrder.Amount)))
 		}
 		keeper.ok.SetOrder(ctx, sysTransferOrder)
 
@@ -404,7 +413,7 @@ func (keeper BaseKeeper) SysTransferFinish(ctx sdk.Context, fromCUAddr sdk.CUAdd
 		if err != nil {
 			return sdk.ErrInvalidTx(fmt.Sprintf("fail to create deposit item, %v %v %v", localTx.Hash, 0, localTx.Amount)).Result()
 		}
-		_ = keeper.ck.SaveDeposit(ctx, chain, toCUAddr, item)
+		_ = keeper.ik.SaveDeposit(ctx, chain, toCUAddr, item)
 
 	case sdk.AccountSharedBased:
 		return sdk.ErrInvalidTx("Not support AccountSharedBased temporary").Result()
@@ -416,27 +425,28 @@ func (keeper BaseKeeper) SysTransferFinish(ctx sdk.Context, fromCUAddr sdk.CUAdd
 
 	if tokenInfo.IsNonceBased {
 		//don't update local nonce
-		nonce := opCU.GetNonce(chain, sysTransferOrder.FromAddress) + 1
-		opCU.SetNonce(chain, nonce, sysTransferOrder.FromAddress)
+		nonce := opCUAst.GetNonce(chain, sysTransferOrder.FromAddress) + 1
+		opCUAst.SetNonce(chain, nonce, sysTransferOrder.FromAddress)
+		opCUAst.SetEnableSendTx(true, chain, sysTransferOrder.FromAddress)
 	}
-	opCU.SetEnableSendTx(true, chain, sysTransferOrder.FromAddress)
-	keeper.ck.SetCU(ctx, opCU)
-	keeper.ck.SetCU(ctx, toCU)
+	keeper.ik.SetCUIBCAsset(ctx, opCUAst)
+	keeper.ik.SetCUIBCAsset(ctx, toCUAst)
 
 	var flows []sdk.Flow
 	flows = append(flows, keeper.rk.NewOrderFlow(sdk.Symbol(symbol), order.GetCUAddress(), orderID, sdk.OrderTypeSysTransfer, sdk.OrderStatusFinish))
 	flows = append(flows, keeper.rk.NewSysTransferFinishFlow(orderID, costFee))
+	flows = append(flows, balanceFlows...)
 
 	receipt := keeper.rk.NewReceipt(sdk.CategoryTypeSysTransfer, flows)
 	keeper.rk.SaveReceiptToResult(receipt, &result)
 	return result
 }
 
-func (keeper BaseKeeper) checkSysTransferOrder(ctx sdk.Context, sysTransferOrder *sdk.OrderSysTransfer, orderStatus sdk.OrderStatus) (tokenInfo *sdk.TokenInfo, err sdk.Error) {
+func (keeper BaseKeeper) checkSysTransferOrder(ctx sdk.Context, sysTransferOrder *sdk.OrderSysTransfer, orderStatus sdk.OrderStatus) (tokenInfo *sdk.IBCToken, err sdk.Error) {
 
 	symbol := sysTransferOrder.GetSymbol()
 	//symbol check
-	tokenInfo = keeper.tk.GetTokenInfo(ctx, sdk.Symbol(symbol))
+	tokenInfo = keeper.tk.GetIBCToken(ctx, sdk.Symbol(symbol))
 	if tokenInfo == nil {
 		err = sdk.ErrUnSupportToken(fmt.Sprintf("%s does not exist", symbol))
 		return
@@ -444,7 +454,7 @@ func (keeper BaseKeeper) checkSysTransferOrder(ctx sdk.Context, sysTransferOrder
 
 	//chain check
 	chain := tokenInfo.Chain.String()
-	chainTokenInfo := keeper.tk.GetTokenInfo(ctx, sdk.Symbol(chain))
+	chainTokenInfo := keeper.tk.GetIBCToken(ctx, sdk.Symbol(chain))
 	if chainTokenInfo == nil {
 		err = sdk.ErrUnSupportToken(fmt.Sprintf("%s does not exist", chain))
 		return
@@ -466,8 +476,8 @@ func (keeper BaseKeeper) checkSysTransferOrder(ctx sdk.Context, sysTransferOrder
 	// check AssetCoinsHold only if order is not at terminated status
 	if !sysTransferOrder.GetOrderStatus().Terminated() {
 		need := sdk.NewCoins(sdk.NewCoin(tokenInfo.Chain.String(), sysTransferOrder.Amount))
-		fromCU := keeper.ck.GetCU(ctx, sysTransferOrder.GetCUAddress())
-		have := fromCU.GetAssetCoinsHold()
+		fromCUAst := keeper.ik.GetCUIBCAsset(ctx, sysTransferOrder.GetCUAddress())
+		have := fromCUAst.GetAssetCoinsHold()
 
 		if have.AmountOf(tokenInfo.Chain.String()).LT(sysTransferOrder.Amount) {
 			err = sdk.ErrInsufficientCoins(fmt.Sprintf("need %v, have %v", need, have))

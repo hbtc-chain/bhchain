@@ -35,6 +35,7 @@ const (
 
 	MaxWaitAssignKeyOrders = 32
 	MaxPreKeyGenOrders     = 5
+	MaxKeyNodeHeartbeat    = 1000
 )
 
 var (

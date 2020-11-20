@@ -7,6 +7,7 @@ import (
 
 	sdk "github.com/hbtc-chain/bhchain/types"
 	"github.com/hbtc-chain/bhchain/x/distribution/types"
+	"github.com/hbtc-chain/bhchain/x/staking"
 	"github.com/hbtc-chain/bhchain/x/staking/exported"
 )
 
@@ -22,7 +23,7 @@ func (k Keeper) AllocateTokens(
 	// called in BeginBlock, collected fees will be from the previous block
 	// (and distributed to the previous proposer)
 	feeCollector := k.supplyKeeper.GetModuleAccount(ctx, k.feeCollectorName)
-	feesCollectedInt := feeCollector.GetCoins()
+	feesCollectedInt := k.transferKeeper.GetAllBalance(ctx, feeCollector.GetAddress())
 	feesCollected := sdk.NewDecCoins(feesCollectedInt)
 
 	// transfer collected fees to the distribution module CustodianUnit
@@ -40,17 +41,40 @@ func (k Keeper) AllocateTokens(
 		return
 	}
 
-	// calculate fraction votes
-	previousFractionVotes := sdk.NewDec(sumPreviousPrecommitPower).Quo(sdk.NewDec(totalPreviousPower))
+	remaining := feesCollected
+	// calculate previous core nodes reward
+	keyNodes := k.stakingKeeper.GetCurrentEpoch(ctx).KeyNodeSet
+	keyNodeReward := k.GetKeyNodeReward(ctx)
+	var availableKeyNodes []staking.ValidatorI
+	if len(keyNodes) > 0 && keyNodeReward.IsPositive() {
+		for _, nodeAddress := range keyNodes {
+			valAddress := sdk.ValAddress(nodeAddress)
+			validator := k.stakingKeeper.Validator(ctx, valAddress)
+			if validator == nil {
+				logger.Error("key node validator not exist", "valAddress", valAddress)
+				continue
+			}
+			if !validator.IsJailed() {
+				availableKeyNodes = append(availableKeyNodes, validator)
+			}
+		}
+
+		if len(availableKeyNodes) > 0 {
+			totalKeyNodeReward := feesCollected.MulDecTruncate(keyNodeReward)
+			perKeyNodeReward := totalKeyNodeReward.QuoDec(sdk.NewDec(int64(len(availableKeyNodes))))
+			for _, validator := range availableKeyNodes {
+				k.AllocateTokensToValidator(ctx, validator, perKeyNodeReward)
+				remaining = remaining.Sub(perKeyNodeReward)
+			}
+		}
+	}
 
 	// calculate previous proposer reward
 	baseProposerReward := k.GetBaseProposerReward(ctx)
-	bonusProposerReward := k.GetBonusProposerReward(ctx)
-	proposerMultiplier := baseProposerReward.Add(bonusProposerReward.MulTruncate(previousFractionVotes))
-	proposerReward := feesCollected.MulDecTruncate(proposerMultiplier)
 
+	proposerReward := feesCollected.MulDecTruncate(baseProposerReward)
 	// pay previous proposer
-	remaining := feesCollected
+
 	proposerValidator := k.stakingKeeper.ValidatorByConsAddr(ctx, previousProposer)
 
 	if proposerValidator != nil {
@@ -77,19 +101,23 @@ func (k Keeper) AllocateTokens(
 			previousProposer.String()))
 	}
 
-	// calculate fraction allocated to validators
-	communityTax := k.GetCommunityTax(ctx)
-	voteMultiplier := sdk.OneDec().Sub(proposerMultiplier).Sub(communityTax)
-
 	// allocate tokens proportionally to voting power
+	votersReward := remaining
 	// TODO consider parallelizing later, ref https://github.com/hbtc-chain/bhchain/pull/3099#discussion_r246276376
 	for _, vote := range previousVotes {
+		if !vote.SignedLastBlock {
+			continue
+		}
 		validator := k.stakingKeeper.ValidatorByConsAddr(ctx, vote.Validator.Address)
+		if validator == nil {
+			logger.Error("key node validator not exist", "consAddress", vote.Validator.Address)
+			continue
+		}
 
 		// TODO consider microslashing for missing votes.
 		// ref https://github.com/hbtc-chain/bhchain/issues/2525#issuecomment-430838701
-		powerFraction := sdk.NewDec(vote.Validator.Power).QuoTruncate(sdk.NewDec(totalPreviousPower))
-		reward := feesCollected.MulDecTruncate(voteMultiplier).MulDecTruncate(powerFraction)
+		powerFraction := sdk.NewDec(vote.Validator.Power).QuoTruncate(sdk.NewDec(sumPreviousPrecommitPower))
+		reward := votersReward.MulDecTruncate(powerFraction)
 		k.AllocateTokensToValidator(ctx, validator, reward)
 		remaining = remaining.Sub(reward)
 	}
@@ -97,6 +125,25 @@ func (k Keeper) AllocateTokens(
 	// allocate community funding
 	feePool.CommunityPool = feePool.CommunityPool.Add(remaining)
 	k.SetFeePool(ctx, feePool)
+}
+
+func (k Keeper) AllocateTokensToValidatorWithoutShare(ctx sdk.Context, val exported.ValidatorI, tokens sdk.DecCoins) {
+	commission := tokens
+	ctx.EventManager().EmitEvent(
+		sdk.NewEvent(
+			types.EventTypeCommission,
+			sdk.NewAttribute(sdk.AttributeKeyAmount, commission.String()),
+			sdk.NewAttribute(types.AttributeKeyValidator, val.GetOperator().String()),
+		),
+	)
+
+	currentCommission := k.GetValidatorAccumulatedCommission(ctx, val.GetOperator())
+	currentCommission = currentCommission.Add(commission)
+	k.SetValidatorAccumulatedCommission(ctx, val.GetOperator(), currentCommission)
+
+	outstanding := k.GetValidatorOutstandingRewards(ctx, val.GetOperator())
+	outstanding = outstanding.Add(tokens)
+	k.SetValidatorOutstandingRewards(ctx, val.GetOperator(), outstanding)
 }
 
 // AllocateTokensToValidator allocate tokens to a particular validator, splitting according to commission

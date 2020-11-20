@@ -6,3 +6,4 @@ type Handler func(ctx Context, msg Msg) Result
 // AnteHandler authenticates transactions, before their internal messages are handled.
 // If newCtx.IsZero(), ctx is used instead.
 type AnteHandler func(ctx Context, tx Tx, simulate bool) (newCtx Context, result Result, abort bool)
+type GasRefundHandler func(ctx Context, tx Tx, gasWanted, gasUsed uint64) bool

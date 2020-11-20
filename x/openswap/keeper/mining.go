@@ -5,21 +5,17 @@ import (
 	"github.com/hbtc-chain/bhchain/x/openswap/types"
 )
 
-func (k Keeper) CalculateEarning(ctx sdk.Context, addr sdk.CUAddress, tokenA, tokenB sdk.Symbol) sdk.Int {
-	if tokenA > tokenB {
-		tokenA, tokenB = tokenB, tokenA
-	}
-	liquidity := k.GetLiquidity(ctx, tokenA, tokenB, addr)
-	globalMask := k.getDec(ctx, types.GlobalMaskKey(tokenA, tokenB))
-	addrMask := k.getDec(ctx, types.AddrMaskKey(tokenA, tokenB, addr))
+func (k Keeper) CalculateEarning(ctx sdk.Context, addr sdk.CUAddress, dexID uint32, tokenA, tokenB sdk.Symbol) sdk.Int {
+	tokenA, tokenB = k.SortToken(tokenA, tokenB)
+	liquidity := k.GetLiquidity(ctx, addr, dexID, tokenA, tokenB)
+	globalMask := k.getDec(ctx, types.GlobalMaskKey(dexID, tokenA, tokenB))
+	addrMask := k.getDec(ctx, types.AddrMaskKey(addr, dexID, tokenA, tokenB))
 	return globalMask.Mul(liquidity.ToDec()).Sub(addrMask).TruncateInt()
 }
 
-func (k Keeper) ClaimEarning(ctx sdk.Context, addr sdk.CUAddress, tokenA, tokenB sdk.Symbol) sdk.Result {
-	if tokenA > tokenB {
-		tokenA, tokenB = tokenB, tokenA
-	}
-	earning := k.CalculateEarning(ctx, addr, tokenA, tokenB)
+func (k Keeper) ClaimEarning(ctx sdk.Context, addr sdk.CUAddress, dexID uint32, tokenA, tokenB sdk.Symbol) sdk.Result {
+	tokenA, tokenB = k.SortToken(tokenA, tokenB)
+	earning := k.CalculateEarning(ctx, addr, dexID, tokenA, tokenB)
 	if !earning.IsPositive() {
 		return sdk.Result{}
 	}
@@ -38,7 +34,7 @@ func (k Keeper) ClaimEarning(ctx sdk.Context, addr sdk.CUAddress, tokenA, tokenB
 		flows = append(flows, k.getFlowFromResult(&result)...)
 	}
 
-	addrMaskKey := types.AddrMaskKey(tokenA, tokenB, addr)
+	addrMaskKey := types.AddrMaskKey(addr, dexID, tokenA, tokenB)
 	addrMask := k.getDec(ctx, addrMaskKey)
 	addrMask = addrMask.Add(earning.ToDec())
 	k.setDec(ctx, addrMaskKey, addrMask)
@@ -65,13 +61,13 @@ func (k Keeper) Mining(ctx sdk.Context) {
 		return
 	}
 
-	defiToken := k.tokenKeeper.GetTokenInfo(ctx, sdk.NativeDefiToken)
+	defiToken := k.tokenKeeper.GetToken(ctx, sdk.NativeDefiToken)
 	if defiToken == nil {
 		return
 	}
 	circulation := k.sk.GetSupply(ctx).GetTotal().AmountOf(sdk.NativeDefiToken)
 	burned := k.sk.GetSupply(ctx).GetBurned().AmountOf(sdk.NativeDefiToken)
-	maxMining := defiToken.TotalSupply.Sub(circulation).Sub(burned)
+	maxMining := defiToken.GetTotalSupply().Sub(circulation).Sub(burned)
 	amount = sdk.MinInt(amount, maxMining)
 	if !amount.IsPositive() {
 		return
@@ -102,11 +98,8 @@ func (k Keeper) distribute(ctx sdk.Context, amount sdk.Int) {
 			distribution = amount.Mul(w.Weight).Quo(totalWeight)
 			remaining = remaining.Sub(distribution)
 		}
-		tokenA, tokenB := w.TokenA, w.TokenB
-		if tokenA > tokenB {
-			tokenA, tokenB = tokenB, tokenA
-		}
-		k.onMining(ctx, tokenA, tokenB, distribution)
+		tokenA, tokenB := k.SortToken(w.TokenA, w.TokenB)
+		k.onMining(ctx, w.DexID, tokenA, tokenB, distribution)
 	}
 }
 
@@ -122,27 +115,27 @@ func (k Keeper) getMiningAmount(ctx sdk.Context) sdk.Int {
 	return amount
 }
 
-func (k Keeper) onUpdateLiquidity(ctx sdk.Context, tokenA, tokenB sdk.Symbol, addr sdk.CUAddress, liquidity sdk.Int) {
+func (k Keeper) onUpdateLiquidity(ctx sdk.Context, addr sdk.CUAddress, dexID uint32, tokenA, tokenB sdk.Symbol, liquidity sdk.Int) {
 	// update total share
-	totalShareKey := types.TotalShareKey(tokenA, tokenB)
+	totalShareKey := types.TotalShareKey(dexID, tokenA, tokenB)
 	totalShare := k.getDec(ctx, totalShareKey)
 	totalShare = totalShare.Add(liquidity.ToDec())
 	k.setDec(ctx, totalShareKey, totalShare)
 
 	// update addr mast
-	globalMask := k.getDec(ctx, types.GlobalMaskKey(tokenA, tokenB))
+	globalMask := k.getDec(ctx, types.GlobalMaskKey(dexID, tokenA, tokenB))
 	if globalMask.IsPositive() {
-		addrMaskKey := types.AddrMaskKey(tokenA, tokenB, addr)
+		addrMaskKey := types.AddrMaskKey(addr, dexID, tokenA, tokenB)
 		addrMask := k.getDec(ctx, addrMaskKey)
 		addrMask = addrMask.Add(globalMask.Mul(liquidity.ToDec()))
 		k.setDec(ctx, addrMaskKey, addrMask)
 	}
 }
 
-func (k Keeper) onMining(ctx sdk.Context, tokenA, tokenB sdk.Symbol, amount sdk.Int) {
-	totalShare := k.getDec(ctx, types.TotalShareKey(tokenA, tokenB))
+func (k Keeper) onMining(ctx sdk.Context, dexID uint32, tokenA, tokenB sdk.Symbol, amount sdk.Int) {
+	totalShare := k.getDec(ctx, types.TotalShareKey(dexID, tokenA, tokenB))
 	if totalShare.IsPositive() {
-		globalMaskKey := types.GlobalMaskKey(tokenA, tokenB)
+		globalMaskKey := types.GlobalMaskKey(dexID, tokenA, tokenB)
 		globalMask := k.getDec(ctx, globalMaskKey)
 		globalMask = globalMask.Add(amount.ToDec().Quo(totalShare))
 		k.setDec(ctx, globalMaskKey, globalMask)

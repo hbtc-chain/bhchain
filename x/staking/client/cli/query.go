@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
 	"github.com/hbtc-chain/bhchain/client"
 	"github.com/hbtc-chain/bhchain/client/context"
@@ -601,15 +602,14 @@ $ %s query staking params
 
 // GetCmdQueryParams implements the params query command.
 func GetCmdQueryEpoch(storeName string, cdc *codec.Codec) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "epoch",
-		Args:  cobra.MaximumNArgs(1),
 		Short: "Query epoch, default to current",
 		Long: strings.TrimSpace(
 			fmt.Sprintf(`Query epoch, default to current.
 
 Example:
-$ %s query staking epoch
+$ %s query staking epoch [--index 1] [--block 100]
 `,
 				version.ClientName,
 			),
@@ -618,13 +618,8 @@ $ %s query staking epoch
 			cliCtx := context.NewCLIContext().WithCodec(cdc)
 
 			var params types.QueryEpochParams
-			if len(args) > 0 {
-				index, err := strconv.ParseUint(args[0], 10, 64)
-				if err != nil {
-					return err
-				}
-				params.Index = index
-			}
+			params.Index, _ = strconv.ParseUint(viper.GetString(FlagEpochIndex), 10, 64)
+			params.Height, _ = strconv.ParseUint(viper.GetString(FlagEpochHeight), 10, 64)
 
 			route := fmt.Sprintf("custom/%s/%s", storeName, types.QueryEpoch)
 			bz, err := cdc.MarshalJSON(params)
@@ -641,4 +636,8 @@ $ %s query staking epoch
 			return cliCtx.PrintOutput(epoch)
 		},
 	}
+
+	cmd.Flags().String(FlagEpochIndex, "", "The index of epoch")
+	cmd.Flags().String(FlagEpochHeight, "", "The height of epoch")
+	return cmd
 }

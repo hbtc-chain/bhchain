@@ -35,8 +35,14 @@ func QueryParams(cliCtx context.CLIContext, queryRoute string) (PrettyParams, er
 		return PrettyParams{}, err
 	}
 
+	route = fmt.Sprintf("custom/%s/params/%s", queryRoute, types.ParamKeyNodeReward)
+	retKeyNodeReward, _, err := cliCtx.QueryWithData(route, []byte{})
+	if err != nil {
+		return PrettyParams{}, err
+	}
+
 	return NewPrettyParams(
-		retCommunityTax, retBaseProposerReward, retBonusProposerReward, retWithdrawAddrEnabled,
+		retCommunityTax, retBaseProposerReward, retBonusProposerReward, retWithdrawAddrEnabled, retKeyNodeReward,
 	), nil
 }
 

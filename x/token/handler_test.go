@@ -9,12 +9,23 @@ import (
 	"github.com/stretchr/testify/require"
 
 	sdk "github.com/hbtc-chain/bhchain/types"
+	evitypes "github.com/hbtc-chain/bhchain/x/evidence/types"
 	"github.com/hbtc-chain/bhchain/x/token/types"
 )
 
-var ethSymbol = sdk.Symbol("eth")
+var ethSymbol sdk.Symbol
 
-var symbols = []sdk.Symbol{"eth", "btc", "usdt"}
+var symbols = []sdk.Symbol{}
+
+func init() {
+	symbols = []sdk.Symbol{}
+	for symbol, t := range TestIBCTokens {
+		if t.Name == "eth" {
+			ethSymbol = symbol
+		}
+		symbols = append(symbols, symbol)
+	}
+}
 
 type Args struct {
 	symbol sdk.Symbol
@@ -23,19 +34,19 @@ type Args struct {
 
 func Test_handleMsgSynGasPriceNormal(t *testing.T) {
 	env := setupUnitTestEnv()
-	gasPrice := sdk.NewInt(100)
+	gasPrice := sdk.NewInt(1000)
 	for i := 0; i < 4; i++ {
 		got := handleMsgSynGasPrice(env.ctx, env.tk, newSyncGasPriceMsg(env, i, 95, gasPrice, ethSymbol))
 		require.Equal(t, sdk.CodeOK, got.Code, got)
 	}
 
-	tokenInfo := env.tk.GetTokenInfo(env.ctx, ethSymbol)
+	tokenInfo := env.tk.GetIBCToken(env.ctx, ethSymbol)
 	require.Equal(t, gasPrice.String(), tokenInfo.GasPrice.String())
 }
 
 func Test_handleMsgSynGasPriceMulti(t *testing.T) {
 	env := setupUnitTestEnv()
-	gasPrice := sdk.NewInt(100)
+	gasPrice := sdk.NewInt(1000)
 
 	args := make([]Args, 0)
 	for _, symbol := range symbols {
@@ -53,7 +64,7 @@ func Test_handleMsgSynGasPriceMulti(t *testing.T) {
 	}
 
 	for _, symbol := range symbols {
-		tokenInfo := env.tk.GetTokenInfo(env.ctx, symbol)
+		tokenInfo := env.tk.GetIBCToken(env.ctx, symbol)
 		require.Equal(t, gasPrice, tokenInfo.GasPrice)
 	}
 }
@@ -80,13 +91,13 @@ func Test_handleMsgSynGasPriceRandomPrice(t *testing.T) {
 func Test_handleMsgSynGasPriceMissing(t *testing.T) {
 	env := setupUnitTestEnv()
 
-	gasPrice := sdk.NewInt(100)
+	gasPrice := sdk.NewInt(1000)
 	for i := 0; i < 4; i++ {
 		got := handleMsgSynGasPrice(env.ctx, env.tk, newSyncGasPriceMsg(env, i, 95, gasPrice, ethSymbol))
 		require.Equal(t, sdk.CodeOK, got.Code)
 	}
 
-	tokenInfo := env.tk.GetTokenInfo(env.ctx, ethSymbol)
+	tokenInfo := env.tk.GetIBCToken(env.ctx, ethSymbol)
 	require.Equal(t, gasPrice.String(), tokenInfo.GasPrice.String())
 }
 
@@ -106,7 +117,7 @@ func Test_handleMsgSynGasPriceAllDifferent(t *testing.T) {
 	got = handleMsgSynGasPrice(env.ctx, env.tk, newSyncGasPriceMsg(env, 3, 95, gasPrice.MulRaw(4), ethSymbol))
 	require.Equal(t, sdk.CodeOK, got.Code)
 
-	tokenInfo := env.tk.GetTokenInfo(env.ctx, ethSymbol)
+	tokenInfo := env.tk.GetIBCToken(env.ctx, ethSymbol)
 	// default
 	require.Equal(t, sdk.NewInt(1000), tokenInfo.GasPrice)
 }
@@ -124,6 +135,13 @@ func Test_handleMsgSynGasPriceInvalidHeight(t *testing.T) {
 
 func Test_handleMsgSynGasPricePunish(t *testing.T) {
 	env := setupUnitTestEnv()
+	eviParams := evitypes.BehaviourParams{
+		MaxMisbehaviourCount:   10,
+		BehaviourWindow:        100,
+		BehaviourSlashFraction: sdk.NewDecFromIntWithPrec(sdk.NewInt(1), 1),
+	}
+
+	env.evidenceKeeper.SetBehaviourParams(env.ctx, string(evitypes.VoteBehaviourKey), eviParams)
 	gasPrice := sdk.ZeroInt()
 	ctx := env.ctx
 	for i := 1; i <= 11; i++ {
@@ -132,13 +150,13 @@ func Test_handleMsgSynGasPricePunish(t *testing.T) {
 			if i == 0 {
 				gasPrice = sdk.NewInt(10000)
 			} else {
-				gasPrice = sdk.NewInt(100)
+				gasPrice = sdk.NewInt(1000)
 			}
 			got := handleMsgSynGasPrice(ctx, env.tk, newSyncGasPriceMsg(env, i, uint64(ctx.BlockHeight()-1), gasPrice, ethSymbol))
 			require.Equal(t, sdk.CodeOK, got.Code, sdk.CodeToDefaultMsg(got.Code))
 		}
-		tokenInfo := env.tk.GetTokenInfo(env.ctx, ethSymbol)
-		require.Equal(t, "100", tokenInfo.GasPrice.String())
+		tokenInfo := env.tk.GetIBCToken(env.ctx, ethSymbol)
+		require.Equal(t, "1000", tokenInfo.GasPrice.String())
 	}
 	ctx = ctx.WithBlockHeight(1000)
 	env.mockStakingKeeper.On("JailByOperator", mock.Anything, env.validators[0].OperatorAddress)

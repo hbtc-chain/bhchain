@@ -19,13 +19,13 @@ const (
 var _ sdk.Msg = MsgMappingSwap{}
 
 type MsgMappingSwap struct {
-	From        string     `json:"from"`
-	IssueSymbol sdk.Symbol `json:"issue_symbol"`
-	Coins       sdk.Coins  `json:"coins"`
+	From        sdk.CUAddress `json:"from"`
+	IssueSymbol sdk.Symbol    `json:"issue_symbol"`
+	Coins       sdk.Coins     `json:"coins"`
 }
 
 func NewMsgMappingSwap(from sdk.CUAddress, issueSymbol sdk.Symbol, amount sdk.Coins) MsgMappingSwap {
-	return MsgMappingSwap{from.String(), issueSymbol, amount}
+	return MsgMappingSwap{from, issueSymbol, amount}
 }
 
 func (msg MsgMappingSwap) Route() string { return RouterKey }
@@ -33,13 +33,13 @@ func (msg MsgMappingSwap) Route() string { return RouterKey }
 func (msg MsgMappingSwap) Type() string { return TypeMsgMappingSwap }
 
 func (msg MsgMappingSwap) ValidateBasic() sdk.Error {
-	if msg.From == "" || !sdk.IsValidAddr(msg.From) {
-		return sdk.ErrInvalidAddress(fmt.Sprintf("from address can not be empty or invalid:%v", msg.From))
+	if !msg.From.IsValidAddr() {
+		return sdk.ErrInvalidAddress(fmt.Sprintf("from address can not be empty or invalid: %s", msg.From.String()))
 	}
 	if len(msg.IssueSymbol) <= 0 {
 		return sdk.ErrInvalidSymbol("issue symbol should not be empty")
 	}
-	if !msg.IssueSymbol.IsValidTokenName() {
+	if !msg.IssueSymbol.IsValid() {
 		return sdk.ErrInvalidSymbol("invalid issue symbol")
 	}
 	if msg.Coins.Len() != 1 {
@@ -54,11 +54,7 @@ func (msg MsgMappingSwap) GetSignBytes() []byte {
 }
 
 func (msg MsgMappingSwap) GetSigners() []sdk.CUAddress {
-	addr, err := sdk.CUAddressFromBase58(msg.From)
-	if err != nil {
-		return []sdk.CUAddress{}
-	}
-	return []sdk.CUAddress{addr}
+	return []sdk.CUAddress{msg.From}
 }
 
 var _ sdk.Msg = MsgCreateDirectSwap{}
@@ -86,7 +82,7 @@ func (msg MsgCreateDirectSwap) ValidateBasic() sdk.Error {
 		return sdk.ErrInvalidOrder(fmt.Sprintf("invalid orderid:%v", msg.OrderID))
 	}
 
-	if !msg.SwapInfo.SrcSymbol.IsValidTokenName() || !msg.SwapInfo.TargetSymbol.IsValidTokenName() ||
+	if !msg.SwapInfo.SrcSymbol.IsValid() || !msg.SwapInfo.TargetSymbol.IsValid() ||
 		msg.SwapInfo.TargetSymbol.String() == msg.SwapInfo.SrcSymbol.String() {
 		return sdk.ErrInvalidSymbol(fmt.Sprintf("invalid symbol:%v, %v", msg.SwapInfo.SrcSymbol, msg.SwapInfo.TargetSymbol))
 	}
@@ -136,7 +132,7 @@ func (msg MsgCreateFreeSwap) ValidateBasic() sdk.Error {
 		return sdk.ErrInvalidOrder(fmt.Sprintf("invalid orderid:%v", msg.OrderID))
 	}
 
-	if !msg.SwapInfo.SrcSymbol.IsValidTokenName() || !msg.SwapInfo.TargetSymbol.IsValidTokenName() ||
+	if !msg.SwapInfo.SrcSymbol.IsValid() || !msg.SwapInfo.TargetSymbol.IsValid() ||
 		msg.SwapInfo.TargetSymbol.String() == msg.SwapInfo.SrcSymbol.String() {
 		return sdk.ErrInvalidSymbol(fmt.Sprintf("invalid symbol:%v, %v", msg.SwapInfo.SrcSymbol, msg.SwapInfo.TargetSymbol))
 	}

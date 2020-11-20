@@ -24,11 +24,7 @@ const (
 	// Default maximum entries in a UBD/RED pair
 	DefaultMaxEntries uint16 = 7
 
-	DefaultElectionPeriod uint64 = 1
-
 	DefaultMaxKeyNodes uint16 = 7
-
-	DefaultMaxKeyNodeHeartbeatInterval uint64 = 10000
 
 	DefaultMaxCandidateKeyNodeHeartbeatInterval uint64 = 100
 )
@@ -47,11 +43,9 @@ var (
 	KeyMaxValidators                        = []byte("MaxValidators")
 	KeyMaxEntries                           = []byte("KeyMaxEntries")
 	KeyBondDenom                            = []byte("BondDenom")
-	KeyElectionPeriod                       = []byte("ElectionPeriod")
 	KeyMaxKeyNodes                          = []byte("MaxKeyNodes")
 	KeyMinValidatorDelegation               = []byte("MinValidatorDelegation")
 	KeyMinKeyNodeDelegation                 = []byte("MinKeyNodeDelegation")
-	KeyMaxKeyNodeHeartbeatInterval          = []byte("MaxKeyNodeHeartbeatInterval")
 	KeyMaxCandidateKeyNodeHeartbeatInterval = []byte("MaxCandidateKeyNodeHeartbeatInterval")
 )
 
@@ -63,28 +57,24 @@ type Params struct {
 	MaxValidators uint16        `json:"max_validators" yaml:"max_validators"` // maximum number of validators (max uint16 = 65535)
 	MaxEntries    uint16        `json:"max_entries" yaml:"max_entries"`       // max entries for either unbonding delegation or redelegation (per pair/trio)
 	// note: we need to be a bit careful about potential overflow here, since this is user-determined
-	BondDenom                            string  `json:"bond_denom" yaml:"bond_denom"` // bondable coin denomination
-	ElectionPeriod                       uint64  `json:"election_period" yaml:"election_period"`
+	BondDenom                            string  `json:"bond_denom" yaml:"bond_denom"`       // bondable coin denomination
 	MaxKeyNodes                          uint16  `json:"max_key_nodes" yaml:"max_key_nodes"` // maximum number of keynodes
 	MinValidatorDelegation               sdk.Int `json:"min_validator_delegation" yaml:"min_validator_delegation"`
 	MinKeyNodeDelegation                 sdk.Int `json:"min_key_node_delegation" yaml:"min_key_node_delegation"`
-	MaxKeyNodeHeartbeatInterval          uint64  `json:"max_key_node_heartbeat_interval" yaml:"max_key_node_heartbeat_interval"`
 	MaxCandidateKeyNodeHeartbeatInterval uint64  `json:"max_candidate_key_node_heartbeat_interval" yaml:"max_candidate_key_node_heartbeat_interval"`
 }
 
 // NewParams creates a new Params instance
 func NewParams(unbondingTime time.Duration, maxValidators, maxKeyNodes, maxEntries uint16, bondDenom string,
-	electionPeriod uint64, minValidatorDelegation, minKeyNodeDelegation sdk.Int, maxKeyNodeHeartbeatInterval, maxCandidateKeyNodeHeartbeatInterval uint64) Params {
+	minValidatorDelegation, minKeyNodeDelegation sdk.Int, maxCandidateKeyNodeHeartbeatInterval uint64) Params {
 	return Params{
 		UnbondingTime:                        unbondingTime,
 		MaxValidators:                        maxValidators,
 		MaxKeyNodes:                          maxKeyNodes,
 		MaxEntries:                           maxEntries,
 		BondDenom:                            bondDenom,
-		ElectionPeriod:                       electionPeriod,
 		MinValidatorDelegation:               minValidatorDelegation,
 		MinKeyNodeDelegation:                 minKeyNodeDelegation,
-		MaxKeyNodeHeartbeatInterval:          maxKeyNodeHeartbeatInterval,
 		MaxCandidateKeyNodeHeartbeatInterval: maxCandidateKeyNodeHeartbeatInterval,
 	}
 }
@@ -96,11 +86,9 @@ func (p *Params) ParamSetPairs() params.ParamSetPairs {
 		{KeyMaxValidators, &p.MaxValidators},
 		{KeyMaxEntries, &p.MaxEntries},
 		{KeyBondDenom, &p.BondDenom},
-		{KeyElectionPeriod, &p.ElectionPeriod},
 		{KeyMaxKeyNodes, &p.MaxKeyNodes},
 		{KeyMinValidatorDelegation, &p.MinValidatorDelegation},
 		{KeyMinKeyNodeDelegation, &p.MinKeyNodeDelegation},
-		{KeyMaxKeyNodeHeartbeatInterval, &p.MaxKeyNodeHeartbeatInterval},
 		{KeyMaxCandidateKeyNodeHeartbeatInterval, &p.MaxCandidateKeyNodeHeartbeatInterval},
 	}
 }
@@ -116,7 +104,7 @@ func (p Params) Equal(p2 Params) bool {
 // DefaultParams returns a default set of parameters.
 func DefaultParams() Params {
 	return NewParams(DefaultUnbondingTime, DefaultMaxValidators, DefaultMaxKeyNodes, DefaultMaxEntries, sdk.DefaultBondDenom,
-		DefaultElectionPeriod, DefaultMinValidatorDelegation, DefaultMinKeyNodeDelegation, DefaultMaxKeyNodeHeartbeatInterval, DefaultMaxCandidateKeyNodeHeartbeatInterval)
+		DefaultMinValidatorDelegation, DefaultMinKeyNodeDelegation, DefaultMaxCandidateKeyNodeHeartbeatInterval)
 }
 
 // String returns a human readable string representation of the parameters.
@@ -126,14 +114,12 @@ func (p Params) String() string {
   MaxValidators: %d
   MaxKeyNodes: %d
   MaxEntries: %d
-  MaxKeyNodeHeartbeatInterval: %d
   MaxCandidateKeyNodeHeartbeatInterval: %d
   BondDenom: %s
-  ElectionPeriod: %d
   MinValidatorDelegation: %s
   MinKeyNodeDelegation: %s`,
-		p.UnbondingTime, p.MaxValidators, p.MaxKeyNodes, p.MaxEntries, p.MaxKeyNodeHeartbeatInterval, p.MaxCandidateKeyNodeHeartbeatInterval,
-		p.BondDenom, p.ElectionPeriod, p.MinValidatorDelegation.String(), p.MinKeyNodeDelegation.String())
+		p.UnbondingTime, p.MaxValidators, p.MaxKeyNodes, p.MaxEntries, p.MaxCandidateKeyNodeHeartbeatInterval,
+		p.BondDenom, p.MinValidatorDelegation.String(), p.MinKeyNodeDelegation.String())
 }
 
 // unmarshal the current staking params value from store key or panic

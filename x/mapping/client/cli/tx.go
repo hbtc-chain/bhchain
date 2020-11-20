@@ -3,8 +3,9 @@ package cli
 import (
 	"errors"
 	"fmt"
-	uuid "github.com/satori/go.uuid"
 	"strconv"
+
+	uuid "github.com/satori/go.uuid"
 
 	"github.com/hbtc-chain/bhchain/client"
 	"github.com/hbtc-chain/bhchain/codec"
@@ -59,7 +60,7 @@ func NewCmdSubmitAddMappingProposal(cdc *codec.Codec) *cobra.Command {
 			if !ok {
 				return errors.New("invalid total supply")
 			}
-			content := types.NewAddMappingProposal(from.String(), title, description, sdk.Symbol(args[0]), sdk.Symbol(args[1]), totalSupply)
+			content := types.NewAddMappingProposal(from, title, description, sdk.Symbol(args[0]), sdk.Symbol(args[1]), totalSupply)
 			err = content.ValidateBasic()
 			if err != nil {
 				return err

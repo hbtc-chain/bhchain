@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"strings"
+
 	"github.com/hbtc-chain/bhchain/client"
 	"github.com/hbtc-chain/bhchain/client/context"
 	"github.com/hbtc-chain/bhchain/client/flags"
@@ -13,7 +15,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	tmtypes "github.com/tendermint/tendermint/types"
-	"strings"
 )
 
 const (
@@ -33,7 +34,6 @@ func GetQueryCmd(cdc *codec.Codec) *cobra.Command {
 	}
 	cmd.AddCommand(GetCUCmd(cdc))
 	cmd.AddCommand(GetOpCUCmd(cdc))
-	cmd.AddCommand(GetCUCoinsCmd(cdc))
 
 	return cmd
 }
@@ -65,43 +65,6 @@ func GetCUCmd(cdc *codec.Codec) *cobra.Command {
 			}
 
 			return cliCtx.PrintOutput(cu)
-		},
-	}
-
-	return flags.GetCommands(cmd)[0]
-}
-
-// GetCUCoinsCmd returns a query CU coin that will display the coin of the CU at a given address & symbol.
-func GetCUCoinsCmd(cdc *codec.Codec) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:     "cucoin [address] [symbol]",
-		Aliases: []string{"cc"},
-		Short:   "Query custodian unit coin",
-		Args:    cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			cliCtx := context.NewCLIContext().WithCodec(cdc)
-			cuGetter := types.NewCURetriever(cliCtx)
-
-			key, err := sdk.CUAddressFromBase58(args[0])
-			if err != nil {
-				return err
-			}
-
-			if err := cuGetter.EnsureExists(key); err != nil {
-				return err
-			}
-
-			cu, err := cuGetter.GetCU(key)
-			if err != nil {
-				return err
-			}
-
-			cucoin, err := utils.GetCUCoinFromCu(cu, args[1])
-			if err != nil {
-				return err
-			}
-
-			return cliCtx.PrintOutput(cucoin)
 		},
 	}
 

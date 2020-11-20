@@ -26,34 +26,34 @@ func (m *Manager) Init(ctx sdk.Context) {
 }
 
 func (m *Manager) AddOrder(order *types.Order) {
-	key := m.formatKey(order.BaseSymbol, order.QuoteSymbol)
+	key := m.formatKey(order.DexID, order.BaseSymbol, order.QuoteSymbol)
 	market, exist := m.markets[key]
 	if !exist {
-		market = m.addMarket(order.BaseSymbol, order.QuoteSymbol)
+		market = m.addMarket(order.DexID, order.BaseSymbol, order.QuoteSymbol)
 	}
 	market.AddOrder(order)
 }
 
 func (m *Manager) DelOrder(order *types.Order) {
-	key := m.formatKey(order.BaseSymbol, order.QuoteSymbol)
+	key := m.formatKey(order.DexID, order.BaseSymbol, order.QuoteSymbol)
 	market, exist := m.markets[key]
 	if !exist {
-		market = m.addMarket(order.BaseSymbol, order.QuoteSymbol)
+		market = m.addMarket(order.DexID, order.BaseSymbol, order.QuoteSymbol)
 	}
 	market.DelOrder(order)
 }
 
-func (m *Manager) addMarket(baseSymbol, quoteSymbol sdk.Symbol) *Market {
-	market := NewMarket(baseSymbol, quoteSymbol)
-	key := m.formatKey(baseSymbol, quoteSymbol)
+func (m *Manager) addMarket(dexID uint32, baseSymbol, quoteSymbol sdk.Symbol) *Market {
+	market := NewMarket(dexID, baseSymbol, quoteSymbol)
+	key := m.formatKey(dexID, baseSymbol, quoteSymbol)
 	m.markets[key] = market
 	m.marketKeys = append(m.marketKeys, key)
 	sort.Strings(m.marketKeys)
 	return market
 }
 
-func (m *Manager) GetAllOrders(baseSymbol, quoteSymbol sdk.Symbol) ([]*types.Order, []*types.Order) {
-	market, exist := m.markets[m.formatKey(baseSymbol, quoteSymbol)]
+func (m *Manager) GetAllOrders(dexID uint32, baseSymbol, quoteSymbol sdk.Symbol) ([]*types.Order, []*types.Order) {
+	market, exist := m.markets[m.formatKey(dexID, baseSymbol, quoteSymbol)]
 	if !exist {
 		return nil, nil
 	}
@@ -80,6 +80,6 @@ func (m *Manager) GetMarkets() []*Market {
 	return markets
 }
 
-func (m *Manager) formatKey(baseSymbol, quoteSymbol sdk.Symbol) string {
-	return fmt.Sprintf("%s-%s", baseSymbol, quoteSymbol)
+func (m *Manager) formatKey(dexID uint32, baseSymbol, quoteSymbol sdk.Symbol) string {
+	return fmt.Sprintf("%d-%s-%s", dexID, baseSymbol, quoteSymbol)
 }

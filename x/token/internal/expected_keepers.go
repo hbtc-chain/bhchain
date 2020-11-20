@@ -7,7 +7,6 @@ import (
 
 type StakingKeeper interface {
 	IsActiveKeyNode(ctx sdk.Context, addr sdk.CUAddress) (bool, int)
-	GetEpochByHeight(ctx sdk.Context, height uint64) sdk.Epoch
 }
 
 type EvidenceKeeper interface {

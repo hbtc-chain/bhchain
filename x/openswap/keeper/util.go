@@ -8,68 +8,82 @@ import (
 	"github.com/hbtc-chain/bhchain/x/openswap/types"
 )
 
-func (k Keeper) canRepurchase(ctx sdk.Context, symbol sdk.Symbol) bool {
-	if symbol == sdk.NativeDefiToken {
+func (k Keeper) canRepurchase(ctx sdk.Context, tokenIn sdk.Symbol, amount sdk.Int) bool {
+	if tokenIn == sdk.NativeToken {
 		return true
 	}
-	pair := k.GetTradingPair(ctx, symbol, sdk.NativeDefiToken)
-	if pair != nil {
-		return true
-	}
-	pair = k.GetTradingPair(ctx, symbol, types.RepurchaseRoutingCoin)
-	if pair == nil {
-		return false
-	}
-	pair = k.GetTradingPair(ctx, types.RepurchaseRoutingCoin, sdk.NativeDefiToken)
+	pair := k.GetTradingPair(ctx, 0, tokenIn, sdk.NativeToken)
 	return pair != nil
 }
 
-func (k Keeper) getRealInCoeff(ctx sdk.Context) sdk.Dec {
-	return sdk.OneDec().Sub(k.RefererTransactionBonusRate(ctx)).Sub(k.FeeRate(ctx)).Sub(k.RepurchaseRate(ctx))
+func (k Keeper) getFeeRates(ctx sdk.Context, pair *types.TradingPair) *types.FeeRate {
+	if pair.DexID == 0 {
+		return types.NewFeeRate(k.LpRewardRate(ctx), k.RepurchaseRate(ctx), k.RefererTransactionBonusRate(ctx))
+	}
+	if pair.IsPublic {
+		return types.NewFeeRate(k.LpRewardRate(ctx), k.RepurchaseRate(ctx), pair.RefererRewardRate)
+	}
+	return types.NewFeeRate(pair.LPRewardRate, k.RepurchaseRate(ctx), pair.RefererRewardRate)
 }
 
-func (k Keeper) getAmountOut(ctx sdk.Context, amountIn sdk.Int, path []sdk.Symbol) (sdk.Int, error) {
-	coeff := k.getRealInCoeff(ctx)
+func (k Keeper) getRealInCoeff(ctx sdk.Context, pair *types.TradingPair) sdk.Dec {
+	return sdk.OneDec().Sub(k.getFeeRates(ctx, pair).TotalFeeRate())
+}
+
+func (k Keeper) getReserves(ctx sdk.Context, pair *types.TradingPair, tokenA, tokenB sdk.Symbol) (sdk.Int, sdk.Int) {
+	if pair.IsPublic && pair.DexID != 0 {
+		pair = k.GetTradingPair(ctx, 0, tokenA, tokenB)
+	}
+	if pair == nil {
+		return sdk.ZeroInt(), sdk.ZeroInt()
+	}
+	if tokenA == pair.TokenA {
+		return pair.TokenAAmount, pair.TokenBAmount
+	}
+	return pair.TokenBAmount, pair.TokenAAmount
+}
+
+func (k Keeper) getAmountOut(ctx sdk.Context, dexID uint32, amountIn sdk.Int, path []sdk.Symbol) (sdk.Int, error) {
 	amountOut := amountIn
 	for i := 0; i < len(path)-1; i++ {
-		reserveIn, reserveOut, err := k.getReserve(ctx, path[i], path[i+1])
-		if err != nil {
-			return sdk.ZeroInt(), err
+		pair := k.GetTradingPair(ctx, dexID, path[i], path[i+1])
+		if pair == nil {
+			return sdk.ZeroInt(), fmt.Errorf("%s-%s trading pair does not exist in dex %d",
+				path[i], path[i+1], dexID)
+		}
+		reserveIn, reserveOut := k.getReserves(ctx, pair, path[i], path[i+1])
+		if !reserveIn.IsPositive() || !reserveOut.IsPositive() {
+			return sdk.ZeroInt(), fmt.Errorf("%s-%s trading pair does not have enough liquidity", path[i], path[i+1])
 		}
 
+		coeff := k.getRealInCoeff(ctx, pair)
 		amountOut = amountOut.ToDec().Mul(coeff).TruncateInt()
 		amountOut = mulAndDiv(amountOut, reserveOut, reserveIn.Add(amountOut))
 	}
 	return amountOut, nil
 }
 
-func (k Keeper) getAmountIn(ctx sdk.Context, amountOut sdk.Int, path []sdk.Symbol) (sdk.Int, error) {
-	coeff := k.getRealInCoeff(ctx)
+func (k Keeper) getAmountIn(ctx sdk.Context, dexID uint32, amountOut sdk.Int, path []sdk.Symbol) (sdk.Int, error) {
 	amountIn := amountOut
 	for i := len(path) - 1; i > 0; i-- {
-		reserveIn, reserveOut, err := k.getReserve(ctx, path[i-1], path[i])
-		if err != nil {
-			return sdk.ZeroInt(), err
+		pair := k.GetTradingPair(ctx, dexID, path[i-1], path[i])
+		if pair == nil {
+			return sdk.ZeroInt(), fmt.Errorf("%s-%s trading pair does not exist in dex %d",
+				path[i-1], path[i], dexID)
 		}
-		if reserveOut.LTE(amountOut) {
-			return sdk.ZeroInt(), fmt.Errorf("insufficient reserve out, have %v, need %v", reserveOut.String(), amountOut.String())
+		reserveIn, reserveOut := k.getReserves(ctx, pair, path[i-1], path[i])
+		if !reserveIn.IsPositive() || !reserveOut.IsPositive() {
+			return sdk.ZeroInt(), fmt.Errorf("%s-%s trading pair does not have enough liquidity", path[i-1], path[i])
+		}
+		if reserveOut.LTE(amountIn) {
+			return sdk.ZeroInt(), fmt.Errorf("insufficient reserve out, have %v, need %v", reserveOut.String(), amountIn.String())
 		}
 
+		coeff := k.getRealInCoeff(ctx, pair)
 		amountIn = mulAndDiv(amountIn, reserveIn, reserveOut.Sub(amountIn))
-		amountIn = amountIn.ToDec().Quo(coeff).TruncateInt()
+		amountIn = amountIn.ToDec().Quo(coeff).TruncateInt().AddRaw(1)
 	}
 	return amountIn, nil
-}
-
-func (k Keeper) getReserve(ctx sdk.Context, tokenA, tokenB sdk.Symbol) (sdk.Int, sdk.Int, error) {
-	pair := k.GetTradingPair(ctx, tokenA, tokenB)
-	if pair == nil {
-		return sdk.ZeroInt(), sdk.ZeroInt(), fmt.Errorf("%s-%s not found", tokenA.String(), tokenB.String())
-	}
-	if tokenA == pair.TokenA {
-		return pair.TokenAAmount, pair.TokenBAmount, nil
-	}
-	return pair.TokenBAmount, pair.TokenAAmount, nil
 }
 
 func (k Keeper) getDec(ctx sdk.Context, key []byte) (ret sdk.Dec) {
@@ -80,6 +94,13 @@ func (k Keeper) getDec(ctx sdk.Context, key []byte) (ret sdk.Dec) {
 	}
 	k.cdc.MustUnmarshalBinaryBare(bz, &ret)
 	return
+}
+
+func (k Keeper) SortToken(tokenA, tokenB sdk.Symbol) (sdk.Symbol, sdk.Symbol) {
+	if tokenA > tokenB {
+		tokenA, tokenB = tokenB, tokenA
+	}
+	return tokenA, tokenB
 }
 
 func (k Keeper) setDec(ctx sdk.Context, key []byte, d sdk.Dec) {
@@ -93,21 +114,28 @@ func (k Keeper) getFlowFromResult(result *sdk.Result) []sdk.Flow {
 	return receipt.Flows
 }
 
+func (k Keeper) calLimitSwapAmount(ctx sdk.Context, order *types.Order, pair *types.TradingPair) (sdk.Int, bool) {
+	if !pair.TokenAAmount.IsPositive() || !pair.TokenBAmount.IsPositive() {
+		return sdk.ZeroInt(), false
+	}
+
+	curPrice := pair.Price()
+	amount := sdk.ZeroInt()
+	var priceSuitable bool
+	if order.Side == types.OrderSideBuy && order.Price.GT(curPrice) {
+		amount = pair.TokenAAmount.ToDec().Mul(order.Price).TruncateInt().Sub(pair.TokenBAmount)
+		priceSuitable = true
+	} else if order.Side == types.OrderSideSell && order.Price.LT(curPrice) {
+		amount = pair.TokenBAmount.ToDec().Quo(order.Price).TruncateInt().Sub(pair.TokenAAmount)
+		priceSuitable = true
+	}
+	if amount.IsPositive() {
+		return amount, priceSuitable
+	}
+	return sdk.ZeroInt(), priceSuitable
+}
+
 func mulAndDiv(amountA, amountB, amountC sdk.Int) sdk.Int {
 	product := big.NewInt(0).Mul(amountA.BigInt(), amountB.BigInt())
 	return sdk.NewIntFromBigInt(big.NewInt(0).Quo(product, amountC.BigInt()))
-}
-
-func calLimitSwapAmount(order *types.Order, pair *types.TradingPair) sdk.Int {
-	amount := sdk.ZeroInt()
-	curPrice := pair.Price()
-	if order.Side == types.OrderSideBuy && order.Price.GT(curPrice) {
-		amount = pair.TokenAAmount.ToDec().Mul(order.Price).TruncateInt().Sub(pair.TokenBAmount)
-	} else if order.Side == types.OrderSideSell && order.Price.LT(curPrice) {
-		amount = pair.TokenBAmount.ToDec().Quo(order.Price).TruncateInt().Sub(pair.TokenAAmount)
-	}
-	if amount.IsPositive() {
-		return amount
-	}
-	return sdk.ZeroInt()
 }

@@ -28,7 +28,7 @@ func keeperTestParams() types.Params {
 func TestHandleDoubleSign(t *testing.T) {
 
 	// initial setup
-	ctx, ck, sk, _, keeper := createTestInput(t, keeperTestParams())
+	ctx, trk, sk, _, keeper := createTestInput(t, keeperTestParams())
 	// validator added pre-genesis
 	ctx = ctx.WithBlockHeight(-1)
 	power := int64(1000000)
@@ -47,7 +47,7 @@ func TestHandleDoubleSign(t *testing.T) {
 	for i := 0; i < 7; i++ {
 		operatorAddr := addrs[i]
 		require.Equal(
-			t, ck.GetCoins(ctx, sdk.CUAddress(operatorAddr)),
+			t, trk.GetAllBalance(ctx, sdk.CUAddress(operatorAddr)),
 			sdk.NewCoins(sdk.NewCoin(sk.GetParams(ctx).BondDenom, initTokens.Sub(amt))),
 		)
 		require.Equal(t, amt, sk.Validator(ctx, operatorAddr).GetBondedTokens())
@@ -106,7 +106,7 @@ func TestHandleDoubleSign(t *testing.T) {
 func TestPastMaxEvidenceAge(t *testing.T) {
 
 	// initial setup
-	ctx, ck, sk, _, keeper := createTestInput(t, keeperTestParams())
+	ctx, trk, sk, _, keeper := createTestInput(t, keeperTestParams())
 	// validator added pre-genesis
 	ctx = ctx.WithBlockHeight(-1)
 	power := int64(1000000)
@@ -116,7 +116,7 @@ func TestPastMaxEvidenceAge(t *testing.T) {
 	require.True(t, got.IsOK())
 	staking.EndBlocker(ctx, sk)
 	require.Equal(
-		t, ck.GetCoins(ctx, sdk.CUAddress(operatorAddr)),
+		t, trk.GetAllBalance(ctx, sdk.CUAddress(operatorAddr)),
 		sdk.NewCoins(sdk.NewCoin(sk.GetParams(ctx).BondDenom, initTokens.Sub(amt))),
 	)
 	require.Equal(t, amt, sk.Validator(ctx, operatorAddr).GetBondedTokens())
@@ -143,7 +143,7 @@ func TestPastMaxEvidenceAge(t *testing.T) {
 func TestHandleAbsentValidator(t *testing.T) {
 
 	// initial setup
-	ctx, ck, sk, _, keeper := createTestInput(t, keeperTestParams())
+	ctx, trk, sk, _, keeper := createTestInput(t, keeperTestParams())
 	power := int64(1000000)
 	amt := sdk.TokensFromConsensusPower(power)
 	addr, val := addrs[0], pks[0]
@@ -154,7 +154,7 @@ func TestHandleAbsentValidator(t *testing.T) {
 	staking.EndBlocker(ctx, sk)
 
 	require.Equal(
-		t, ck.GetCoins(ctx, sdk.CUAddress(addr)),
+		t, trk.GetAllBalance(ctx, sdk.CUAddress(addr)),
 		sdk.NewCoins(sdk.NewCoin(sk.GetParams(ctx).BondDenom, initTokens.Sub(amt))),
 	)
 	require.Equal(t, amt, sk.Validator(ctx, addr).GetBondedTokens())
@@ -192,7 +192,7 @@ func TestHandleAbsentValidator(t *testing.T) {
 	validator, _ := sk.GetValidatorByConsAddr(ctx, sdk.GetConsAddress(val))
 	require.Equal(t, sdk.Bonded, validator.GetStatus())
 	bondPool := sk.GetBondedPool(ctx)
-	require.True(sdk.IntEq(t, amt, bondPool.GetCoins().AmountOf(sk.BondDenom(ctx))))
+	require.True(sdk.IntEq(t, amt, trk.GetAllBalance(ctx, bondPool.GetAddress()).AmountOf(sk.BondDenom(ctx))))
 
 	// 501st block missed
 	ctx = ctx.WithBlockHeight(height)
@@ -249,7 +249,7 @@ func TestHandleAbsentValidator(t *testing.T) {
 
 	// validator should have been slashed
 	bondPool = sk.GetBondedPool(ctx)
-	require.Equal(t, amt.Sub(slashAmt), bondPool.GetCoins().AmountOf(sk.BondDenom(ctx)))
+	require.Equal(t, amt.Sub(slashAmt), trk.GetAllBalance(ctx, bondPool.GetAddress()).AmountOf(sk.BondDenom(ctx)))
 
 	// Validator start height should not have been changed
 	info, found = keeper.getValidatorSigningInfo(ctx, sdk.ConsAddress(val.Address()))
@@ -297,7 +297,7 @@ func TestHandleAbsentValidator(t *testing.T) {
 func TestHandleNewValidator(t *testing.T) {
 	period := int64(5)
 	// initial setup
-	ctx, ck, sk, _, keeper := createTestInput(t, keeperTestParams())
+	ctx, trk, sk, _, keeper := createTestInput(t, keeperTestParams())
 	addr, val := addrs[0], pks[0]
 	amt := sdk.TokensFromConsensusPower(1000000)
 	sh := staking.NewHandler(sk)
@@ -311,7 +311,7 @@ func TestHandleNewValidator(t *testing.T) {
 	staking.EndBlocker(ctx, sk)
 
 	require.Equal(
-		t, ck.GetCoins(ctx, sdk.CUAddress(addr)),
+		t, trk.GetAllBalance(ctx, sdk.CUAddress(addr)),
 		sdk.NewCoins(sdk.NewCoin(sk.GetParams(ctx).BondDenom, initTokens.Sub(amt))),
 	)
 	require.Equal(t, amt, sk.Validator(ctx, addr).GetBondedTokens())
@@ -333,7 +333,7 @@ func TestHandleNewValidator(t *testing.T) {
 	require.Equal(t, sdk.Bonded, validator.GetStatus())
 	bondPool := sk.GetBondedPool(ctx)
 	expTokens := sdk.TokensFromConsensusPower(1000000)
-	require.Equal(t, expTokens, bondPool.GetCoins().AmountOf(sk.BondDenom(ctx)))
+	require.Equal(t, expTokens, trk.GetAllBalance(ctx, bondPool.GetAddress()).AmountOf(sk.BondDenom(ctx)))
 }
 
 // Test a jailed validator being "down" twice

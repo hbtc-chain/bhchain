@@ -3,29 +3,14 @@ package internal
 import (
 	sdk "github.com/hbtc-chain/bhchain/types"
 	"github.com/hbtc-chain/bhchain/x/custodianunit/exported"
+	ibcexported "github.com/hbtc-chain/bhchain/x/ibcasset/exported"
 	"github.com/hbtc-chain/bhchain/x/staking/types"
 )
 
 // AccountKeeper defines the account contract that must be fulfilled when
 // creating a x/bank keeper.
 type TokenKeeper interface {
-	IsUtxoBased(ctx sdk.Context, symbol sdk.Symbol) bool
-
-	IsSubToken(ctx sdk.Context, symbol sdk.Symbol) bool
-
-	GetOpenFee(ctx sdk.Context, symbol sdk.Symbol) sdk.Int
-
-	GetSysOpenFee(ctx sdk.Context, symbol sdk.Symbol) sdk.Int
-
-	IsTokenSupported(ctx sdk.Context, symbol sdk.Symbol) bool
-
-	GetMaxOpCUNumber(ctx sdk.Context, symbol sdk.Symbol) uint64
-
-	GetChain(ctx sdk.Context, symbol sdk.Symbol) sdk.Symbol
-
-	GetTokenInfo(ctx sdk.Context, symbol sdk.Symbol) *sdk.TokenInfo
-
-	GetAllTokenInfo(ctx sdk.Context) []sdk.TokenInfo
+	GetIBCToken(ctx sdk.Context, symbol sdk.Symbol) *sdk.IBCToken
 }
 
 type OrderKeeper interface {
@@ -38,7 +23,7 @@ type OrderKeeper interface {
 	GetOrder(ctx sdk.Context, orderID string) sdk.Order
 
 	NewOrderKeyGen(ctx sdk.Context, from sdk.CUAddress, orderID string, symbol string,
-		keynodes []sdk.CUAddress, signThreshold uint64, to sdk.CUAddress, openFee sdk.Coins) *sdk.OrderKeyGen
+		keynodes []sdk.CUAddress, signThreshold uint64, to sdk.CUAddress, openFee sdk.Coin) *sdk.OrderKeyGen
 
 	RemoveProcessOrder(ctx sdk.Context, orderType sdk.OrderType, orderID string)
 
@@ -58,10 +43,17 @@ type CUKeeper interface {
 
 	GetOpCUs(ctx sdk.Context, symbol string) []exported.CustodianUnit
 
-	SetExtAddresseWithCU(ctx sdk.Context, symbol, extAddress string, cuAddress sdk.CUAddress)
+	SetExtAddressWithCU(ctx sdk.Context, symbol, extAddress string, cuAddress sdk.CUAddress)
 
 	GetCUFromExtAddress(ctx sdk.Context, symbol, extAddress string) (sdk.CUAddress, error)
 }
+
+type IBCAssetKeeper interface {
+	GetCUIBCAsset(context sdk.Context, addresses sdk.CUAddress) ibcexported.CUIBCAsset
+	NewCUIBCAssetWithAddress(ctx sdk.Context, cuType sdk.CUType, cuaddr sdk.CUAddress) ibcexported.CUIBCAsset
+	SetCUIBCAsset(ctx sdk.Context, cuAst ibcexported.CUIBCAsset)
+}
+
 type ReceiptKeeper interface {
 	// NewReceipt creates a new receipt with a list of flows
 	NewReceipt(category sdk.CategoryType, flows []sdk.Flow) *sdk.Receipt
@@ -80,11 +72,18 @@ type ReceiptKeeper interface {
 }
 
 type StakingKeeper interface {
-	GetAllValidators(ctx sdk.Context) (validators []types.Validator)
+	GetValidator(ctx sdk.Context, addr sdk.ValAddress) (validator types.Validator, found bool)
 	GetEpochByHeight(ctx sdk.Context, height uint64) sdk.Epoch
 	GetCurrentEpoch(ctx sdk.Context) sdk.Epoch
 }
 
 type DistributionKeeper interface {
 	AddToFeePool(ctx sdk.Context, coins sdk.DecCoins)
+}
+
+type TransferKeeper interface {
+	GetBalance(ctx sdk.Context, addr sdk.CUAddress, symbol string) sdk.Int
+	SubCoin(ctx sdk.Context, addr sdk.CUAddress, coin sdk.Coin) (sdk.Coin, sdk.Flow, sdk.Error)
+	SubCoinHold(ctx sdk.Context, addr sdk.CUAddress, coin sdk.Coin) (sdk.Coin, sdk.Flow, sdk.Error)
+	LockCoin(ctx sdk.Context, addr sdk.CUAddress, amt sdk.Coin) ([]sdk.Flow, sdk.Error)
 }

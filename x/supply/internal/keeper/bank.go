@@ -17,7 +17,8 @@ func (k Keeper) SendCoinsFromModuleToAccount(ctx sdk.Context, senderModule strin
 		return err.Result(), err
 	}
 
-	return k.tk.SendCoins(ctx, senderAddr, recipientAddr, amt)
+	res, _, err := k.tk.SendCoins(ctx, senderAddr, recipientAddr, amt)
+	return res, err
 }
 
 // SendCoinsFromModuleToModule transfers coins from a ModuleAccount to another
@@ -35,7 +36,8 @@ func (k Keeper) SendCoinsFromModuleToModule(ctx sdk.Context, senderModule, recip
 		panic(fmt.Sprintf("module CU %s isn't able to be created", recipientModule))
 	}
 
-	return k.tk.SendCoins(ctx, senderAddr, recipientAcc.GetAddress(), amt)
+	res, _, err := k.tk.SendCoins(ctx, senderAddr, recipientAcc.GetAddress(), amt)
+	return res, err
 }
 
 // SendCoinsFromAccountToModule transfers coins from an CUAddress to a ModuleAccount
@@ -48,7 +50,8 @@ func (k Keeper) SendCoinsFromAccountToModule(ctx sdk.Context, senderAddr sdk.CUA
 		panic(fmt.Sprintf("module CU %s isn't able to be created", recipientModule))
 	}
 
-	return k.tk.SendCoins(ctx, senderAddr, recipientAcc.GetAddress(), amt)
+	res, _, err := k.tk.SendCoins(ctx, senderAddr, recipientAcc.GetAddress(), amt)
+	return res, err
 }
 
 // DelegateCoinsFromAccountToModule delegates coins and transfers
@@ -131,7 +134,7 @@ func (k Keeper) BurnCoins(ctx sdk.Context, moduleName string, amt sdk.Coins) sdk
 		panic(fmt.Sprintf("module CU %s does not have permissions to burn tokens", moduleName))
 	}
 
-	_, _, err := k.tk.SubtractCoins(ctx, acc.GetAddress(), amt)
+	_, _, err := k.tk.SubCoins(ctx, acc.GetAddress(), amt)
 	if err != nil {
 		panic(err)
 	}

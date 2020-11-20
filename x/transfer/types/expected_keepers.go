@@ -5,6 +5,7 @@ import (
 	sdk "github.com/hbtc-chain/bhchain/types"
 	"github.com/hbtc-chain/bhchain/x/custodianunit/exported"
 	evidencetypes "github.com/hbtc-chain/bhchain/x/evidence/exported"
+	ibcexported "github.com/hbtc-chain/bhchain/x/ibcasset/exported"
 	"github.com/hbtc-chain/bhchain/x/staking/types"
 )
 
@@ -14,9 +15,19 @@ type CUKeeper interface {
 	NewCUWithAddress(ctx sdk.Context, cuType sdk.CUType, addr sdk.CUAddress) exported.CustodianUnit
 
 	GetCU(ctx sdk.Context, addr sdk.CUAddress) exported.CustodianUnit
+	GetOrNewCU(context sdk.Context, cuType sdk.CUType, addresses sdk.CUAddress) exported.CustodianUnit
 	GetAllCUs(ctx sdk.Context) []exported.CustodianUnit
 	SetCU(ctx sdk.Context, acc exported.CustodianUnit)
 	IterateCUs(ctx sdk.Context, process func(exported.CustodianUnit) bool)
+
+	GetOpCUs(ctx sdk.Context, symbol string) []exported.CustodianUnit
+	GetCUFromExtAddress(ctx sdk.Context, symbol, extAddress string) (sdk.CUAddress, error)
+}
+
+type IBCAssetKeeper interface {
+	GetCUIBCAsset(context sdk.Context, addresses sdk.CUAddress) ibcexported.CUIBCAsset
+	NewCUIBCAssetWithAddress(ctx sdk.Context, cuType sdk.CUType, cuaddr sdk.CUAddress) ibcexported.CUIBCAsset
+	SetCUIBCAsset(ctx sdk.Context, cuAst ibcexported.CUIBCAsset)
 
 	//Deposit operation
 	GetDepositList(ctx sdk.Context, symbol string, address sdk.CUAddress) sdk.DepositList
@@ -27,24 +38,10 @@ type CUKeeper interface {
 	SetDepositStatus(ctx sdk.Context, symbol string, address sdk.CUAddress, hash string, index uint64, status sdk.DepositItemStatus) error
 	GetDeposit(ctx sdk.Context, symbol string, address sdk.CUAddress, hash string, index uint64) sdk.DepositItem
 	IsDepositExist(ctx sdk.Context, symbol string, address sdk.CUAddress, hash string, index uint64) bool
-	GetOpCUs(ctx sdk.Context, symbol string) []exported.CustodianUnit
-	GetCUFromExtAddress(ctx sdk.Context, symbol, extAddress string) (sdk.CUAddress, error)
 }
 
 type TokenKeeper interface {
-	GetTokenInfo(ctx sdk.Context, symbol sdk.Symbol) *sdk.TokenInfo
-	GetIssuer(ctx sdk.Context, symbol sdk.Symbol) string
-	GetChain(ctx sdk.Context, symbol sdk.Symbol) sdk.Symbol
-	GetTokenType(ctx sdk.Context, symbol sdk.Symbol) sdk.TokenType
-	IsUtxoBased(ctx sdk.Context, symbol sdk.Symbol) bool
-	IsSubToken(ctx sdk.Context, symbol sdk.Symbol) bool
-	IsSendEnabled(ctx sdk.Context, symbol sdk.Symbol) bool
-	IsDepositEnabled(ctx sdk.Context, symbol sdk.Symbol) bool
-	IsWithdrawalEnabled(ctx sdk.Context, symbol sdk.Symbol) bool
-	GetCollectThreshold(ctx sdk.Context, symbol sdk.Symbol) sdk.Int
-	GetWithdrawalFeeRate(ctx sdk.Context, symbol sdk.Symbol) sdk.Dec
-	IsTokenSupported(ctx sdk.Context, symbol sdk.Symbol) bool
-	GetSymbols(ctx sdk.Context) []string
+	GetIBCToken(ctx sdk.Context, symbol sdk.Symbol) *sdk.IBCToken
 }
 
 type ReceiptKeeper interface {
@@ -58,23 +55,23 @@ type ReceiptKeeper interface {
 	NewDepositFlow(CuAddress, multisignedadress, symbol, txhash, orderID, memo string,
 		index uint64, amount sdk.Int, depositType sdk.DepositType, epoch uint64) sdk.DepositFlow
 	NewDepositConfirmedFlow(validOrderIds, invalidOrderIds []string) sdk.DepositConfirmedFlow
-	NewOrderRetryFlow(orderIDs []string) sdk.OrderRetryFlow
+	NewOrderRetryFlow(orderIDs []string, excludedKeyNode sdk.CUAddress) sdk.OrderRetryFlow
 
 	NewCollectWaitSignFlow(orderIDs []string, rawData []byte) sdk.CollectWaitSignFlow
-	NewCollectSignFinishFlow(orderIDs []string, signedTx []byte, txHash string) sdk.CollectSignFinishFlow
+	NewCollectSignFinishFlow(orderIDs []string, signedTx []byte) sdk.CollectSignFinishFlow
 	NewCollectFinishFlow(orderIDs []string, costFee sdk.Int) sdk.CollectFinishFlow
 	NewWithdrawalFlow(orderID, fromcu, toaddr, symbol string, amount, gasFee sdk.Int, status sdk.WithdrawStatus) sdk.WithdrawalFlow
 	NewWithdrawalConfirmFlow(orderID string, status sdk.WithdrawStatus) sdk.WithdrawalConfirmFlow
 	NewWithdrawalWaitSignFlow(orderIDs []string, opcu, fromAddr string, rawData []byte) sdk.WithdrawalWaitSignFlow
-	NewWithdrawalSignFinishFlow(orderIDs []string, signedTx []byte, txHash string) sdk.WithdrawalSignFinishFlow
+	NewWithdrawalSignFinishFlow(orderIDs []string, signedTx []byte) sdk.WithdrawalSignFinishFlow
 	NewWithdrawalFinishFlow(orderIDs []string, costFee sdk.Int, valid bool) sdk.WithdrawalFinishFlow
 	NewSysTransferFlow(orderID, fromcu, tocu, fromAddr, toaddr, symbol string, amount sdk.Int) sdk.SysTransferFlow
 	NewSysTransferWaitSignFlow(orderID string, rawData []byte) sdk.SysTransferWaitSignFlow
-	NewSysTransferSignFinishFlow(orderID string, signedTx []byte, txHash string) sdk.SysTransferSignFinishFlow
+	NewSysTransferSignFinishFlow(orderID string, signedTx []byte) sdk.SysTransferSignFinishFlow
 	NewSysTransferFinishFlow(orderID string, costFee sdk.Int) sdk.SysTransferFinishFlow
 	NewOpcuAssetTransferFlow(orderID, fromcu, fromAddr, toaddr, symbol string, items []sdk.TransferItem) sdk.OpcuAssetTransferFlow
 	NewOpcuAssetTransferWaitSignFlow(orderID string, rawData []byte) sdk.OpcuAssetTransferWaitSignFlow
-	NewOpcuAssetTransferSignFinishFlow(orderID string, signedTx []byte, txHash string) sdk.OpcuAssetTransferSignFinishFlow
+	NewOpcuAssetTransferSignFinishFlow(orderID string, signedTx []byte) sdk.OpcuAssetTransferSignFinishFlow
 	NewOpcuAssetTransferFinishFlow(orderID string, costFee sdk.Int) sdk.OpcuAssetTransferFinishFlow
 
 	SaveReceiptToResult(receipt *sdk.Receipt, result *sdk.Result) *sdk.Result
@@ -100,7 +97,7 @@ type OrderKeeper interface {
 }
 
 type StakingKeeper interface {
-	GetAllValidators(ctx sdk.Context) (validators []types.Validator)
+	GetValidator(ctx sdk.Context, addr sdk.ValAddress) (validator types.Validator, found bool)
 	GetEpochByHeight(ctx sdk.Context, height uint64) sdk.Epoch
 	GetCurrentEpoch(ctx sdk.Context) sdk.Epoch
 	SetMigrationFinished(ctx sdk.Context)

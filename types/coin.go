@@ -17,7 +17,7 @@ import (
 //
 // TODO: Make field members private for further safety.
 type Coin struct {
-	Denom string `json:"denom"`
+	Denom string `json:"denom"` // denom is token symbol
 
 	// To allow the use of unsigned integers (see: #1273) a larger refactor will
 	// need to be made. So we use signed integers for now with safety measures in
@@ -219,9 +219,6 @@ func (coins Coins) IsValid() bool {
 
 		lowDenom := coins[0].Denom
 		for _, coin := range coins[1:] {
-			if strings.ToLower(coin.Denom) != coin.Denom {
-				return false
-			}
 			if coin.Denom <= lowDenom {
 				return false
 			}
@@ -592,8 +589,7 @@ func (coins Coins) Sort() Coins {
 // Parsing
 
 var (
-	// Denominations can be 2 ~ 16 characters long.
-	reDnmString = `[a-z][a-z0-9]{1,15}`
+	reDnmString = `[a-zA-Z0-9]{2,40}`
 	reAmt       = `[[:digit:]]+`
 	reDecAmt    = `[[:digit:]]*\.[[:digit:]]+`
 	reSpc       = `[[:space:]]*`
@@ -633,7 +629,7 @@ func ParseCoin(coinStr string) (coin Coin, err error) {
 	}
 
 	if err := validateDenom(denomStr); err != nil {
-		return Coin{}, fmt.Errorf("invalid denom cannot contain upper case characters or spaces: %s", err)
+		return Coin{}, fmt.Errorf("invalid denom: %s", err)
 	}
 
 	return NewCoin(denomStr, amount), nil

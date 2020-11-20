@@ -139,8 +139,8 @@ func InitGenesis(ctx sdk.Context, k Keeper, supplyKeeper SupplyKeeper, data Gene
 	}
 
 	// add coins if not provided on genesis
-	if moduleAcc.GetCoins().IsZero() {
-		if err := moduleAcc.SetCoins(totalDeposits); err != nil {
+	if k.tk.GetAllBalance(ctx, moduleAcc.GetAddress()).IsZero() {
+		if _, _, err := k.tk.AddCoins(ctx, moduleAcc.GetAddress(), totalDeposits); err != nil {
 			panic(err)
 		}
 		supplyKeeper.SetModuleAccount(ctx, moduleAcc)

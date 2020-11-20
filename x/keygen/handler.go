@@ -7,8 +7,8 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 
 	sdk "github.com/hbtc-chain/bhchain/types"
-	"github.com/hbtc-chain/bhchain/x/custodianunit/exported"
 	cutypes "github.com/hbtc-chain/bhchain/x/custodianunit/types"
+	"github.com/hbtc-chain/bhchain/x/ibcasset/exported"
 	"github.com/hbtc-chain/bhchain/x/keygen/types"
 )
 
@@ -39,82 +39,91 @@ func handleMsgKeyGen(ctx sdk.Context, keeper Keeper, msg MsgKeyGen) sdk.Result {
 	ctx.Logger().Info("handleMsgKeyGen", "msg", msg)
 	//user's fromAddr/toAddr cu account allow toAddr be nil,but opcu account must not be nil.
 	symbol, fromAddr, toAddr := msg.Symbol, msg.From, msg.To
-	ti := keeper.tk.GetTokenInfo(ctx, symbol)
+	ti := keeper.tk.GetIBCToken(ctx, symbol)
 	if result := checkSymbol(symbol, ti, keeper); !result.IsOK() {
 		return result
 	}
-	var toCU exported.CustodianUnit
-	fromCU := keeper.ck.GetCU(ctx, fromAddr)
+	var toCUAst exported.CUIBCAsset
+	fromCUAst := keeper.ik.GetCUIBCAsset(ctx, fromAddr)
 	if fromAddr.Equals(toAddr) {
-		toCU = fromCU
+		toCUAst = fromCUAst
 	} else {
-		toCU = keeper.ck.GetOrNewCU(ctx, sdk.CUTypeUser, toAddr)
+		toCUAst = keeper.ik.GetCUIBCAsset(ctx, toAddr)
 	}
 
-	pubkeyEpochIndex := toCU.GetAssetPubkeyEpoch()
+	if toCUAst == nil {
+		toCUAst = keeper.ik.NewCUIBCAssetWithAddress(ctx, sdk.CUTypeUser, toAddr)
+	}
+
+	toCU := keeper.ck.GetCU(ctx, toAddr)
+	if toCU == nil {
+		toCU = keeper.ck.GetOrNewCU(ctx, sdk.CUTypeUser, toAddr)
+		keeper.ck.SetCU(ctx, toCU)
+	}
+
+	pubkeyEpochIndex := toCUAst.GetAssetPubkeyEpoch()
 	curEpoch := keeper.vk.GetCurrentEpoch(ctx)
-	feeCoin := getFeeCoin(toCU.GetCUType(), ti)
-	feeCoins := sdk.NewCoins(feeCoin)
+	feeCoin := getFeeCoin(toCUAst.GetCUType(), ti)
 	if pubkeyEpochIndex > 0 {
 		feeCoin = sdk.NewCoin(sdk.NativeToken, sdk.ZeroInt())
 	}
-	fromCoins := fromCU.GetCoins()
-	if fromCoins.AmountOf(feeCoin.Denom).LT(feeCoin.Amount) {
-		return sdk.ErrInsufficientFee(fmt.Sprintf("From CU: %v no enough fee. nativetoken:%v,openfee:%v", fromAddr, fromCoins.AmountOf(sdk.NativeToken), feeCoin.Amount)).Result()
+	have := keeper.trk.GetBalance(ctx, fromAddr, feeCoin.Denom)
+	if have.LT(feeCoin.Amount) {
+		return sdk.ErrInsufficientFee(fmt.Sprintf("From CU %s does not have enough fee. has:%v, need:%v", fromAddr.String(), have, feeCoin.Amount)).Result()
 	}
 
 	if result := checkOrderID(ctx, msg.OrderID, keeper); !result.IsOK() {
 		return result
 	}
-	if toCU.GetAssetAddress(symbol.String(), curEpoch.Index) != "" {
-		return sdk.ErrInvalidAddr(fmt.Sprintf("CU%v already have %v address", toAddr, symbol)).Result()
+	if toCUAst.GetAssetAddress(symbol.String(), curEpoch.Index) != "" {
+		return sdk.ErrInvalidAddr(fmt.Sprintf("CU %s already has %v address", toAddr.String(), symbol)).Result()
 	}
 
-	if toCU.GetCUType() == sdk.CUTypeOp {
+	if toCUAst.GetCUType() == sdk.CUTypeOp {
 		if toCU.GetSymbol() != symbol.String() {
 			return sdk.ErrInvalidSymbol(fmt.Sprintf("symbol:%v & Op CU.symbol:%v not equal", symbol, toCU.GetSymbol())).Result()
 		}
 		if !isValidator(curEpoch.KeyNodeSet, fromAddr) {
-			return sdk.ErrInvalidAddr(fmt.Sprintf("from CU:%v is not a validator", fromAddr)).Result()
+			return sdk.ErrInvalidAddr(fmt.Sprintf("from CU %s is not a validator", fromAddr.String())).Result()
 		}
 		if pubkeyEpochIndex > 0 {
 			return sdk.ErrInvalidTx("OPCU has already keygen").Result()
 		}
 	}
 	processOrderList := keeper.ok.GetProcessOrderListByType(ctx, sdk.OrderTypeKeyGen)
-	if checkCuKeyGenOrder(ctx, keeper, processOrderList, toAddr) {
-		return sdk.ErrInvalidTx(fmt.Sprintf("ToCU: %v is already exist and not finish", toAddr.String())).Result()
+	if exist, orderID := checkCuKeyGenOrder(ctx, keeper, processOrderList, toAddr); exist {
+		return sdk.ErrInvalidTx(fmt.Sprintf("ToCU %s has unfinished keygen order %s", toAddr.String(), orderID)).Result()
 	}
 
 	if pubkeyEpochIndex == curEpoch.Index {
 		//6、如果subtoken，且tocu已有链上地址，直接copy。执行结束。
-		chainAddr := toCU.GetAssetAddress(ti.Chain.String(), curEpoch.Index)
-		if keeper.tk.IsSubToken(ctx, symbol) && chainAddr != "" {
-			_ = toCU.SetAssetAddress(symbol.String(), chainAddr, curEpoch.Index)
-			keeper.ck.SetCU(ctx, toCU)
+		chainAddr := toCUAst.GetAssetAddress(ti.Chain.String(), curEpoch.Index)
+		if ti.Symbol != ti.Chain && chainAddr != "" {
+			_ = toCUAst.SetAssetAddress(symbol.String(), chainAddr, curEpoch.Index)
+			keeper.ik.SetCUIBCAsset(ctx, toCUAst)
 			return sdk.Result{}
 		}
 
 		//7、toCU.AssetPubkey已经存在，address不存在，用AssetPubkey向chainnode要address.
-		if pk := toCU.GetAssetPubkey(curEpoch.Index); pk != nil {
+		if pk := toCUAst.GetAssetPubkey(curEpoch.Index); pk != nil {
 			mulAddress, err := keeper.cn.ConvertAddress(ti.Chain.String(), pk)
 			if err != nil {
 				return sdk.ErrInternal(fmt.Sprintf("chainnode err:%v", err)).Result()
 			}
 			if mulAddress != "" {
-				err = toCU.SetAssetAddress(symbol.String(), mulAddress, curEpoch.Index)
+				err = toCUAst.SetAssetAddress(symbol.String(), mulAddress, curEpoch.Index)
 				if err != nil {
 					return sdk.ErrInternal(fmt.Sprintf("Set address error: %v", err)).Result()
 				}
 				if symbol != ti.Chain {
-					if err := toCU.SetAssetAddress(ti.Chain.String(), mulAddress, curEpoch.Index); err != nil {
+					if err := toCUAst.SetAssetAddress(ti.Chain.String(), mulAddress, curEpoch.Index); err != nil {
 						return sdk.ErrInternal(fmt.Sprintf("Set chain asset address error: %v", err)).Result()
 					}
 				}
-				keeper.ck.SetCU(ctx, toCU)
+				keeper.ik.SetCUIBCAsset(ctx, toCUAst)
 
 				// index extAddress to cuAddress
-				keeper.ck.SetExtAddresseWithCU(ctx, ti.Chain.String(), mulAddress, toCU.GetAddress())
+				keeper.ck.SetExtAddressWithCU(ctx, ti.Chain.String(), mulAddress, toCUAst.GetAddress())
 				return sdk.Result{}
 			}
 		}
@@ -138,14 +147,14 @@ func handleMsgKeyGen(ctx sdk.Context, keeper Keeper, msg MsgKeyGen) sdk.Result {
 			continue
 		}
 		// multisignaddress 写入to CU，PubKey 写入cu.AssetPubkey
-		if result := setAddressAndPubkeyToCU(ctx, toCU, keeper, keygenOrder.Pubkey, addr, symbol.String(), ti.Chain.String(), curEpoch.Index); !result.IsOK() {
+		if result := setAddressAndPubkeyToCU(ctx, toCUAst, keeper, keygenOrder.Pubkey, addr, symbol.String(), ti.Chain.String(), curEpoch.Index); !result.IsOK() {
 			return result
 		}
 		// 更新 order 状态
 		keygenOrder.CUAddress = fromAddr
 		keygenOrder.Symbol = symbol.String()
 		keygenOrder.To = toAddr
-		keygenOrder.OpenFee = feeCoins
+		keygenOrder.OpenFee = feeCoin
 		keygenOrder.Status = sdk.OrderStatusFinish
 		keygenOrder.MultiSignAddress = addr
 		keeper.ok.SetOrder(ctx, keygenOrder)
@@ -158,16 +167,13 @@ func handleMsgKeyGen(ctx sdk.Context, keeper Keeper, msg MsgKeyGen) sdk.Result {
 		flows = append(flows, orderflow, keyGenFinishFlow)
 
 		if feeCoin.Amount.IsPositive() {
-			fromCU.SubCoins(feeCoins)
-			keeper.dk.AddToFeePool(ctx, sdk.NewDecCoins(feeCoins))
+			_, flow, err := keeper.trk.SubCoin(ctx, fromAddr, feeCoin)
+			if err != nil {
+				return err.Result()
+			}
+			flows = append(flows, flow)
+			keeper.dk.AddToFeePool(ctx, sdk.NewDecCoins(sdk.NewCoins(feeCoin)))
 		}
-
-		if len(fromCU.GetBalanceFlows()) > 0 {
-			flows = append(flows, fromCU.GetBalanceFlows()[0])
-			fromCU.ResetBalanceFlows()
-		}
-
-		keeper.ck.SetCU(ctx, fromCU)
 
 		receipt := keeper.rk.NewReceipt(sdk.CategoryTypeKeyGen, flows)
 		result := sdk.Result{}
@@ -177,7 +183,7 @@ func handleMsgKeyGen(ctx sdk.Context, keeper Keeper, msg MsgKeyGen) sdk.Result {
 				types.EventTypeKeyGenFinish,
 				sdk.NewAttribute(types.AttributeKeyFrom, fromAddr.String()),
 				sdk.NewAttribute(types.AttributeKeySender, msg.From.String()),
-				sdk.NewAttribute(types.AttributeKeyTo, toCU.GetAddress().String()),
+				sdk.NewAttribute(types.AttributeKeyTo, toCUAst.GetAddress().String()),
 				sdk.NewAttribute(types.AttributeKeySymbol, msg.Symbol.String()),
 				sdk.NewAttribute(types.AttributeKeyOrderID, orderID),
 			),
@@ -190,35 +196,36 @@ func handleMsgKeyGen(ctx sdk.Context, keeper Keeper, msg MsgKeyGen) sdk.Result {
 
 	// 没有预生成的公钥则直接 keygen
 	//hold openfee
+	var transferFlows []sdk.Flow
 	if pubkeyEpochIndex == 0 {
-		fromCU.SubCoins(feeCoins)
-		fromCU.AddCoinsHold(feeCoins)
-		keeper.ck.SetCU(ctx, fromCU)
+		var err sdk.Error
+		transferFlows, err = keeper.trk.LockCoin(ctx, fromAddr, feeCoin)
+		if err != nil {
+			return err.Result()
+		}
 	}
-	keeper.ck.SetCU(ctx, toCU)
+	keeper.ik.SetCUIBCAsset(ctx, toCUAst)
 
 	//8、生成KeyGenOrder， ID为msg.orderID
-	vals := curEpoch.KeyNodeSet
-	if len(vals) == 0 {
-		return sdk.ErrInsufficientValidatorNumForKeyGen(fmt.Sprintf("validator's number:%v", len(vals))).Result()
+	excludedKeyNode := keeper.getExcludedKeyNode(ctx, curEpoch.KeyNodeSet)
+	keynodes := make([]sdk.CUAddress, 0, len(curEpoch.KeyNodeSet))
+	for _, val := range curEpoch.KeyNodeSet {
+		if !val.Equals(excludedKeyNode) {
+			keynodes = append(keynodes, val)
+		}
 	}
-	keynodes := make([]sdk.CUAddress, len(vals))
-	for i, val := range vals {
-		keynodes[i] = val
+	if len(keynodes) == 0 {
+		return sdk.ErrInsufficientValidatorNumForKeyGen("empty keynode list").Result()
 	}
-	order := keeper.ok.NewOrderKeyGen(ctx, fromAddr, msg.OrderID, symbol.String(), keynodes, uint64(sdk.Majority23(len(vals))), toAddr, feeCoins)
+	order := keeper.ok.NewOrderKeyGen(ctx, fromAddr, msg.OrderID, symbol.String(), keynodes, uint64(sdk.Majority23(len(curEpoch.KeyNodeSet))), toAddr, feeCoin)
 	keeper.ok.SetOrder(ctx, order)
 
 	//9. generate orderflow, keygenflow, balanceFlows
 	flows := make([]sdk.Flow, 0, 3)
 	orderFlow := keeper.rk.NewOrderFlow(symbol, toAddr, msg.OrderID, sdk.OrderTypeKeyGen, sdk.OrderStatusBegin)
-	keyGenFlow := sdk.KeyGenFlow{OrderID: msg.OrderID, Symbol: symbol, From: fromAddr, To: toAddr, IsPreKeyGen: false}
+	keyGenFlow := sdk.KeyGenFlow{OrderID: msg.OrderID, Symbol: symbol, From: fromAddr, To: toAddr, IsPreKeyGen: false, ExcludedKeyNode: excludedKeyNode}
 	flows = append(flows, orderFlow, keyGenFlow)
-	bFlows := fromCU.GetBalanceFlows()
-	fromCU.ResetBalanceFlows()
-	for _, bFlow := range bFlows {
-		flows = append(flows, bFlow)
-	}
+	flows = append(flows, transferFlows...)
 
 	receipt := keeper.rk.NewReceipt(sdk.CategoryTypeKeyGen, flows)
 	result := sdk.Result{}
@@ -261,26 +268,27 @@ func handleMsgKeyGenWaitSign(ctx sdk.Context, keeper Keeper, msg MsgKeyGenWaitSi
 		return sdk.ErrInvalidTx("not a OrderKeyGen").Result()
 	}
 
-	toCU := keeper.ck.GetCU(ctx, keyGenOrder.To)
-	if toCU != nil {
-		if toCU.GetCUType() == sdk.CUTypeOp {
+	toCUAst := keeper.ik.GetCUIBCAsset(ctx, keyGenOrder.To)
+	if toCUAst != nil {
+		if toCUAst.GetCUType() == sdk.CUTypeOp {
+			toCU := keeper.ck.GetCU(ctx, keyGenOrder.To)
 			if toCU.GetSymbol() != symbol {
-				return sdk.ErrInvalidSymbol(fmt.Sprintf("%v is not Op CU.symbol:%v", symbol, toCU.GetSymbol())).Result()
+				return sdk.ErrInvalidSymbol(fmt.Sprintf("%s is not Op CU %s's symbol:%v", symbol, toCU.GetAddress().String(), toCU.GetSymbol())).Result()
 			}
 			// order.from & msg.from may not equal
 			if !isValidator(curEpoch.KeyNodeSet, fromCUAddr) || !isValidator(curEpoch.KeyNodeSet, msg.From) {
-				return sdk.ErrInvalidAddr(fmt.Sprintf("from CU:%v or msg.From:%v is not a validator", fromCUAddr, msg.From)).Result()
+				return sdk.ErrInvalidAddr(fmt.Sprintf("from CU:%s or msg.From:%s is not a keynode", fromCUAddr.String(), msg.From.String())).Result()
 			}
 		}
 
 		//4、检查tocu.symbol对应的address是否已经存在，
-		if toCU.GetAssetAddress(symbol, msg.Epoch) != "" {
+		if toCUAst.GetAssetAddress(symbol, msg.Epoch) != "" {
 			return sdk.ErrInvalidTx("cu asset address already exist").Result()
 		}
 	} else {
 		// 3.检查 from 必须为 validator
 		if !isValidator(curEpoch.KeyNodeSet, msg.From) {
-			return sdk.ErrInvalidAddr(fmt.Sprintf("from CU:%v is not a validator", msg.From)).Result()
+			return sdk.ErrInvalidAddr(fmt.Sprintf("from CU:%s is not a keynode", msg.From.String())).Result()
 		}
 	}
 
@@ -351,38 +359,39 @@ func handleMsgKeyGenFinish(ctx sdk.Context, keeper Keeper, msg MsgKeyGenFinish) 
 	// 6.生成 orderFlow, keyGenSignFinishFlow
 	flows := make([]sdk.Flow, 0, 2)
 
-	toCU := keeper.ck.GetCU(ctx, keyGenOrder.To)
-	if toCU != nil {
-		ti := keeper.tk.GetTokenInfo(ctx, sdk.Symbol(symbol))
+	toCUAst := keeper.ik.GetCUIBCAsset(ctx, keyGenOrder.To)
+	if toCUAst != nil {
+		ti := keeper.tk.GetIBCToken(ctx, sdk.Symbol(symbol))
 		addr, err := keeper.cn.ConvertAddress(ti.Chain.String(), keyGenOrder.Pubkey)
 		if err != nil {
 			return sdk.ErrInvalidTx(fmt.Sprintf("Convert address error, chain:%v, pubKey:%v, err:%v", ti.Chain.String(), keyGenOrder.Pubkey, err)).Result()
 
 		}
-		if result := setAddressAndPubkeyToCU(ctx, toCU, keeper, keyGenOrder.Pubkey, addr, symbol, ti.Chain.String(), keyGenOrder.Epoch); !result.IsOK() {
+		if result := setAddressAndPubkeyToCU(ctx, toCUAst, keeper, keyGenOrder.Pubkey, addr, symbol, ti.Chain.String(), keyGenOrder.Epoch); !result.IsOK() {
 			return result
 		}
 
-		if toCU.GetCUType() == sdk.CUTypeOp && toCU.GetMigrationStatus() == sdk.MigrationKeyGenBegin {
-			toCU.SetMigrationStatus(sdk.MigrationKeyGenFinish)
-			keeper.ck.SetCU(ctx, toCU)
+		if toCUAst.GetCUType() == sdk.CUTypeOp && toCUAst.GetMigrationStatus() == sdk.MigrationKeyGenBegin {
+			toCUAst.SetMigrationStatus(sdk.MigrationKeyGenFinish)
+			keeper.ik.SetCUIBCAsset(ctx, toCUAst)
 		}
 
 		keyGenOrder.SetOrderStatus(sdk.OrderStatusFinish)
-
-		//sub openfee
-		fromCU := keeper.ck.GetCU(ctx, fromCUAddr)
-		openFee := keyGenOrder.OpenFee
-		hasFee := openFee.AmountOf(sdk.NativeToken).IsPositive()
-		if hasFee {
-			fromCU.SubCoinsHold(openFee)
-			keeper.ck.SetCU(ctx, fromCU)
-			keeper.dk.AddToFeePool(ctx, sdk.NewDecCoins(openFee))
-		}
-
 		orderFlow := keeper.rk.NewOrderFlow("", msg.Validator, msg.OrderID, sdk.OrderTypeKeyGen, sdk.OrderStatusFinish)
 		keyGenSignFinishFlow := sdk.KeyGenFinishFlow{OrderID: msg.OrderID, IsPreKeyGen: false, ToAddr: keyGenOrder.To.String()}
 		flows = append(flows, orderFlow, keyGenSignFinishFlow)
+
+		//sub openfee
+		openFee := keyGenOrder.OpenFee
+		hasFee := openFee.IsPositive()
+		if hasFee {
+			_, balanceFlow, err := keeper.trk.SubCoinHold(ctx, fromCUAddr, openFee)
+			if err != nil {
+				return err.Result()
+			}
+			keeper.dk.AddToFeePool(ctx, sdk.NewDecCoins(sdk.NewCoins(openFee)))
+			flows = append(flows, balanceFlow)
+		}
 	} else {
 		keyGenOrder.SetOrderStatus(sdk.OrderStatusSignFinish)
 		keeper.ok.RemoveProcessOrder(ctx, sdk.OrderTypeKeyGen, msg.OrderID)
@@ -419,7 +428,7 @@ func handleMsgPreKeyGen(ctx sdk.Context, keeper Keeper, msg MsgPreKeyGen) sdk.Re
 
 	// 1.检查交易为验证人发出
 	if !isValidator(curEpoch.KeyNodeSet, msg.From) {
-		return sdk.ErrInvalidAddr(fmt.Sprintf("From CU:%v is not a validator", msg.From)).Result()
+		return sdk.ErrInvalidAddr(fmt.Sprintf("From CU %s is not a keynode", msg.From.String())).Result()
 	}
 	// 2.检查当前没有正在处理的 order
 	processOrders := keeper.ok.GetProcessOrderList(ctx)
@@ -444,20 +453,23 @@ func handleMsgPreKeyGen(ctx sdk.Context, keeper Keeper, msg MsgPreKeyGen) sdk.Re
 	}
 
 	// 6.生成KeyGenOrder, orderflow, keygenflow
-	vals := curEpoch.KeyNodeSet
-	if len(vals) == 0 {
-		return sdk.ErrInsufficientValidatorNumForKeyGen(fmt.Sprintf("validator's number:%v", len(vals))).Result()
+	excludedKeyNode := keeper.getExcludedKeyNode(ctx, curEpoch.KeyNodeSet)
+	keynodes := make([]sdk.CUAddress, 0, len(curEpoch.KeyNodeSet))
+	for _, val := range curEpoch.KeyNodeSet {
+		if !val.Equals(excludedKeyNode) {
+			keynodes = append(keynodes, val)
+		}
 	}
-	keynodes := make([]sdk.CUAddress, len(vals))
-	for i, val := range vals {
-		keynodes[i] = val
+	if len(keynodes) == 0 {
+		return sdk.ErrInsufficientValidatorNumForKeyGen("empty keynode list").Result()
 	}
 	flows := make([]sdk.Flow, 0, 2*len(msg.OrderIDs))
 	for _, orderID := range msg.OrderIDs {
-		order := keeper.ok.NewOrderKeyGen(ctx, msg.From, orderID, "", keynodes, uint64(sdk.Majority23(len(vals))), nil, nil)
+		zeroFee := sdk.NewCoin(sdk.NativeToken, sdk.ZeroInt())
+		order := keeper.ok.NewOrderKeyGen(ctx, msg.From, orderID, "", keynodes, uint64(sdk.Majority23(len(curEpoch.KeyNodeSet))), nil, zeroFee)
 		keeper.ok.SetOrder(ctx, order)
 		orderFlow := keeper.rk.NewOrderFlow("", nil, orderID, sdk.OrderTypeKeyGen, sdk.OrderStatusBegin)
-		keyGenFlow := sdk.KeyGenFlow{OrderID: orderID, Symbol: "", From: msg.From, To: nil, IsPreKeyGen: true}
+		keyGenFlow := sdk.KeyGenFlow{OrderID: orderID, Symbol: "", From: msg.From, To: nil, IsPreKeyGen: true, ExcludedKeyNode: excludedKeyNode}
 		flows = append(flows, orderFlow, keyGenFlow)
 	}
 
@@ -485,7 +497,7 @@ func handleMsgOpcuMigrationKeyGen(ctx sdk.Context, keeper Keeper, msg MsgOpcuMig
 	}
 
 	if !isValidator(curEpoch.KeyNodeSet, msg.From) {
-		return sdk.ErrInvalidAddr(fmt.Sprintf("from CU:%v is not a validator", msg.From)).Result()
+		return sdk.ErrInvalidAddr(fmt.Sprintf("from CU %s is not a keynode", msg.From.String())).Result()
 	}
 
 	for _, orderID := range msg.OrderIDs {
@@ -494,17 +506,19 @@ func handleMsgOpcuMigrationKeyGen(ctx sdk.Context, keeper Keeper, msg MsgOpcuMig
 		}
 	}
 
-	// 生成 keynodes
-	vals := curEpoch.KeyNodeSet
-	if len(vals) == 0 {
-		return sdk.ErrInsufficientValidatorNumForKeyGen(fmt.Sprintf("validator's number:%v", len(vals))).Result()
+	excludedKeyNode := keeper.getExcludedKeyNode(ctx, curEpoch.KeyNodeSet)
+	keynodes := make([]sdk.CUAddress, 0, len(curEpoch.KeyNodeSet))
+	for _, val := range curEpoch.KeyNodeSet {
+		if !val.Equals(excludedKeyNode) {
+			keynodes = append(keynodes, val)
+		}
 	}
-	keynodes := make([]sdk.CUAddress, len(vals))
-	for i, val := range vals {
-		keynodes[i] = val
+	if len(keynodes) == 0 {
+		return sdk.ErrInsufficientValidatorNumForKeyGen("empty keynode list").Result()
 	}
-	threshold := uint64(sdk.Majority23(len(vals)))
-	zeroFee := sdk.NewCoins(sdk.NewCoin(sdk.NativeToken, sdk.ZeroInt()))
+
+	threshold := uint64(sdk.Majority23(len(curEpoch.KeyNodeSet)))
+	zeroFee := sdk.NewCoin(sdk.NativeToken, sdk.ZeroInt())
 
 	opcus := keeper.ck.GetOpCUs(ctx, "")
 	if len(opcus) != len(msg.OrderIDs) {
@@ -513,18 +527,19 @@ func handleMsgOpcuMigrationKeyGen(ctx sdk.Context, keeper Keeper, msg MsgOpcuMig
 	processOrderList := keeper.ok.GetProcessOrderListByType(ctx, sdk.OrderTypeKeyGen)
 	var flows []sdk.Flow
 	for i, opcu := range opcus {
-		if opcu.GetMigrationStatus() != sdk.MigrationBegin {
+		opcuAst := keeper.ik.GetCUIBCAsset(ctx, opcu.GetAddress())
+		if opcuAst.GetMigrationStatus() != sdk.MigrationBegin {
 			return sdk.ErrInvalidTx("Migration status is not Begin").Result()
 		}
-		opcu.SetMigrationStatus(sdk.MigrationKeyGenBegin)
-		keeper.ck.SetCU(ctx, opcu)
-		if checkCuKeyGenOrder(ctx, keeper, processOrderList, opcu.GetAddress()) {
+		opcuAst.SetMigrationStatus(sdk.MigrationKeyGenBegin)
+		keeper.ik.SetCUIBCAsset(ctx, opcuAst)
+		if exist, _ := checkCuKeyGenOrder(ctx, keeper, processOrderList, opcu.GetAddress()); exist {
 			continue
 		}
 		order := keeper.ok.NewOrderKeyGen(ctx, msg.From, msg.OrderIDs[i], opcu.GetSymbol(), keynodes, threshold, opcu.GetAddress(), zeroFee)
 		keeper.ok.SetOrder(ctx, order)
 		orderFlow := keeper.rk.NewOrderFlow(sdk.Symbol(opcu.GetSymbol()), opcu.GetAddress(), msg.OrderIDs[i], sdk.OrderTypeKeyGen, sdk.OrderStatusBegin)
-		keyGenFlow := sdk.KeyGenFlow{OrderID: msg.OrderIDs[i], Symbol: sdk.Symbol(opcu.GetSymbol()), From: msg.From, To: opcu.GetAddress(), IsPreKeyGen: false}
+		keyGenFlow := sdk.KeyGenFlow{OrderID: msg.OrderIDs[i], Symbol: sdk.Symbol(opcu.GetSymbol()), From: msg.From, To: opcu.GetAddress(), IsPreKeyGen: false, ExcludedKeyNode: excludedKeyNode}
 		flows = append(flows, orderFlow, keyGenFlow)
 	}
 	receipt := keeper.rk.NewReceipt(sdk.CategoryTypeKeyGen, flows)
@@ -543,17 +558,13 @@ func handleMsgOpcuMigrationKeyGen(ctx sdk.Context, keeper Keeper, msg MsgOpcuMig
 	return result
 }
 
-func checkSymbol(symbol sdk.Symbol, ti *sdk.TokenInfo, keeper Keeper) sdk.Result {
+func checkSymbol(symbol sdk.Symbol, ti *sdk.IBCToken, keeper Keeper) sdk.Result {
 	if ti == nil {
 		return sdk.ErrInvalidSymbol(fmt.Sprintf("not support token %v", symbol)).Result()
 	}
 
 	if ti.Chain.String() == sdk.NativeToken {
 		return sdk.ErrInvalidTx("native token no need to key gen").Result()
-	}
-
-	if !keeper.cn.SupportChain(ti.Chain.String()) {
-		return sdk.ErrInvalidTx("chain not supported").Result()
 	}
 
 	return sdk.Result{Code: sdk.CodeOK}
@@ -597,20 +608,20 @@ func checkKeyNodesSigns(msg []byte, sigs []cutypes.StdSignature, keyNodes []sdk.
 	return sdk.Result{Code: sdk.CodeOK}
 }
 
-func checkCuKeyGenOrder(ctx sdk.Context, keeper Keeper, processOrderList []string, cu sdk.CUAddress) bool {
+func checkCuKeyGenOrder(ctx sdk.Context, keeper Keeper, processOrderList []string, cu sdk.CUAddress) (bool, string) {
 	for _, id := range processOrderList {
 		order := keeper.ok.GetOrder(ctx, id)
 		if order != nil {
 			keyGenOrder, ok := order.(*sdk.OrderKeyGen)
 			if ok && keyGenOrder.To.Equals(cu) {
-				return true
+				return true, id
 			}
 		}
 	}
-	return false
+	return false, ""
 }
 
-func getFeeCoin(cutype sdk.CUType, ti *sdk.TokenInfo) sdk.Coin {
+func getFeeCoin(cutype sdk.CUType, ti *sdk.IBCToken) sdk.Coin {
 	openFee := sdk.ZeroInt()
 	if cutype == sdk.CUTypeOp {
 		openFee = ti.SysOpenFee
@@ -621,22 +632,22 @@ func getFeeCoin(cutype sdk.CUType, ti *sdk.TokenInfo) sdk.Coin {
 	return sdk.NewCoin(sdk.NativeToken, openFee)
 }
 
-func setAddressAndPubkeyToCU(ctx sdk.Context, cu exported.CustodianUnit, keeper Keeper,
+func setAddressAndPubkeyToCU(ctx sdk.Context, cuAst exported.CUIBCAsset, keeper Keeper,
 	pubkey []byte, address string, symbol, chain string, epoch uint64) sdk.Result {
-	if err := cu.SetAssetAddress(symbol, address, epoch); err != nil {
+	if err := cuAst.SetAssetAddress(symbol, address, epoch); err != nil {
 		return sdk.ErrInternal(fmt.Sprintf("Set asset address error: %v", err)).Result()
 	}
 	if symbol != chain {
-		if err := cu.SetAssetAddress(chain, address, epoch); err != nil {
+		if err := cuAst.SetAssetAddress(chain, address, epoch); err != nil {
 			return sdk.ErrInternal(fmt.Sprintf("Set chain asset address error: %v", err)).Result()
 		}
 	}
 
-	if err := cu.SetAssetPubkey(pubkey, epoch); err != nil {
+	if err := cuAst.SetAssetPubkey(pubkey, epoch); err != nil {
 		return sdk.ErrInternal(fmt.Sprintf("Set asset public key error: %v", err)).Result()
 	}
-	keeper.ck.SetExtAddresseWithCU(ctx, chain, address, cu.GetAddress())
-	keeper.ck.SetCU(ctx, cu)
+	keeper.ck.SetExtAddressWithCU(ctx, chain, address, cuAst.GetAddress())
+	keeper.ik.SetCUIBCAsset(ctx, cuAst)
 
 	return sdk.Result{Code: sdk.CodeOK}
 }
@@ -650,9 +661,9 @@ func handleMsgNewOpCU(ctx sdk.Context, keeper Keeper, msg MsgNewOpCU) sdk.Result
 		return sdk.ErrInvalidTx("Cannot new opcu in migration period").Result()
 	}
 
-	symbol := sdk.Symbol(msg.Symbol)
-	if !keeper.tk.IsTokenSupported(ctx, symbol) {
-		return sdk.ErrUnSupportToken(msg.Symbol).Result()
+	ti := keeper.tk.GetIBCToken(ctx, sdk.Symbol(msg.Symbol))
+	if ti == nil {
+		return sdk.ErrUnSupportToken(fmt.Sprintf("token %s not support", msg.Symbol)).Result()
 	}
 	if !msg.OpCUAddress.IsValidAddr() {
 		return sdk.ErrInvalidAddr("invalid CU address").Result()
@@ -665,23 +676,27 @@ func handleMsgNewOpCU(ctx sdk.Context, keeper Keeper, msg MsgNewOpCU) sdk.Result
 	}
 
 	if !isValidator(curEpoch.KeyNodeSet, msg.From) {
-		return sdk.ErrInvalidAddr(fmt.Sprintf("from CU:%v is not a validator", msg.From)).Result()
+		return sdk.ErrInvalidAddr(fmt.Sprintf("from CU %s is not a keynode", msg.From)).Result()
 	}
-	// too many op cu of symbol
-	var cuLimit uint64
 
-	cuLimit = keeper.tk.GetMaxOpCUNumber(ctx, symbol)
+	cuLimit := ti.MaxOpCUNumber
 	opcuCount := len(keeper.ck.GetOpCUs(ctx, msg.Symbol))
 	if uint64(opcuCount) >= cuLimit {
 		return sdk.ErrInternal(fmt.Sprintf("too many operation CU of %s", msg.Symbol)).Result()
 	}
 
-	// TODO add event ?
 	opcu := keeper.ck.NewOpCUWithAddress(ctx, msg.Symbol, opcuAddress)
 	if opcu == nil {
 		return sdk.ErrInternal("create operation CU failed").Result()
 	}
+
+	opcuAst := keeper.ik.NewCUIBCAssetWithAddress(ctx, sdk.CUTypeOp, opcuAddress)
+	if opcuAst == nil {
+		return sdk.ErrInternal("create operation CU failed").Result()
+	}
+
 	keeper.ck.SetCU(ctx, opcu)
+	keeper.ik.SetCUIBCAsset(ctx, opcuAst)
 
 	ctx.EventManager().EmitEvents(sdk.Events{
 		sdk.NewEvent(

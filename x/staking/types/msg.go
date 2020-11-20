@@ -28,7 +28,6 @@ type MsgCreateValidator struct {
 	ValidatorAddress  sdk.ValAddress  `json:"validator_address" yaml:"validator_address"`
 	PubKey            crypto.PubKey   `json:"pubkey" yaml:"pubkey"`
 	Value             sdk.Coin        `json:"value" yaml:"value"`
-	IsKeyNode         bool            `json:"is_key_node" yaml:"is_key_node"`
 }
 
 type msgCreateValidatorJSON struct {
@@ -39,14 +38,12 @@ type msgCreateValidatorJSON struct {
 	ValidatorAddress  sdk.ValAddress  `json:"validator_address" yaml:"validator_address"`
 	PubKey            string          `json:"pubkey" yaml:"pubkey"`
 	Value             sdk.Coin        `json:"value" yaml:"value"`
-	IsKeyNode         bool            `json:"is_key_node" yaml:"is_key_node"`
 }
 
 // Default way to create validator. Delegator address and validator address are the same
 func NewMsgCreateValidator(
 	valAddr sdk.ValAddress, pubKey crypto.PubKey, selfDelegation sdk.Coin,
-	description Description, commission CommissionRates, minSelfDelegation sdk.Int, isKeyNode bool,
-) MsgCreateValidator {
+	description Description, commission CommissionRates, minSelfDelegation sdk.Int) MsgCreateValidator {
 
 	return MsgCreateValidator{
 		Description:       description,
@@ -56,7 +53,6 @@ func NewMsgCreateValidator(
 		Value:             selfDelegation,
 		Commission:        commission,
 		MinSelfDelegation: minSelfDelegation,
-		IsKeyNode:         isKeyNode,
 	}
 }
 
@@ -88,7 +84,6 @@ func (msg MsgCreateValidator) MarshalJSON() ([]byte, error) {
 		PubKey:            sdk.MustBech32ifyConsPub(msg.PubKey),
 		Value:             msg.Value,
 		MinSelfDelegation: msg.MinSelfDelegation,
-		IsKeyNode:         msg.IsKeyNode,
 	})
 }
 
@@ -111,7 +106,6 @@ func (msg *MsgCreateValidator) UnmarshalJSON(bz []byte) error {
 	}
 	msg.Value = msgCreateValJSON.Value
 	msg.MinSelfDelegation = msgCreateValJSON.MinSelfDelegation
-	msg.IsKeyNode = msgCreateValJSON.IsKeyNode
 
 	return nil
 }
@@ -168,16 +162,14 @@ type MsgEditValidator struct {
 	// REF: #2373
 	CommissionRate    *sdk.Dec `json:"commission_rate" yaml:"commission_rate"`
 	MinSelfDelegation *sdk.Int `json:"min_self_delegation" yaml:"min_self_delegation"`
-	IsKeyNode         *bool    `json:"is_key_node" yaml:"is_key_node"`
 }
 
-func NewMsgEditValidator(valAddr sdk.ValAddress, description Description, newRate *sdk.Dec, newMinSelfDelegation *sdk.Int, isKeyNode *bool) MsgEditValidator {
+func NewMsgEditValidator(valAddr sdk.ValAddress, description Description, newRate *sdk.Dec, newMinSelfDelegation *sdk.Int) MsgEditValidator {
 	return MsgEditValidator{
 		Description:       description,
 		CommissionRate:    newRate,
 		ValidatorAddress:  valAddr,
 		MinSelfDelegation: newMinSelfDelegation,
-		IsKeyNode:         isKeyNode,
 	}
 }
 

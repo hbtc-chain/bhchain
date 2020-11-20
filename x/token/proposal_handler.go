@@ -1,9 +1,14 @@
 package token
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"strings"
 
+	"golang.org/x/crypto/ripemd160"
+
+	"github.com/hbtc-chain/bhchain/base58"
 	"github.com/hbtc-chain/bhchain/codec"
 	sdk "github.com/hbtc-chain/bhchain/types"
 	govtypes "github.com/hbtc-chain/bhchain/x/gov/types"
@@ -13,58 +18,100 @@ import (
 func handleAddTokenProposal(ctx sdk.Context, keeper Keeper, proposal types.AddTokenProposal) sdk.Result {
 	ctx.Logger().Info("handleAddTokenProposal", "proposal", proposal)
 
-	if proposal.TokenInfo.WithdrawalFeeRate.LTE(sdk.OneDec()) || proposal.TokenInfo.GasLimit.LTE(sdk.ZeroInt()) {
-		return sdk.ErrInvalidSymbol(fmt.Sprintf("token %s parame error", proposal.TokenInfo.Symbol)).Result()
-
+	tokenInfo := proposal.TokenInfo
+	if tokenInfo.Chain == sdk.NativeToken {
+		return sdk.ErrInvalidSymbol(fmt.Sprintf("chain cannot be %s", tokenInfo.Chain)).Result()
 	}
+
+	if tokenInfo.Symbol != tokenInfo.Chain {
+		tokenInfo.Symbol = calSymbol(tokenInfo.Issuer, tokenInfo.Chain)
+	}
+
 	//symbol already exist
-	if ti := keeper.GetTokenInfo(ctx, proposal.TokenInfo.Symbol); ti != nil {
-		return sdk.ErrInvalidSymbol(fmt.Sprintf("token %s already exist", proposal.TokenInfo.Symbol)).Result()
+	if keeper.HasToken(ctx, tokenInfo.Symbol) {
+		return sdk.ErrAlreadyExitSymbol(fmt.Sprintf("token symbol %s already exists", tokenInfo.Symbol)).Result()
 	}
 
 	//chain does not exist, if symbol != chain
-	if proposal.TokenInfo.Symbol.String() != proposal.TokenInfo.Chain.String() {
-		if ti := keeper.GetTokenInfo(ctx, proposal.TokenInfo.Chain); ti == nil {
-			return sdk.ErrInvalidSymbol(fmt.Sprintf("token %s's chain %s does not exist", proposal.TokenInfo.Symbol, proposal.TokenInfo.Chain)).Result()
+	if tokenInfo.Symbol != tokenInfo.Chain {
+		if !keeper.HasToken(ctx, proposal.TokenInfo.Chain) {
+			return sdk.ErrInvalidSymbol(fmt.Sprintf("token %s's chain %s does not exist", tokenInfo.Symbol, tokenInfo.Chain)).Result()
 		}
 	}
 
-	keeper.SetTokenInfo(ctx, &proposal.TokenInfo)
+	err := keeper.CreateToken(ctx, tokenInfo)
+	if err != nil {
+		return sdk.ErrInternal(err.Error()).Result()
+	}
+
 	ctx.EventManager().EmitEvent(
 		sdk.NewEvent(
 			types.EventTypeExecuteAddTokenProposal,
-			sdk.NewAttribute(types.AttributeKeyToken, proposal.TokenInfo.Symbol.String()),
-			sdk.NewAttribute(types.AttributeKeyTokeninfo, proposal.TokenInfo.String()),
+			sdk.NewAttribute(types.AttributeKeyToken, tokenInfo.Symbol.String()),
+			sdk.NewAttribute(types.AttributeKeyTokeninfo, tokenInfo.String()),
 		),
 	)
 	return sdk.Result{Events: ctx.EventManager().Events()}
 }
 
-func processChangeParam(key, value string, ti *sdk.TokenInfo, cdc *codec.Codec) error {
+func calSymbol(issuer string, chain sdk.Symbol) sdk.Symbol {
+	payload := []byte(fmt.Sprintf("%s-%s", chain, issuer))
+	hasherSHA256 := sha256.New()
+	hasherSHA256.Write(payload)
+	sha := hasherSHA256.Sum(nil)
+
+	hasherRIPEMD160 := ripemd160.New()
+	hasherRIPEMD160.Write(sha)
+	bz := hasherRIPEMD160.Sum(nil)
+
+	sum := base58.Checksum(bz)
+	bz = append(bz, sum[:]...)
+
+	symbol := strings.ToUpper(chain.String()) + base58.Encode(bz)
+	return sdk.Symbol(symbol)
+}
+
+func processBaseTokenChangeParam(key, value string, ti *sdk.BaseToken, cdc *codec.Codec) error {
 	switch key {
-	case sdk.KeyIsSendEnabled:
+	case sdk.KeySendEnabled:
 		val := false
 		err := cdc.UnmarshalJSON([]byte(value), &val)
 		if err != nil {
 			return err
 		}
-		ti.IsSendEnabled = val
+		ti.SendEnabled = val
+	default:
+		return errors.New(fmt.Sprintf("Unkonwn parameter:%v for token %s", key, ti.Symbol))
+	}
 
-	case sdk.KeyIsDepositEnabled:
-		val := false
-		err := cdc.UnmarshalJSON([]byte(value), &val)
-		if err != nil {
-			return err
-		}
-		ti.IsDepositEnabled = val
+	return nil
+}
 
-	case sdk.KeyIsWithdrawalEnabled:
+func processIBCTokenChangeParam(key, value string, ti *sdk.IBCToken, cdc *codec.Codec) error {
+	switch key {
+	case sdk.KeySendEnabled:
 		val := false
 		err := cdc.UnmarshalJSON([]byte(value), &val)
 		if err != nil {
 			return err
 		}
-		ti.IsWithdrawalEnabled = val
+		ti.SendEnabled = val
+
+	case sdk.KeyDepositEnabled:
+		val := false
+		err := cdc.UnmarshalJSON([]byte(value), &val)
+		if err != nil {
+			return err
+		}
+		ti.DepositEnabled = val
+
+	case sdk.KeyWithdrawalEnabled:
+		val := false
+		err := cdc.UnmarshalJSON([]byte(value), &val)
+		if err != nil {
+			return err
+		}
+		ti.WithdrawalEnabled = val
 
 	case sdk.KeyCollectThreshold:
 		val := sdk.ZeroInt()
@@ -73,7 +120,7 @@ func processChangeParam(key, value string, ti *sdk.TokenInfo, cdc *codec.Codec) 
 			return err
 		}
 		if val.IsNegative() {
-			return types.ErrInvalidParameter(DefaultParamspace, key, value)
+			return types.ErrInvalidParameter(DefaultCodespace, key, value)
 		}
 		ti.CollectThreshold = val
 
@@ -84,7 +131,7 @@ func processChangeParam(key, value string, ti *sdk.TokenInfo, cdc *codec.Codec) 
 			return err
 		}
 		if val.IsNegative() {
-			return types.ErrInvalidParameter(DefaultParamspace, key, value)
+			return types.ErrInvalidParameter(DefaultCodespace, key, value)
 		}
 		ti.DepositThreshold = val
 
@@ -95,7 +142,7 @@ func processChangeParam(key, value string, ti *sdk.TokenInfo, cdc *codec.Codec) 
 			return err
 		}
 		if val.IsNegative() {
-			return types.ErrInvalidParameter(DefaultParamspace, key, value)
+			return types.ErrInvalidParameter(DefaultCodespace, key, value)
 		}
 		ti.OpenFee = val
 
@@ -106,7 +153,7 @@ func processChangeParam(key, value string, ti *sdk.TokenInfo, cdc *codec.Codec) 
 			return err
 		}
 		if val.IsNegative() {
-			return types.ErrInvalidParameter(DefaultParamspace, key, value)
+			return types.ErrInvalidParameter(DefaultCodespace, key, value)
 		}
 		ti.SysOpenFee = val
 
@@ -118,7 +165,7 @@ func processChangeParam(key, value string, ti *sdk.TokenInfo, cdc *codec.Codec) 
 		}
 
 		if val.LT(sdk.OneDec()) {
-			return types.ErrInvalidParameter(DefaultParamspace, key, value)
+			return types.ErrInvalidParameter(DefaultCodespace, key, value)
 		}
 		ti.WithdrawalFeeRate = val
 
@@ -137,7 +184,7 @@ func processChangeParam(key, value string, ti *sdk.TokenInfo, cdc *codec.Codec) 
 			return err
 		}
 		if val.IsNegative() {
-			return types.ErrInvalidParameter(DefaultParamspace, key, value)
+			return types.ErrInvalidParameter(DefaultCodespace, key, value)
 		}
 
 		ti.SysTransferNum = val
@@ -149,7 +196,7 @@ func processChangeParam(key, value string, ti *sdk.TokenInfo, cdc *codec.Codec) 
 			return err
 		}
 		if val.IsNegative() {
-			return types.ErrInvalidParameter(DefaultParamspace, key, value)
+			return types.ErrInvalidParameter(DefaultCodespace, key, value)
 		}
 		ti.OpCUSysTransferNum = val
 
@@ -160,7 +207,7 @@ func processChangeParam(key, value string, ti *sdk.TokenInfo, cdc *codec.Codec) 
 			return err
 		}
 		if val.IsNegative() {
-			return types.ErrInvalidParameter(DefaultParamspace, key, value)
+			return types.ErrInvalidParameter(DefaultCodespace, key, value)
 		}
 		ti.GasLimit = val
 	case sdk.KeyConfirmations:
@@ -170,12 +217,19 @@ func processChangeParam(key, value string, ti *sdk.TokenInfo, cdc *codec.Codec) 
 			return err
 		}
 		if val == 0 {
-			return types.ErrInvalidParameter(DefaultParamspace, key, value)
+			return types.ErrInvalidParameter(DefaultCodespace, key, value)
 		}
 		ti.Confirmations = val
+	case sdk.KeyNeedCollectFee:
+		val := false
+		err := cdc.UnmarshalJSON([]byte(value), &val)
+		if err != nil {
+			return err
+		}
+		ti.NeedCollectFee = val
 
 	default:
-		return errors.New(fmt.Sprintf("Unkonwn parameter:%v", key))
+		return errors.New(fmt.Sprintf("Unkonwn parameter:%v for token %s", key, ti.Symbol))
 	}
 
 	return nil
@@ -184,46 +238,28 @@ func processChangeParam(key, value string, ti *sdk.TokenInfo, cdc *codec.Codec) 
 func handleTokenParamsChangeProposal(ctx sdk.Context, keeper Keeper, proposal types.TokenParamsChangeProposal) sdk.Result {
 	ctx.Logger().Info("handleTokenParamsChangeProposal", "proposal", proposal)
 
-	ti := keeper.GetTokenInfo(ctx, sdk.Symbol(proposal.Symbol))
+	ti := keeper.GetToken(ctx, sdk.Symbol(proposal.Symbol))
 	if ti == nil {
 		return sdk.ErrInvalidSymbol(fmt.Sprintf("token %s dose not exist", proposal.Symbol)).Result()
 	}
 
 	attr := []sdk.Attribute{}
 	for _, pc := range proposal.Changes {
-		err := processChangeParam(pc.Key, pc.Value, ti, keeper.cdc)
+		var err error
+		if ti.IsIBCToken() {
+			err = processIBCTokenChangeParam(pc.Key, pc.Value, ti.(*sdk.IBCToken), keeper.cdc)
+		} else {
+			err = processBaseTokenChangeParam(pc.Key, pc.Value, ti.(*sdk.BaseToken), keeper.cdc)
+		}
 		if err != nil {
 			return types.ErrInvalidParameter(types.DefaultCodespace, pc.Key, pc.Value).Result()
 		}
 		attr = append(attr, sdk.NewAttribute(types.AttributeKeyTokenParam, pc.Key), sdk.NewAttribute(types.AttributeKeyTokenParamValue, pc.Value))
 	}
 
-	keeper.SetTokenInfo(ctx, ti)
+	keeper.SetToken(ctx, ti)
 	ctx.EventManager().EmitEvent(
 		sdk.NewEvent(types.EventTypeExecuteTokenParamsChangeProposal, attr...),
-	)
-	return sdk.Result{Events: ctx.EventManager().Events()}
-}
-
-func handleDisableTokenProposal(ctx sdk.Context, keeper Keeper, proposal types.DisableTokenProposal) sdk.Result {
-	ctx.Logger().Info("handleDisableTokenProposal", "proposal", proposal)
-
-	ti := keeper.GetTokenInfo(ctx, sdk.Symbol(proposal.Symbol))
-	if ti == nil {
-		return sdk.ErrInvalidSymbol(fmt.Sprintf("token %s does not exist", proposal.Symbol)).Result()
-	}
-
-	ti.IsSendEnabled = false
-	ti.IsDepositEnabled = false
-	ti.IsWithdrawalEnabled = false
-
-	keeper.SetTokenInfo(ctx, ti)
-
-	ctx.EventManager().EmitEvent(
-		sdk.NewEvent(
-			types.EventTypeExecuteDisableTokenProposal,
-			sdk.NewAttribute(types.AttributeKeyToken, proposal.Symbol),
-		),
 	)
 	return sdk.Result{Events: ctx.EventManager().Events()}
 }
@@ -236,9 +272,6 @@ func NewTokenProposalHandler(k Keeper) govtypes.Handler {
 
 		case types.TokenParamsChangeProposal:
 			return handleTokenParamsChangeProposal(ctx, k, c)
-
-		case types.DisableTokenProposal:
-			return handleDisableTokenProposal(ctx, k, c)
 
 		default:
 			errMsg := fmt.Sprintf("unrecognized token proposal content type: %T", c)

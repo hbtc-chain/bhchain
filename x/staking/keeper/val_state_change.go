@@ -26,11 +26,7 @@ func (k Keeper) ApplyAndReturnValidatorSetUpdates(ctx sdk.Context) (updates []ab
 
 	store := ctx.KVStore(k.storeKey)
 	maxValidators := k.GetParams(ctx).MaxValidators
-	maxKeyNodes := k.GetParams(ctx).MaxKeyNodes
 	minValidatorDelegation := k.GetParams(ctx).MinValidatorDelegation
-	minKeyNodeDelegation := k.GetParams(ctx).MinKeyNodeDelegation
-	maxCandidateKeyNodeHeartbeatInterval := k.GetParams(ctx).MaxCandidateKeyNodeHeartbeatInterval
-	blkHeight := uint64(ctx.BlockHeight())
 	totalPower := sdk.ZeroInt()
 	amtFromBondedToNotBonded, amtFromNotBondedToBonded := sdk.ZeroInt(), sdk.ZeroInt()
 
@@ -38,63 +34,25 @@ func (k Keeper) ApplyAndReturnValidatorSetUpdates(ctx sdk.Context) (updates []ab
 	// The persistent set is updated later in this function.
 	// (see LastValidatorPowerKey).
 	last := k.getLastValidatorsByAddr(ctx)
-	lastKeyNodeSet := k.GetCurrentEpoch(ctx).KeyNodeSet
-
-	var retainKeyNodes []sdk.ValAddress
-	if ctx.BlockHeight() > 0 {
-		maxUpdateKeyNodeNum := sdk.OneSixthCeil(uint16(len(lastKeyNodeSet)))
-		k.jailQueuedValidatorNow(ctx, maxUpdateKeyNodeNum)
-		// 计算必须连任的 keynodes
-		retainKeyNodes = k.getRetainKeyNodes(ctx, lastKeyNodeSet, len(lastKeyNodeSet)-int(maxUpdateKeyNodeNum), minKeyNodeDelegation)
-	}
-
-	newKeyNodes := make([]sdk.CUAddress, 0)
-	for _, valAddr := range retainKeyNodes {
-		validator := k.mustGetValidator(ctx, valAddr)
-
-		var valAddrBytes [sdk.AddrLen]byte
-		copy(valAddrBytes[:], valAddr[:])
-		oldPowerBytes := last[valAddrBytes]
-
-		newPower := validator.ConsensusPower()
-		newPowerBytes := k.cdc.MustMarshalBinaryLengthPrefixed(newPower)
-
-		// update the validator set if power has changed
-		if !bytes.Equal(oldPowerBytes, newPowerBytes) {
-			updates = append(updates, validator.ABCIValidatorUpdate())
-
-			// set validator power on lookup index
-			k.SetLastValidatorPower(ctx, valAddr, newPower)
-		}
-		delete(last, valAddrBytes)
-
-		// keep count
-		totalPower = totalPower.Add(sdk.NewInt(newPower))
-
-		newKeyNodes = append(newKeyNodes, sdk.CUAddress(valAddr))
-	}
 
 	// Iterate over validators, highest power to lowest.
 	iterator := sdk.KVStoreReversePrefixIterator(store, types.ValidatorsByPowerIndexKey)
 	defer iterator.Close()
-	for count := len(retainKeyNodes); iterator.Valid() && count < int(maxValidators); iterator.Next() {
+	for count := 0; iterator.Valid() && count < int(maxValidators); iterator.Next() {
 
 		// everything that is iterated in this loop is becoming or already a
 		// part of the bonded validator set
 
 		// fetch the validator
 		valAddr := sdk.ValAddress(iterator.Value())
-		if isInValAddresses(valAddr, retainKeyNodes) {
-			continue
-		}
 		validator := k.mustGetValidator(ctx, valAddr)
 
+		if validator.Tokens.LT(minValidatorDelegation) {
+			break
+		}
 		// if we get to a zero-power validator (which we don't bond),
 		// there are no more possible bonded validators
 		if validator.PotentialConsensusPower() == 0 {
-			break
-		}
-		if validator.Tokens.LT(minValidatorDelegation) {
 			break
 		}
 
@@ -136,25 +94,6 @@ func (k Keeper) ApplyAndReturnValidatorSetUpdates(ctx sdk.Context) (updates []ab
 		count++
 		totalPower = totalPower.Add(sdk.NewInt(newPower))
 
-		if validator.CanBeKeyNode(minKeyNodeDelegation) && blkHeight-validator.LastKeyNodeHeartbeatHeight < maxCandidateKeyNodeHeartbeatInterval &&
-			len(newKeyNodes) < int(maxKeyNodes) {
-			newKeyNodes = append(newKeyNodes, sdk.CUAddress(validator.OperatorAddress))
-		}
-	}
-
-	if isCUAddressSetDiff(newKeyNodes, lastKeyNodeSet) {
-		// emit event and update epoch
-		epoch := k.StartNewEpoch(ctx, newKeyNodes)
-		if ctx.BlockHeight() > 0 {
-			//set allopcu in migration // delete prekeygen order
-			k.AfterNewEpoch(ctx, epoch)
-			ctx.EventManager().EmitEvent(
-				sdk.NewEvent(
-					types.EventTypeMigrationBegin,
-					sdk.NewAttribute(types.AttributeMigrationNewEpochIndex, fmt.Sprintf("%d", epoch.Index)),
-				),
-			)
-		}
 	}
 
 	// sort the no-longer-bonded validators
@@ -239,14 +178,8 @@ func (k Keeper) jailValidator(ctx sdk.Context, validator types.Validator) {
 	}
 
 	validator.Jailed = true
-	if validator.IsUnbonded() {
-		k.DeleteValidatorByPowerIndex(ctx, validator)
-	} else {
-		index := k.insertJailedQueue(ctx, validator)
-		validator.JailedIndex = index
-	}
-
 	k.SetValidator(ctx, validator)
+	k.DeleteValidatorByPowerIndex(ctx, validator)
 }
 
 // remove a validator from jail
@@ -256,14 +189,8 @@ func (k Keeper) unjailValidator(ctx sdk.Context, validator types.Validator) {
 	}
 
 	validator.Jailed = false
-
-	// remove from jailed queue or readd to power index if not in queue
-	if !k.deleteFromJailedQueue(ctx, validator) {
-		k.SetValidatorByPowerIndex(ctx, validator)
-	}
-
-	validator.JailedIndex = 0
 	k.SetValidator(ctx, validator)
+	k.SetValidatorByPowerIndex(ctx, validator)
 }
 
 // perform all the store operations for when a validator status becomes bonded
@@ -331,42 +258,6 @@ func (k Keeper) completeUnbondingValidator(ctx sdk.Context, validator types.Vali
 // map of operator addresses to serialized power
 type validatorsByAddr map[[sdk.AddrLen]byte][]byte
 
-// 计算下周期必须连任的核心节点
-func (k Keeper) getRetainKeyNodes(ctx sdk.Context, keyNodeSet []sdk.CUAddress, num int, minKeyNodeDelegation sdk.Int) []sdk.ValAddress {
-	var validators []types.Validator
-	for _, addr := range keyNodeSet {
-		validator := k.mustGetValidator(ctx, sdk.ValAddress(addr))
-		validators = append(validators, validator)
-	}
-	// 按票数排序
-	sort.SliceStable(validators, func(i, j int) bool {
-		if validators[i].Tokens.Equal(validators[j].Tokens) {
-			return bytes.Compare(validators[i].OperatorAddress, validators[j].OperatorAddress) == 1
-		}
-		return validators[i].Tokens.GT(validators[j].Tokens)
-	})
-	// 过滤 jail 的节点，并按是否有资格成为 keynode 拆分
-	var canBe, cannotBe []sdk.ValAddress
-	maxKeyNodeHeartbeatInterval := k.GetParams(ctx).MaxKeyNodeHeartbeatInterval
-	blkHeight := uint64(ctx.BlockHeight())
-	for _, v := range validators {
-		if v.Jailed {
-			continue
-		}
-		if v.CanBeKeyNode(minKeyNodeDelegation) && blkHeight-v.LastKeyNodeHeartbeatHeight < maxKeyNodeHeartbeatInterval {
-			canBe = append(canBe, v.OperatorAddress)
-		} else {
-			cannotBe = append(cannotBe, v.OperatorAddress)
-		}
-	}
-	// 数量足够，直接截取
-	if len(canBe) >= num {
-		return canBe[:num]
-	}
-	// 数量不够，拿没有资格连任的拼凑
-	return append(canBe, cannotBe[:(num-len(canBe))]...)
-}
-
 // get the last validator set
 func (k Keeper) getLastValidatorsByAddr(ctx sdk.Context) validatorsByAddr {
 	last := make(validatorsByAddr)
@@ -404,32 +295,4 @@ func sortNoLongerBonded(last validatorsByAddr) [][]byte {
 		return bytes.Compare(noLongerBonded[i], noLongerBonded[j]) == -1
 	})
 	return noLongerBonded
-}
-
-func isInValAddresses(addr sdk.ValAddress, addrs []sdk.ValAddress) bool {
-	for _, a := range addrs {
-		if addr.Equals(a) {
-			return true
-		}
-	}
-	return false
-}
-
-func isCUAddressSetDiff(a, b []sdk.CUAddress) bool {
-	if len(a) != len(b) {
-		return true
-	}
-	for _, cuA := range a {
-		var found bool
-		for _, cuB := range b {
-			if cuA.Equals(cuB) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return true
-		}
-	}
-	return false
 }

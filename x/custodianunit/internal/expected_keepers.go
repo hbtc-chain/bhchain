@@ -8,22 +8,7 @@ import (
 )
 
 // AccountKeeper defines the account contract that must be fulfilled when
-// creating a x/bank keeper.
-type TokenKeeper interface {
-	IsUtxoBased(ctx sdk.Context, symbol sdk.Symbol) bool
-
-	IsSubToken(ctx sdk.Context, symbol sdk.Symbol) bool
-
-	GetOpenFee(ctx sdk.Context, symbol sdk.Symbol) sdk.Int
-
-	GetSysOpenFee(ctx sdk.Context, symbol sdk.Symbol) sdk.Int
-
-	IsTokenSupported(ctx sdk.Context, symbol sdk.Symbol) bool
-
-	GetMaxOpCUNumber(ctx sdk.Context, symbol sdk.Symbol) uint64
-
-	GetChain(ctx sdk.Context, symbol sdk.Symbol) sdk.Symbol
-}
+// creating a x/transfer keeper.
 
 type StakingKeeper interface {
 	GetAllValidators(ctx sdk.Context) (validators []types.Validator)
@@ -32,11 +17,13 @@ type StakingKeeper interface {
 	IsActiveKeyNode(ctx sdk.Context, addr sdk.CUAddress) (bool, int)
 }
 
-type ReceiptKeeper interface {
+type TransferKeeper interface {
+	SendCoins(ctx sdk.Context, from, to sdk.CUAddress, amt sdk.Coins) (sdk.Result, []sdk.Flow, sdk.Error)
 }
 
 // SupplyKeeper defines the expected supply Keeper (noalias)
 type SupplyKeeper interface {
+	SendCoinsFromModuleToAccount(ctx sdk.Context, senderModule string, recipientAddr sdk.CUAddress, amt sdk.Coins) (sdk.Result, sdk.Error)
 	SendCoinsFromAccountToModule(ctx sdk.Context, senderAddr sdk.CUAddress, recipientModule string, amt sdk.Coins) (sdk.Result, sdk.Error)
 	GetModuleAccount(ctx sdk.Context, moduleName string) exported.ModuleAccountI
 	GetModuleAddress(moduleName string) sdk.CUAddress

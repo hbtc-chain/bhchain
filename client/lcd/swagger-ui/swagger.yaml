@@ -1516,17 +1516,17 @@ paths:
           description: Invalid coin denomination
         500:
           description: Internal Server Error
-  /token/info/{denom}:
+  /token/info/{symbol}:
     parameters:
       - in: path
-        name: denom
-        description: Token denomination
+        name: symbol
+        description: Token symbol
         required: true
         schema:
           type: string
           example: hbc
     get:
-      summary: Information about a token denomination
+      summary: Information about a token
       tags:
         - Token
       responses:
@@ -1542,12 +1542,12 @@ paths:
                   result:
                     $ref: "#/components/schemas/Token"
         400:
-          description: Invalid token denomination
+          description: Invalid token symbol
         500:
           description: Internal Server Error
-  /token/tokens:
+  /token/ibctokens:
     get:
-      summary: Query all tokens.
+      summary: Query all ibc-tokens.
       tags:
         - Token
 
@@ -1682,11 +1682,11 @@ paths:
                   type: string
         500:
           description: Internal Server Error
-  /hrc20/parameters:
+  /hrc10/parameters:
     get:
-      summary: Query the hrc20 module's parameters
+      summary: Query the hrc10 module's parameters
       tags:
-        - Hrc20
+        - Hrc10
       responses:
         200:
           description: OK
@@ -2772,6 +2772,9 @@ components:
     Token:
       type: object
       properties:
+        name:
+          type: string
+          example: "hbc"
         symbol:
           type: string
           example: "hbc"
@@ -2784,13 +2787,13 @@ components:
         type:
           type: string
           example: "2"
-        is_send_enabled:
+        send_enabled:
           type: boolean
           example: true
-        is_deposit_enabled:
+        deposit_enabled:
           type: boolean
           example: false
-        is_withdrawal_enabled:
+        withdrawal_enabled:
           type: boolean
           example: false
         decimals:

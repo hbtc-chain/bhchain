@@ -19,8 +19,10 @@ import (
 	sdk "github.com/hbtc-chain/bhchain/types"
 	"github.com/hbtc-chain/bhchain/x/custodianunit"
 	ctest "github.com/hbtc-chain/bhchain/x/custodianunit/test"
+	"github.com/hbtc-chain/bhchain/x/genaccounts"
 	"github.com/hbtc-chain/bhchain/x/params"
 	"github.com/hbtc-chain/bhchain/x/receipt"
+	"github.com/hbtc-chain/bhchain/x/transfer"
 )
 
 const chainID = ""
@@ -30,18 +32,20 @@ const chainID = ""
 // capabilities aren't needed for testing.
 type App struct {
 	*bam.BaseApp
-	Cdc        *codec.Codec // Cdc is public since the codec is passed into the module anyways
-	KeyMain    *sdk.KVStoreKey
-	KeyAccount *sdk.KVStoreKey
-	KeyParams  *sdk.KVStoreKey
-	TKeyParams *sdk.TransientStoreKey
+	Cdc         *codec.Codec // Cdc is public since the codec is passed into the module anyways
+	KeyMain     *sdk.KVStoreKey
+	KeyAccount  *sdk.KVStoreKey
+	KeyTransfer *sdk.KVStoreKey
+	KeyParams   *sdk.KVStoreKey
+	TKeyParams  *sdk.TransientStoreKey
 
 	// TODO: Abstract this out from not needing to be auth specifically
-	CUKeeper      custodianunit.CUKeeper
-	ParamsKeeper  params.Keeper
-	ReceiptKeeper *receipt.Keeper
+	CUKeeper       custodianunit.CUKeeper
+	ParamsKeeper   params.Keeper
+	ReceiptKeeper  *receipt.Keeper
+	TransferKeeper *transfer.BaseKeeper
 
-	GenesisAccounts  []custodianunit.CU
+	GenesisAccounts  []genaccounts.GenesisCU
 	TotalCoinsSupply sdk.Coins
 }
 
@@ -60,6 +64,7 @@ func NewApp() *App {
 		Cdc:              cdc,
 		KeyMain:          sdk.NewKVStoreKey(bam.MainStoreKey),
 		KeyAccount:       sdk.NewKVStoreKey(custodianunit.StoreKey),
+		KeyTransfer:      sdk.NewKVStoreKey(transfer.StoreKey),
 		KeyParams:        sdk.NewKVStoreKey("params"),
 		TKeyParams:       sdk.NewTransientStoreKey("transient_params"),
 		TotalCoinsSupply: sdk.NewCoins(),
@@ -71,18 +76,19 @@ func NewApp() *App {
 	app.CUKeeper = custodianunit.NewCUKeeper(
 		app.Cdc,
 		app.KeyAccount,
-		nil, //TODO tokenkeeper & receiptkeeper
 		app.ParamsKeeper.Subspace(custodianunit.DefaultParamspace),
 		custodianunit.ProtoBaseCU,
 	)
 
-	supplyKeeper := ctest.NewDummySupplyKeeper(app.CUKeeper)
+	transferKeeper := transfer.NewBaseKeeper(app.Cdc, app.KeyTransfer, &app.CUKeeper, nil, nil, nil, app.ReceiptKeeper, nil, nil, app.ParamsKeeper.Subspace(transfer.DefaultParamspace), transfer.DefaultCodespace, nil)
+	supplyKeeper := ctest.NewDummySupplyKeeper(app.Cdc,app.CUKeeper, transferKeeper)
+	app.TransferKeeper = transferKeeper
 
 	// Initialize the app. The chainers and blockers can be overwritten before
 	// calling complete setup.
 	app.SetInitChainer(app.InitChainer)
 	app.SetAnteHandler(custodianunit.NewAnteHandler(app.CUKeeper, supplyKeeper, nil, custodianunit.DefaultSigVerificationGasConsumer))
-
+	app.SetGasRefundHandler(custodianunit.NewGasRefundHandler(supplyKeeper))
 	// Not sealing for custom extension
 
 	return app
@@ -118,8 +124,9 @@ func (app *App) InitChainer(ctx sdk.Context, _ abci.RequestInitChain) abci.Respo
 
 	// Load the genesis accounts
 	for _, genacc := range app.GenesisAccounts {
-		acc := app.CUKeeper.NewCUWithAddress(ctx, sdk.CUTypeUser, genacc.GetAddress())
-		acc.SetCoins(genacc.GetCoins())
+		acc := app.CUKeeper.NewCUWithAddress(ctx, sdk.CUTypeUser, genacc.Address)
+		app.TransferKeeper.AddCoins(ctx, genacc.Address, genacc.Coins)
+		// acc.SetCoins(genacc.GetCoins())
 		app.CUKeeper.SetCU(ctx, acc)
 	}
 
@@ -173,7 +180,7 @@ func (b AddrKeysSlice) Swap(i, j int) {
 
 // CreateGenAccounts generates genesis accounts loaded with coins, and returns
 // their addresses, pubkeys, and privkeys.
-func CreateGenAccounts(numAccs int, genCoins sdk.Coins) (genAccs []custodianunit.CU,
+func CreateGenAccounts(numAccs int, genCoins sdk.Coins) (genAccs []genaccounts.GenesisCU,
 	addrs []sdk.CUAddress, pubKeys []crypto.PubKey, privKeys []crypto.PrivKey) {
 
 	addrKeysSlice := AddrKeysSlice{}
@@ -192,11 +199,10 @@ func CreateGenAccounts(numAccs int, genCoins sdk.Coins) (genAccs []custodianunit
 		addrs = append(addrs, addrKeysSlice[i].Address)
 		pubKeys = append(pubKeys, addrKeysSlice[i].PubKey)
 		privKeys = append(privKeys, addrKeysSlice[i].PrivKey)
-		genAccs = append(genAccs, &custodianunit.BaseCU{
-			Type:            sdk.CUTypeUser,
-			Address:         addrKeysSlice[i].Address,
-			Coins:           genCoins,
-			MigrationStatus: sdk.MigrationFinish,
+		genAccs = append(genAccs, genaccounts.GenesisCU{
+			Type:    sdk.CUTypeUser,
+			Address: addrKeysSlice[i].Address,
+			Coins:   genCoins,
 		})
 	}
 
@@ -204,7 +210,7 @@ func CreateGenAccounts(numAccs int, genCoins sdk.Coins) (genAccs []custodianunit
 }
 
 // SetGenesis sets the mock app genesis accounts.
-func SetGenesis(app *App, accs []custodianunit.CU) {
+func SetGenesis(app *App, accs []genaccounts.GenesisCU) {
 	// Pass the accounts in via the application (lazy) instead of through
 	// RequestInitChain.
 	app.GenesisAccounts = accs
@@ -291,7 +297,7 @@ func GeneratePrivKeyAddressPairsFromRand(rand *rand.Rand, n int) (keys []crypto.
 // provided addresses and coin denominations.
 // nolint: errcheck
 func RandomSetGenesis(r *rand.Rand, app *App, addrs []sdk.CUAddress, denoms []string) {
-	accts := make([]custodianunit.CU, len(addrs))
+	accts := make([]genaccounts.GenesisCU, len(addrs))
 	randCoinIntervals := []BigInterval{
 		{sdk.NewIntWithDecimal(1, 0), sdk.NewIntWithDecimal(1, 1)},
 		{sdk.NewIntWithDecimal(1, 2), sdk.NewIntWithDecimal(1, 3)},
@@ -309,10 +315,14 @@ func RandomSetGenesis(r *rand.Rand, app *App, addrs []sdk.CUAddress, denoms []st
 		}
 
 		app.TotalCoinsSupply = app.TotalCoinsSupply.Add(coins)
-		baseAcc := custodianunit.NewBaseCUWithAddress(addrs[i], sdk.CUTypeUser)
+		//baseAcc := custodianunit.NewBaseCUWithAddress(addrs[i], sdk.CUTypeUser)
 
-		(baseAcc).SetCoins(coins)
-		accts[i] = &baseAcc
+		// (baseAcc).SetCoins(coins)
+		accts[i] = genaccounts.GenesisCU{
+			Type:    sdk.CUTypeUser,
+			Address: addrs[i],
+			Coins:   coins,
+		}
 	}
 	app.GenesisAccounts = accts
 }

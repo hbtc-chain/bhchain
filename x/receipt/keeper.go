@@ -91,9 +91,10 @@ func (r *Keeper) NewDepositConfirmedFlow(validOrderIds, invalidOrderIds []string
 	}
 }
 
-func (r *Keeper) NewOrderRetryFlow(orderIDs []string) sdk.OrderRetryFlow {
+func (r *Keeper) NewOrderRetryFlow(orderIDs []string, excludedKeyNode sdk.CUAddress) sdk.OrderRetryFlow {
 	return sdk.OrderRetryFlow{
-		OrderIDs: orderIDs,
+		OrderIDs:        orderIDs,
+		ExcludedKeyNode: excludedKeyNode,
 	}
 }
 
@@ -122,11 +123,10 @@ func (r *Keeper) NewCollectWaitSignFlow(orderIDs []string, rawData []byte) sdk.C
 	}
 }
 
-func (r *Keeper) NewCollectSignFinishFlow(orderIDs []string, signedTx []byte, txHash string) sdk.CollectSignFinishFlow {
+func (r *Keeper) NewCollectSignFinishFlow(orderIDs []string, signedTx []byte) sdk.CollectSignFinishFlow {
 	return sdk.CollectSignFinishFlow{
 		OrderIDs: orderIDs,
 		SignedTx: signedTx,
-		TxHash:   txHash,
 	}
 }
 
@@ -165,11 +165,10 @@ func (r *Keeper) NewWithdrawalWaitSignFlow(orderIDs []string, opcu, fromAddr str
 	}
 }
 
-func (r *Keeper) NewWithdrawalSignFinishFlow(orderIDs []string, signedTx []byte, txHash string) sdk.WithdrawalSignFinishFlow {
+func (r *Keeper) NewWithdrawalSignFinishFlow(orderIDs []string, signedTx []byte) sdk.WithdrawalSignFinishFlow {
 	return sdk.WithdrawalSignFinishFlow{
 		OrderIDs: orderIDs,
 		SignedTx: signedTx,
-		TxHash:   txHash,
 	}
 }
 
@@ -200,11 +199,10 @@ func (r *Keeper) NewSysTransferWaitSignFlow(orderID string, rawData []byte) sdk.
 	}
 }
 
-func (r *Keeper) NewSysTransferSignFinishFlow(orderID string, signedTx []byte, txHash string) sdk.SysTransferSignFinishFlow {
+func (r *Keeper) NewSysTransferSignFinishFlow(orderID string, signedTx []byte) sdk.SysTransferSignFinishFlow {
 	return sdk.SysTransferSignFinishFlow{
 		OrderID:  orderID,
 		SignedTx: signedTx,
-		TxHash:   txHash,
 	}
 }
 
@@ -237,11 +235,10 @@ func (r *Keeper) NewOpcuAssetTransferWaitSignFlow(orderID string, rawData []byte
 	}
 }
 
-func (r *Keeper) NewOpcuAssetTransferSignFinishFlow(orderID string, signedTx []byte, txHash string) sdk.OpcuAssetTransferSignFinishFlow {
+func (r *Keeper) NewOpcuAssetTransferSignFinishFlow(orderID string, signedTx []byte) sdk.OpcuAssetTransferSignFinishFlow {
 	return sdk.OpcuAssetTransferSignFinishFlow{
 		OrderID:  orderID,
 		SignedTx: signedTx,
-		TxHash:   txHash,
 	}
 }
 

@@ -1,7 +1,6 @@
 package types
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/hbtc-chain/bhchain/codec"
@@ -20,8 +19,6 @@ var (
 func TestCoin(t *testing.T) {
 	require.Panics(t, func() { NewInt64Coin(testDenom1, -1) })
 	require.Panics(t, func() { NewCoin(testDenom1, NewInt(-1)) })
-	require.Panics(t, func() { NewInt64Coin(strings.ToUpper(testDenom1), 10) })
-	require.Panics(t, func() { NewCoin(strings.ToUpper(testDenom1), NewInt(10)) })
 	require.Equal(t, NewInt(5), NewInt64Coin(testDenom1, 5).Amount)
 	require.Equal(t, NewInt(5), NewCoin(testDenom1, NewInt(5)).Amount)
 }
@@ -56,10 +53,10 @@ func TestCoinIsValid(t *testing.T) {
 		{Coin{testDenom1, NewInt(-1)}, false},
 		{Coin{testDenom1, NewInt(0)}, true},
 		{Coin{testDenom1, NewInt(1)}, true},
-		{Coin{"Atom", NewInt(1)}, false},
+		{Coin{"Atom", NewInt(1)}, true},
 		{Coin{"a", NewInt(1)}, false},
 		{Coin{"a very long coin denom", NewInt(1)}, false},
-		{Coin{"atOm", NewInt(1)}, false},
+		{Coin{"atOm", NewInt(1)}, true},
 		{Coin{"     ", NewInt(1)}, false},
 	}
 
@@ -327,8 +324,8 @@ func TestCoins(t *testing.T) {
 
 	assert.True(t, good.IsValid(), "Coins are valid")
 	assert.False(t, mixedCase1.IsValid(), "Coins denoms contain upper case characters")
-	assert.False(t, mixedCase2.IsValid(), "First Coins denoms contain upper case characters")
-	assert.False(t, mixedCase3.IsValid(), "Single denom in Coins contains upper case characters")
+	assert.True(t, mixedCase2.IsValid(), "Coins are valid")
+	assert.True(t, mixedCase3.IsValid(), "Coins are valid")
 	assert.True(t, good.IsAllPositive(), "Expected coins to be positive: %v", good)
 	assert.False(t, empty.IsAllPositive(), "Expected coins to not be positive: %v", empty)
 	assert.True(t, good.IsAllGTE(empty), "Expected %v to be >= %v", good, empty)
@@ -398,11 +395,11 @@ func TestParse(t *testing.T) {
 		{"98 bar , 1 foo  ", true, Coins{{"bar", NewInt(98)}, {"foo", one}}},
 		{"  55\t \t bling\n", true, Coins{{"bling", NewInt(55)}}},
 		{"2foo, 97 bar", true, Coins{{"bar", NewInt(97)}, {"foo", NewInt(2)}}},
-		{"5 mycoin,", false, nil},             // no empty coins in a list
-		{"2 3foo, 97 bar", false, nil},        // 3foo is invalid coin name
-		{"11me coin, 12you coin", false, nil}, // no spaces in coin names
-		{"1.2btc", false, nil},                // amount must be integer
-		{"5foo-bar", false, nil},              // once more, only letters in coin name
+		{"5 mycoin,", false, nil},                                                 // no empty coins in a list
+		{"2 3foo, 97 bar", true, Coins{{"3foo", NewInt(2)}, {"bar", NewInt(97)}}}, // 3foo is valid coin name
+		{"11me coin, 12you coin", false, nil},                                     // no spaces in coin names
+		{"1.2btc", false, nil},                                                    // amount must be integer
+		{"5foo-bar", false, nil},                                                  // once more, only letters in coin name
 	}
 
 	for tcIndex, tc := range cases {
@@ -503,7 +500,7 @@ func TestAmountOf(t *testing.T) {
 		assert.Equal(t, NewInt(tc.amountOfTREE), tc.coins.AmountOf("tree"))
 	}
 
-	assert.Panics(t, func() { cases[0].coins.AmountOf("Invalid") })
+	assert.Panics(t, func() { cases[0].coins.AmountOf("In valid") })
 }
 
 //

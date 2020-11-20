@@ -26,19 +26,21 @@ type Keeper struct {
 	cdc        *codec.Codec
 	paramstore params.Subspace
 
-	tk internal.TokenKeeper
-	ck internal.CUKeeper
-	rk internal.ReceiptKeeper
+	tk  internal.TokenKeeper
+	ck  internal.CUKeeper
+	rk  internal.ReceiptKeeper
+	trk internal.TransferKeeper
 }
 
 func NewKeeper(storeKey sdk.StoreKey, cdc *codec.Codec, tk internal.TokenKeeper, ck internal.CUKeeper,
-	rk internal.ReceiptKeeper, paramstore params.Subspace) Keeper {
+	rk internal.ReceiptKeeper, trk internal.TransferKeeper, paramstore params.Subspace) Keeper {
 	return Keeper{
 		storeKey:   storeKey,
 		cdc:        cdc,
 		rk:         rk,
 		ck:         ck,
 		tk:         tk,
+		trk:        trk,
 		paramstore: paramstore.WithKeyTable(ParamKeyTable()),
 	}
 }
@@ -120,8 +122,7 @@ func (k Keeper) IsSwapOrderExist(ctx sdk.Context, OrderID string, swapType int) 
 	}
 }
 
-func (k Keeper) CreateFreeSwapOrder(ctx sdk.Context, Owner sdk.CUAddress, swapInfo FreeSwapInfo, orderID string) sdk.Result {
-	fromCU := k.ck.GetCU(ctx, Owner)
+func (k Keeper) CreateFreeSwapOrder(ctx sdk.Context, owner sdk.CUAddress, swapInfo FreeSwapInfo, orderID string) sdk.Result {
 	store := ctx.KVStore(k.storeKey)
 	bz := store.Get(swapPoolKey)
 	var swapPool SwapPool
@@ -134,20 +135,20 @@ func (k Keeper) CreateFreeSwapOrder(ctx sdk.Context, Owner sdk.CUAddress, swapIn
 		swapPool.SwapCoins = sdk.NewCoins(sdk.NewCoin(sdk.NativeToken, sdk.ZeroInt()))
 	}
 
-	needCoin := sdk.NewCoins(sdk.NewCoin(swapInfo.SrcSymbol.String(), swapInfo.TotalAmount))
-	if fromCU.GetCoins().AmountOf(swapInfo.SrcSymbol.String()).LT(swapInfo.TotalAmount) {
-		return sdk.ErrInvalidTx(fmt.Sprintf("swap token not enough, need:%v, have:%v", needCoin, fromCU.GetCoins())).Result()
-	}
-
 	if swapInfo.MaxSwapAmount.Equal(sdk.ZeroInt()) {
 		swapInfo.MaxSwapAmount = swapInfo.TotalAmount
 	}
 
-	fromCU.SubCoins(needCoin)
-	swapPool.SwapCoins = swapPool.SwapCoins.Add(needCoin)
+	needCoin := sdk.NewCoin(swapInfo.SrcSymbol.String(), swapInfo.TotalAmount)
+	_, flow, err := k.trk.SubCoin(ctx, owner, needCoin)
+	if err != nil {
+		return err.Result()
+	}
+
+	swapPool.SwapCoins = swapPool.SwapCoins.Add(sdk.NewCoins(needCoin))
 	freeSwapOrder := FreeSwapOrder{
 		OrderId:      orderID,
-		Owner:        Owner,
+		Owner:        owner,
 		SwapInfo:     swapInfo,
 		RemainAmount: swapInfo.TotalAmount,
 	}
@@ -155,23 +156,14 @@ func (k Keeper) CreateFreeSwapOrder(ctx sdk.Context, Owner sdk.CUAddress, swapIn
 	store.Set(freeSwapOrderStoreKey(orderID), k.cdc.MustMarshalBinaryBare(freeSwapOrder))
 	store.Set(swapPoolKey, k.cdc.MustMarshalBinaryBare(swapPool))
 
-	k.ck.SetCU(ctx, fromCU)
-
-	var flows []sdk.Flow
-	for _, balanceFlow := range fromCU.GetBalanceFlows() {
-		flows = append(flows, balanceFlow)
-	}
-
-	fromCU.ResetBalanceFlows()
-
-	receipt := k.rk.NewReceipt(sdk.CategoryTypeQuickSwap, flows)
+	receipt := k.rk.NewReceipt(sdk.CategoryTypeQuickSwap, []sdk.Flow{flow})
 	res := sdk.Result{}
 	k.rk.SaveReceiptToResult(receipt, &res)
 
 	ctx.EventManager().EmitEvent(
 		sdk.NewEvent(
 			types.EventTypeCreateFreeSwap,
-			sdk.NewAttribute(types.AttributeKeyFrom, Owner.String()),
+			sdk.NewAttribute(types.AttributeKeyFrom, owner.String()),
 			sdk.NewAttribute(types.AttributeKeyIssueToken, swapInfo.SrcSymbol.String()),
 			sdk.NewAttribute(types.AttributeKeyTargetToken, swapInfo.TargetSymbol.String()),
 			sdk.NewAttribute(types.AttributeKeyOrderID, orderID),
@@ -184,8 +176,7 @@ func (k Keeper) CreateFreeSwapOrder(ctx sdk.Context, Owner sdk.CUAddress, swapIn
 	return res
 }
 
-func (k Keeper) CreateDirectSwapOrder(ctx sdk.Context, Owner sdk.CUAddress, swapInfo DirectSwapInfo, orderID string) sdk.Result {
-	fromCU := k.ck.GetCU(ctx, Owner)
+func (k Keeper) CreateDirectSwapOrder(ctx sdk.Context, owner sdk.CUAddress, swapInfo DirectSwapInfo, orderID string) sdk.Result {
 	store := ctx.KVStore(k.storeKey)
 	bz := store.Get(swapPoolKey)
 	var swapPool SwapPool
@@ -198,38 +189,30 @@ func (k Keeper) CreateDirectSwapOrder(ctx sdk.Context, Owner sdk.CUAddress, swap
 		swapPool.SwapCoins = sdk.NewCoins(sdk.NewCoin(sdk.NativeToken, sdk.ZeroInt()))
 	}
 
-	needCoin := sdk.NewCoins(sdk.NewCoin(swapInfo.SrcSymbol.String(), swapInfo.Amount))
-	if fromCU.GetCoins().AmountOf(swapInfo.SrcSymbol.String()).LT(swapInfo.Amount) {
-		return sdk.ErrInvalidTx(fmt.Sprintf("swap token not enough, need:%v, have:%v", needCoin, fromCU.GetCoins())).Result()
+	needCoin := sdk.NewCoin(swapInfo.SrcSymbol.String(), swapInfo.Amount)
+	_, flow, err := k.trk.SubCoin(ctx, owner, needCoin)
+	if err != nil {
+		return err.Result()
 	}
 
-	fromCU.SubCoins(needCoin)
-	swapPool.SwapCoins = swapPool.SwapCoins.Add(needCoin)
+	swapPool.SwapCoins = swapPool.SwapCoins.Add(sdk.NewCoins(needCoin))
 	directSwapOrder := DirectSwapOrder{
 		OrderId:  orderID,
-		Owner:    Owner,
+		Owner:    owner,
 		SwapInfo: swapInfo,
 	}
 
 	store.Set(directSwapOrderStoreKey(orderID), k.cdc.MustMarshalBinaryBare(directSwapOrder))
 	store.Set(swapPoolKey, k.cdc.MustMarshalBinaryBare(swapPool))
 
-	k.ck.SetCU(ctx, fromCU)
-
-	var flows []sdk.Flow
-	for _, balanceFlow := range fromCU.GetBalanceFlows() {
-		flows = append(flows, balanceFlow)
-	}
-
-	fromCU.ResetBalanceFlows()
-	receipt := k.rk.NewReceipt(sdk.CategoryTypeQuickSwap, flows)
+	receipt := k.rk.NewReceipt(sdk.CategoryTypeQuickSwap, []sdk.Flow{flow})
 	res := sdk.Result{}
 	k.rk.SaveReceiptToResult(receipt, &res)
 
 	ctx.EventManager().EmitEvent(
 		sdk.NewEvent(
 			types.EventTypeCreateDirectSwap,
-			sdk.NewAttribute(types.AttributeKeyFrom, Owner.String()),
+			sdk.NewAttribute(types.AttributeKeyFrom, owner.String()),
 			sdk.NewAttribute(types.AttributeKeyIssueToken, swapInfo.SrcSymbol.String()),
 			sdk.NewAttribute(types.AttributeKeyTargetToken, swapInfo.TargetSymbol.String()),
 			sdk.NewAttribute(types.AttributeKeyOrderID, orderID),
@@ -243,7 +226,6 @@ func (k Keeper) CreateDirectSwapOrder(ctx sdk.Context, Owner sdk.CUAddress, swap
 }
 
 func (k Keeper) SwapSymbol(ctx sdk.Context, fromCUAddr sdk.CUAddress, swapType int, orderID string, swapAmount sdk.Int) sdk.Result {
-	fromCU := k.ck.GetCU(ctx, fromCUAddr)
 	store := ctx.KVStore(k.storeKey)
 
 	bz := store.Get(swapPoolKey)
@@ -278,19 +260,21 @@ func (k Keeper) SwapSymbol(ctx sdk.Context, fromCUAddr sdk.CUAddress, swapType i
 			return sdk.ErrInvalidAmount(fmt.Sprintf("reamain coin amount not enough:%v, %v", order.RemainAmount, swapAmount)).Result()
 		}
 
-		tokenInfo := k.tk.GetTokenInfo(ctx, order.SwapInfo.SrcSymbol)
-		needCoinAmt := sdk.NewDecFromInt(swapAmount.Mul(order.SwapInfo.SwapPrice).Quo(sdk.NewIntWithDecimal(1, int(tokenInfo.Decimals)))).TruncateInt()
-		needCoin := sdk.NewCoins(sdk.NewCoin(order.SwapInfo.TargetSymbol.String(), needCoinAmt))
-		if fromCU.GetCoins().AmountOf(order.SwapInfo.TargetSymbol.String()).LT(needCoinAmt) {
-			return sdk.ErrInvalidAmount(fmt.Sprintf("swap coin not enough:%v", swapAmount)).Result()
+		tokenInfo := k.tk.GetToken(ctx, order.SwapInfo.SrcSymbol)
+		needCoinAmt := sdk.NewDecFromInt(swapAmount.Mul(order.SwapInfo.SwapPrice).Quo(sdk.NewIntWithDecimal(1, int(tokenInfo.GetDecimals())))).TruncateInt()
+		needCoin := sdk.NewCoin(order.SwapInfo.TargetSymbol.String(), needCoinAmt)
+		swapCoin := sdk.NewCoin(order.SwapInfo.SrcSymbol.String(), swapAmount)
+		_, balanceFlows, err := k.trk.SendCoin(ctx, fromCUAddr, order.Owner, needCoin)
+		if err != nil {
+			return err.Result()
 		}
-
-		swapCoin := sdk.NewCoins(sdk.NewCoin(order.SwapInfo.SrcSymbol.String(), swapAmount))
-		toCU := k.ck.GetCU(ctx, order.Owner)
-		fromCU.SubCoins(needCoin)
-		fromCU.AddCoins(swapCoin)
-		swapPool.SwapCoins = swapPool.SwapCoins.Sub(swapCoin)
-		toCU.AddCoins(needCoin)
+		flows = append(flows, balanceFlows...)
+		_, flow, err := k.trk.AddCoin(ctx, fromCUAddr, swapCoin)
+		if err != nil {
+			return err.Result()
+		}
+		flows = append(flows, flow)
+		swapPool.SwapCoins = swapPool.SwapCoins.Sub(sdk.NewCoins(swapCoin))
 		order.RemainAmount = order.RemainAmount.Sub(swapAmount)
 		if order.RemainAmount.Equal(sdk.ZeroInt()) {
 			store.Delete(freeSwapOrderStoreKey(orderID))
@@ -298,20 +282,11 @@ func (k Keeper) SwapSymbol(ctx sdk.Context, fromCUAddr sdk.CUAddress, swapType i
 			store.Set(freeSwapOrderStoreKey(orderID), k.cdc.MustMarshalBinaryBare(order))
 		}
 
-		k.ck.SetCU(ctx, fromCU)
-		k.ck.SetCU(ctx, toCU)
 		if swapPool.SwapCoins.Empty() {
 			store.Delete(swapPoolKey)
 		} else {
 			store.Set(swapPoolKey, k.cdc.MustMarshalBinaryBare(swapPool))
 		}
-
-		for _, balanceFlow := range toCU.GetBalanceFlows() {
-			flows = append(flows, balanceFlow)
-		}
-
-		toCU.ResetBalanceFlows()
-
 	} else {
 		var order DirectSwapOrder
 		bz = store.Get(directSwapOrderStoreKey(orderID))
@@ -328,20 +303,20 @@ func (k Keeper) SwapSymbol(ctx sdk.Context, fromCUAddr sdk.CUAddress, swapType i
 			return sdk.ErrInvalidAddr(fmt.Sprintf("swap addr is not expected:%v, %v", order.SwapInfo.ReceiveAddr, fromCUAddr.String())).Result()
 		}
 
-		needCoin := sdk.NewCoins(sdk.NewCoin(order.SwapInfo.TargetSymbol.String(), order.SwapInfo.SwapAmount))
-		if fromCU.GetCoins().AmountOf(order.SwapInfo.TargetSymbol.String()).LT(order.SwapInfo.SwapAmount) {
-			return sdk.ErrInvalidAmount(fmt.Sprintf("swap coin not enough:%v", swapAmount)).Result()
+		needCoin := sdk.NewCoin(order.SwapInfo.TargetSymbol.String(), order.SwapInfo.SwapAmount)
+		swapCoin := sdk.NewCoin(order.SwapInfo.SrcSymbol.String(), order.SwapInfo.Amount)
+		_, balanceFlows, err := k.trk.SendCoin(ctx, fromCUAddr, order.Owner, needCoin)
+		if err != nil {
+			return err.Result()
 		}
+		flows = append(flows, balanceFlows...)
+		_, flow, err := k.trk.AddCoin(ctx, fromCUAddr, swapCoin)
+		if err != nil {
+			return err.Result()
+		}
+		flows = append(flows, flow)
+		swapPool.SwapCoins = swapPool.SwapCoins.Sub(sdk.NewCoins(swapCoin))
 
-		swapCoin := sdk.NewCoins(sdk.NewCoin(order.SwapInfo.SrcSymbol.String(), order.SwapInfo.Amount))
-		toCU := k.ck.GetCU(ctx, order.Owner)
-		fromCU.SubCoins(needCoin)
-		fromCU.AddCoins(swapCoin)
-		swapPool.SwapCoins = swapPool.SwapCoins.Sub(swapCoin)
-		toCU.AddCoins(needCoin)
-
-		k.ck.SetCU(ctx, fromCU)
-		k.ck.SetCU(ctx, toCU)
 		store.Delete(directSwapOrderStoreKey(orderID))
 
 		if swapPool.SwapCoins.Empty() {
@@ -349,19 +324,7 @@ func (k Keeper) SwapSymbol(ctx sdk.Context, fromCUAddr sdk.CUAddress, swapType i
 		} else {
 			store.Set(swapPoolKey, k.cdc.MustMarshalBinaryBare(swapPool))
 		}
-
-		for _, balanceFlow := range toCU.GetBalanceFlows() {
-			flows = append(flows, balanceFlow)
-		}
-
-		toCU.ResetBalanceFlows()
 	}
-
-	for _, balanceFlow := range fromCU.GetBalanceFlows() {
-		flows = append(flows, balanceFlow)
-	}
-
-	fromCU.ResetBalanceFlows()
 
 	receipt := k.rk.NewReceipt(sdk.CategoryTypeQuickSwap, flows)
 	res := sdk.Result{}
@@ -372,7 +335,7 @@ func (k Keeper) SwapSymbol(ctx sdk.Context, fromCUAddr sdk.CUAddress, swapType i
 			types.EventTypeSwapSymbol,
 			sdk.NewAttribute(types.AttributeKeyFrom, fromCUAddr.String()),
 			sdk.NewAttribute(types.AttributeKeyOrderID, orderID),
-			sdk.NewAttribute(types.AttributeKeySwapType, string(swapType)),
+			sdk.NewAttribute(types.AttributeKeySwapType, fmt.Sprint(swapType)),
 			sdk.NewAttribute(types.AttributeKeyAmount, swapAmount.String()),
 		),
 	)
@@ -411,21 +374,18 @@ func (k Keeper) CancelSwap(ctx sdk.Context, fromCUAddr sdk.CUAddress, swapType i
 		}
 
 		if order.RemainAmount.GT(sdk.ZeroInt()) {
-			toCU := k.ck.GetCU(ctx, order.Owner)
-			cancelCoins := sdk.NewCoins(sdk.NewCoin(order.SwapInfo.SrcSymbol.String(), order.RemainAmount))
-			toCU.AddCoins(cancelCoins)
-			swapPool.SwapCoins = swapPool.SwapCoins.Sub(cancelCoins)
-			k.ck.SetCU(ctx, toCU)
+			cancelCoin := sdk.NewCoin(order.SwapInfo.SrcSymbol.String(), order.RemainAmount)
+			_, flow, err := k.trk.AddCoin(ctx, order.Owner, cancelCoin)
+			if err != nil {
+				return err.Result()
+			}
+			flows = append(flows, flow)
+			swapPool.SwapCoins = swapPool.SwapCoins.Sub(sdk.NewCoins(cancelCoin))
 			if swapPool.SwapCoins.Empty() {
 				store.Delete(swapPoolKey)
 			} else {
 				store.Set(swapPoolKey, k.cdc.MustMarshalBinaryBare(swapPool))
 			}
-			for _, balanceFlow := range toCU.GetBalanceFlows() {
-				flows = append(flows, balanceFlow)
-			}
-
-			toCU.ResetBalanceFlows()
 		}
 
 		store.Delete(freeSwapOrderStoreKey(orderID))
@@ -441,23 +401,21 @@ func (k Keeper) CancelSwap(ctx sdk.Context, fromCUAddr sdk.CUAddress, swapType i
 			return sdk.ErrInvalidAddr(fmt.Sprintf("swap order addr err:%v, %v", order.Owner, fromCUAddr)).Result()
 		}
 
-		toCU := k.ck.GetCU(ctx, order.Owner)
-		cancelCoins := sdk.NewCoins(sdk.NewCoin(order.SwapInfo.SrcSymbol.String(), order.SwapInfo.Amount))
-		toCU.AddCoins(cancelCoins)
-		swapPool.SwapCoins = swapPool.SwapCoins.Sub(cancelCoins)
+		cancelCoin := sdk.NewCoin(order.SwapInfo.SrcSymbol.String(), order.SwapInfo.Amount)
+		_, flow, err := k.trk.AddCoin(ctx, order.Owner, cancelCoin)
+		if err != nil {
+			return err.Result()
+		}
+		flows = append(flows, flow)
+
+		swapPool.SwapCoins = swapPool.SwapCoins.Sub(sdk.NewCoins(cancelCoin))
 		if swapPool.SwapCoins.Empty() {
 			store.Delete(swapPoolKey)
 		} else {
 			store.Set(swapPoolKey, k.cdc.MustMarshalBinaryBare(swapPool))
 		}
-		k.ck.SetCU(ctx, toCU)
 
 		store.Delete(directSwapOrderStoreKey(orderID))
-		for _, balanceFlow := range toCU.GetBalanceFlows() {
-			flows = append(flows, balanceFlow)
-		}
-
-		toCU.ResetBalanceFlows()
 	}
 
 	receipt := k.rk.NewReceipt(sdk.CategoryTypeQuickSwap, flows)
@@ -469,7 +427,7 @@ func (k Keeper) CancelSwap(ctx sdk.Context, fromCUAddr sdk.CUAddress, swapType i
 			types.EventTypeCancelSwap,
 			sdk.NewAttribute(types.AttributeKeyFrom, fromCUAddr.String()),
 			sdk.NewAttribute(types.AttributeKeyOrderID, orderID),
-			sdk.NewAttribute(types.AttributeKeySwapType, string(swapType)),
+			sdk.NewAttribute(types.AttributeKeySwapType, fmt.Sprint(swapType)),
 		),
 	)
 

@@ -1,5 +1,7 @@
 package types
 
+import sdk "github.com/hbtc-chain/bhchain/types"
+
 const (
 	// module name
 	ModuleName = "token"
@@ -13,15 +15,18 @@ const (
 	// QuerierRoute is the querier route for gov
 	QuerierRoute = ModuleName
 
-	// Parameter store default parameter store
-	DefaultParamspace = ModuleName
-
 	// query endpoints supported by the nameservice Querier
-	QueryToken      = "token"
-	QuerySymbols    = "symbols"
-	QueryDecimal    = "decimal"
-	QueryTokens     = "tokens"
-	QueryParameters = "parameters"
+	QueryToken     = "token"
+	QueryIBCTokens = "ibc_tokens"
 
 	TypeMsgSynGasPrice = "token-syngasprice"
 )
+
+var (
+	TokenStoreKeyPrefix = []byte{0x01}
+	IBCTokenListKey     = []byte{0x02}
+)
+
+func TokenStoreKey(symbol sdk.Symbol) []byte {
+	return append(TokenStoreKeyPrefix, []byte(symbol)...)
+}

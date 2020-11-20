@@ -68,6 +68,8 @@ func EndBlocker(ctx sdk.Context, keeper Keeper) {
 
 				// write state to the underlying multi-store
 				writeCache()
+
+				ctx.EventManager().EmitEvents(res.Events)
 			} else {
 				proposal.Status = StatusFailed
 				tagValue = types.AttributeValueProposalFailed

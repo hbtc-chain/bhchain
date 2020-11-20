@@ -47,9 +47,6 @@ func NewDecCoinFromCoin(coin Coin) DecCoin {
 	if coin.Amount.LT(ZeroInt()) {
 		panic(fmt.Sprintf("negative decimal coin amount: %v\n", coin.Amount))
 	}
-	if strings.ToLower(coin.Denom) != coin.Denom {
-		panic(fmt.Sprintf("denom cannot contain upper case characters: %s\n", coin.Denom))
-	}
 
 	return DecCoin{
 		Denom:  coin.Denom,

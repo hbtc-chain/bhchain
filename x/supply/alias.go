@@ -24,8 +24,6 @@ const (
 var (
 	// functions aliases
 	RegisterInvariants    = keeper.RegisterInvariants
-	AllInvariants         = keeper.AllInvariants
-	TotalSupply           = keeper.TotalSupply
 	NewKeeper             = keeper.NewKeeper
 	NewQuerier            = keeper.NewQuerier
 	SupplyKey             = keeper.SupplyKey

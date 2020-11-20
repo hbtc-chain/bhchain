@@ -17,8 +17,27 @@ const (
 	OrderSideSell = 0x1
 )
 
+type FeeRate struct {
+	LPRewardRate      sdk.Dec `json:"lp_reward_rate"`
+	RepurchaseRate    sdk.Dec `json:"repurchase_rate"`
+	RefererRewardRate sdk.Dec `json:"referer_reward_rate"`
+}
+
+func NewFeeRate(lpRewardRate, repurchaseRate, refererRewardRate sdk.Dec) *FeeRate {
+	return &FeeRate{
+		LPRewardRate:      lpRewardRate,
+		RepurchaseRate:    repurchaseRate,
+		RefererRewardRate: refererRewardRate,
+	}
+}
+
+func (f *FeeRate) TotalFeeRate() sdk.Dec {
+	return f.LPRewardRate.Add(f.RefererRewardRate).Add(f.RepurchaseRate)
+}
+
 type Order struct {
 	OrderID      string        `json:"order_id"`
+	DexID        uint32        `json:"dex_id"`
 	From         sdk.CUAddress `json:"from"`
 	Referer      sdk.CUAddress `json:"referer"`
 	Receiver     sdk.CUAddress `json:"receiver"`
@@ -32,25 +51,7 @@ type Order struct {
 	Price        sdk.Dec       `json:"price"`
 	AmountIn     sdk.Int       `json:"amount_int"`
 	LockedFund   sdk.Int       `json:"locked_fund"`
-}
-
-func NewOrder(orderID string, createdTime, expiredTime int64, from, referer, receiver sdk.CUAddress,
-	baseSymbol, quoteSymbol sdk.Symbol, price sdk.Dec, amountIn sdk.Int, side byte) *Order {
-
-	return &Order{
-		OrderID:     orderID,
-		CreatedTime: createdTime,
-		ExpiredTime: expiredTime,
-		From:        from,
-		Referer:     referer,
-		Receiver:    receiver,
-		Price:       price,
-		Side:        side,
-		BaseSymbol:  baseSymbol,
-		QuoteSymbol: quoteSymbol,
-		AmountIn:    amountIn,
-		LockedFund:  amountIn,
-	}
+	FeeRate      *FeeRate      `json:"fee_rate"`
 }
 
 func (o *Order) IsFinished() bool {

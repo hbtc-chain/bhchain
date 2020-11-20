@@ -54,8 +54,8 @@ func TestAnteHandlerSigErrors(t *testing.T) {
 
 	// keys and addresses
 	priv1, _, addr1 := types.KeyTestPubAddr()
-	priv2, _, addr2 := types.KeyTestPubAddr()
-	priv3, _, addr3 := types.KeyTestPubAddr()
+	_, _, addr2 := types.KeyTestPubAddr()
+	_, _, addr3 := types.KeyTestPubAddr()
 
 	// msg and signatures
 	var tx sdk.Tx
@@ -82,16 +82,21 @@ func TestAnteHandlerSigErrors(t *testing.T) {
 	tx = types.NewTestTx(ctx, msgs, privs, seqs, fee)
 	checkInvalidTx(t, anteHandler, ctx, tx, false, sdk.CodeUnauthorized)
 
-	// test an unrecognized CU
-	privs, seqs = []crypto.PrivKey{priv1, priv2, priv3}, []uint64{0, 0, 0}
-	tx = types.NewTestTx(ctx, msgs, privs, seqs, fee)
-	checkInvalidTx(t, anteHandler, ctx, tx, false, sdk.CodeUnknownAddress)
+	// test success
+	// privs, seqs = []crypto.PrivKey{priv1, priv2, priv3}, []uint64{0, 0, 0}
 
-	// save the first CU, but second is still unrecognized
-	acc1 := input.ak.NewCUWithAddress(ctx, sdk.CUTypeUser, addr1)
-	acc1.SetCoins(fee.Amount)
-	input.ak.SetCU(ctx, acc1)
-	checkInvalidTx(t, anteHandler, ctx, tx, false, sdk.CodeUnknownAddress)
+	// input.tk.AddCoins(ctx, addr1, fee.Amount)
+	// //input.tk.AddCoins(ctx, addr2, fee.Amount)
+	// //input.tk.AddCoins(ctx, addr3, fee.Amount)
+
+	tx = types.NewTestTx(ctx, msgs, privs, seqs, fee)
+	// checkInvalidTx(t, anteHandler, ctx, tx, false, sdk.CodeUnknownAddress)
+
+	// // save the first CU, but second is still unrecognized
+	// acc1 := input.ak.NewCUWithAddress(ctx, sdk.CUTypeUser, addr1)
+
+	// input.ak.SetCU(ctx, acc1)
+	/* checkInvalidTx(t, anteHandler, ctx, tx, false, sdk.CodeUnknownAddress) */
 }
 
 // Test logic around sequence checking with one signer and many signers.
@@ -108,17 +113,15 @@ func TestAnteHandlerSequences(t *testing.T) {
 
 	// set the accounts
 	acc1 := input.ak.NewCUWithAddress(ctx, sdk.CUTypeUser, addr1)
-	acc1.SetCoins(types.NewTestCoins())
 	input.ak.SetCU(ctx, acc1)
 	acc2 := input.ak.NewCUWithAddress(ctx, sdk.CUTypeUser, addr2)
-	acc2.SetCoins(types.NewTestCoins())
 	input.ak.SetCU(ctx, acc2)
 	acc3 := input.ak.NewCUWithAddress(ctx, sdk.CUTypeUser, addr3)
-	acc3.SetCoins(types.NewTestCoins())
 	input.ak.SetCU(ctx, acc3)
 
 	// msg and signatures
 	var tx sdk.Tx
+
 	msg := types.NewTestMsg(addr1)
 	fee := types.NewTestStdFee()
 
@@ -126,23 +129,34 @@ func TestAnteHandlerSequences(t *testing.T) {
 
 	// test good tx from one signer
 	privs, seqs := []crypto.PrivKey{priv1}, []uint64{0}
+	input.tk.AddCoins(ctx, addr1, fee.Amount)
+
 	tx = types.NewTestTx(ctx, msgs, privs, seqs, fee)
 	checkValidTx(t, anteHandler, ctx, tx, false)
 
+	input.tk.AddCoins(ctx, addr1, fee.Amount)
 	// test sending it again fails (replay protection)
 	checkInvalidTx(t, anteHandler, ctx, tx, false, sdk.CodeUnauthorized)
 
 	// fix sequence, should pass
 	seqs = []uint64{1}
+	input.tk.AddCoins(ctx, addr1, fee.Amount)
 	tx = types.NewTestTx(ctx, msgs, privs, seqs, fee)
 	checkValidTx(t, anteHandler, ctx, tx, false)
 
 	// new tx with another signer and correct sequences
+	input.tk.AddCoins(ctx, addr1, fee.Amount)
 	msg1 := types.NewTestMsg(addr1, addr2)
+
 	msg2 := types.NewTestMsg(addr3, addr1)
 	msgs = []sdk.Msg{msg1, msg2}
 
 	privs, seqs = []crypto.PrivKey{priv1, priv2, priv3}, []uint64{2, 0, 0}
+
+	input.tk.AddCoins(ctx, addr1, fee.Amount)
+	input.tk.AddCoins(ctx, addr2, fee.Amount)
+	input.tk.AddCoins(ctx, addr3, fee.Amount)
+
 	tx = types.NewTestTx(ctx, msgs, privs, seqs, fee)
 	checkValidTx(t, anteHandler, ctx, tx, false)
 
@@ -157,6 +171,7 @@ func TestAnteHandlerSequences(t *testing.T) {
 	checkInvalidTx(t, anteHandler, ctx, tx, false, sdk.CodeUnauthorized)
 
 	// fix the sequence and it passes
+	input.tk.AddCoins(ctx, addr2, fee.Amount)
 	tx = types.NewTestTx(ctx, msgs, []crypto.PrivKey{priv2}, []uint64{1}, fee)
 	checkValidTx(t, anteHandler, ctx, tx, false)
 
@@ -164,6 +179,8 @@ func TestAnteHandlerSequences(t *testing.T) {
 	msg = types.NewTestMsg(addr1, addr2)
 	msgs = []sdk.Msg{msg}
 	privs, seqs = []crypto.PrivKey{priv1, priv2}, []uint64{3, 2}
+	input.tk.AddCoins(ctx, addr1, fee.Amount)
+	input.tk.AddCoins(ctx, addr2, fee.Amount)
 	tx = types.NewTestTx(ctx, msgs, privs, seqs, fee)
 	checkValidTx(t, anteHandler, ctx, tx, false)
 }
@@ -191,21 +208,23 @@ func TestAnteHandlerFees(t *testing.T) {
 
 	// signer does not have enough funds to pay the fee
 	tx = types.NewTestTx(ctx, msgs, privs, seqs, fee)
-	checkInvalidTx(t, anteHandler, ctx, tx, false, sdk.CodeInsufficientFunds)
+	checkInvalidTx(t, anteHandler, ctx, tx, false, sdk.CodeInsufficientCoins)
 
-	acc1.SetCoins(sdk.NewCoins(sdk.NewInt64Coin("atom", 149)))
+	input.tk.AddCoins(ctx, addr1, sdk.NewCoins(sdk.NewInt64Coin("atom", 149)))
 	input.ak.SetCU(ctx, acc1)
-	checkInvalidTx(t, anteHandler, ctx, tx, false, sdk.CodeInsufficientFunds)
+	checkInvalidTx(t, anteHandler, ctx, tx, false, sdk.CodeInsufficientCoins)
 
-	require.True(t, input.sk.GetModuleAccount(ctx, types.FeeCollectorName).GetCoins().Empty())
-	require.True(sdk.IntEq(t, input.ak.GetCU(ctx, addr1).GetCoins().AmountOf("atom"), sdk.NewInt(149)))
-
-	acc1.SetCoins(sdk.NewCoins(sdk.NewInt64Coin("atom", 150)))
+	input.tk.AddCoins(ctx, addr1, sdk.NewCoins(sdk.NewInt64Coin("atom", 1)))
 	input.ak.SetCU(ctx, acc1)
 	checkValidTx(t, anteHandler, ctx, tx, false)
 
-	require.True(sdk.IntEq(t, input.sk.GetModuleAccount(ctx, types.FeeCollectorName).GetCoins().AmountOf("atom"), sdk.NewInt(150)))
-	require.True(sdk.IntEq(t, input.ak.GetCU(ctx, addr1).GetCoins().AmountOf("atom"), sdk.NewInt(0)))
+	amount := input.tk.GetBalance(ctx, input.sk.GetModuleAccount(ctx, types.FeeCollectorName).GetAddress(), "atom")
+
+	require.True(sdk.IntEq(t, amount, sdk.NewInt(150)))
+	amount = input.tk.GetBalance(ctx, addr1, "atom")
+
+	require.True(sdk.IntEq(t, amount, sdk.NewInt(0)))
+
 }
 
 // Test logic around memo gas consumption.
@@ -261,13 +280,10 @@ func TestAnteHandlerMultiSigner(t *testing.T) {
 
 	// set the accounts
 	acc1 := input.ak.NewCUWithAddress(ctx, sdk.CUTypeUser, addr1)
-	acc1.SetCoins(types.NewTestCoins())
 	input.ak.SetCU(ctx, acc1)
 	acc2 := input.ak.NewCUWithAddress(ctx, sdk.CUTypeUser, addr2)
-	acc2.SetCoins(types.NewTestCoins())
 	input.ak.SetCU(ctx, acc2)
 	acc3 := input.ak.NewCUWithAddress(ctx, sdk.CUTypeUser, addr3)
-	acc3.SetCoins(types.NewTestCoins())
 	input.ak.SetCU(ctx, acc3)
 
 	// set up msgs and fee
@@ -280,15 +296,28 @@ func TestAnteHandlerMultiSigner(t *testing.T) {
 
 	// signers in order
 	privs, seqs := []crypto.PrivKey{priv1, priv2, priv3}, []uint64{0, 0, 0}
+
+	input.tk.AddCoins(ctx, addr1, fee.Amount)
+	input.tk.AddCoins(ctx, addr2, fee.Amount)
+	input.tk.AddCoins(ctx, addr3, fee.Amount)
+
 	tx = types.NewTestTxWithMemo(ctx, msgs, privs, seqs, fee, "Check signers are in expected order and different CU numbers works")
 
 	checkValidTx(t, anteHandler, ctx, tx, false)
+
+	input.tk.AddCoins(ctx, addr1, fee.Amount)
+	input.tk.AddCoins(ctx, addr2, fee.Amount)
+	input.tk.AddCoins(ctx, addr3, fee.Amount)
 
 	// change sequence numbers
 	tx = types.NewTestTx(ctx, []sdk.Msg{msg1}, []crypto.PrivKey{priv1, priv2}, []uint64{1, 1}, fee)
 	checkValidTx(t, anteHandler, ctx, tx, false)
 	tx = types.NewTestTx(ctx, []sdk.Msg{msg2}, []crypto.PrivKey{priv3, priv1}, []uint64{1, 2}, fee)
 	checkValidTx(t, anteHandler, ctx, tx, false)
+
+	input.tk.AddCoins(ctx, addr1, fee.Amount)
+	input.tk.AddCoins(ctx, addr2, fee.Amount)
+	input.tk.AddCoins(ctx, addr3, fee.Amount)
 
 	// expected seqs = [3, 2, 2]
 	tx = types.NewTestTxWithMemo(ctx, msgs, privs, []uint64{3, 2, 2}, fee, "Check signers are in expected order and different CU numbers and sequence numbers works")
@@ -307,10 +336,8 @@ func TestAnteHandlerBadSignBytes(t *testing.T) {
 
 	// set the accounts
 	acc1 := input.ak.NewCUWithAddress(ctx, sdk.CUTypeUser, addr1)
-	acc1.SetCoins(types.NewTestCoins())
 	input.ak.SetCU(ctx, acc1)
 	acc2 := input.ak.NewCUWithAddress(ctx, sdk.CUTypeUser, addr2)
-	acc2.SetCoins(types.NewTestCoins())
 	input.ak.SetCU(ctx, acc2)
 
 	var tx sdk.Tx
@@ -322,6 +349,7 @@ func TestAnteHandlerBadSignBytes(t *testing.T) {
 	fee3 := types.NewTestStdFee()
 	fee3.Amount[0].Amount = fee3.Amount[0].Amount.AddRaw(100)
 
+	input.tk.AddCoins(ctx, addr1, fee.Amount)
 	// test good tx and signBytes
 	privs, seqs := []crypto.PrivKey{priv1}, []uint64{0}
 	tx = types.NewTestTx(ctx, msgs, privs, seqs, fee)
@@ -347,6 +375,7 @@ func TestAnteHandlerBadSignBytes(t *testing.T) {
 
 	privs, seqs = []crypto.PrivKey{priv1}, []uint64{1}
 	for _, cs := range cases {
+		input.tk.AddCoins(ctx, addr1, fee.Amount)
 		tx := types.NewTestTxWithSignBytes(
 			msgs, privs, seqs, fee,
 			StdSignBytes(cs.chainID, cs.seq, cs.fee, cs.msgs, ""),
@@ -357,6 +386,7 @@ func TestAnteHandlerBadSignBytes(t *testing.T) {
 
 	// test wrong signer if public key exist
 	privs, seqs = []crypto.PrivKey{priv2}, []uint64{1}
+	input.tk.AddCoins(ctx, addr1, fee.Amount)
 	tx = types.NewTestTx(ctx, msgs, privs, seqs, fee)
 	checkInvalidTx(t, anteHandler, ctx, tx, false, sdk.CodeUnauthorized)
 
@@ -364,6 +394,7 @@ func TestAnteHandlerBadSignBytes(t *testing.T) {
 	msg = types.NewTestMsg(addr2)
 	msgs = []sdk.Msg{msg}
 	privs, seqs = []crypto.PrivKey{priv1}, []uint64{0}
+	input.tk.AddCoins(ctx, addr2, fee.Amount)
 	tx = types.NewTestTx(ctx, msgs, privs, seqs, fee)
 	checkInvalidTx(t, anteHandler, ctx, tx, false, sdk.CodeInvalidPubKey)
 }
@@ -380,10 +411,8 @@ func TestAnteHandlerSetPubKey(t *testing.T) {
 
 	// set the accounts
 	acc1 := input.ak.NewCUWithAddress(ctx, sdk.CUTypeUser, addr1)
-	acc1.SetCoins(types.NewTestCoins())
 	input.ak.SetCU(ctx, acc1)
 	acc2 := input.ak.NewCUWithAddress(ctx, sdk.CUTypeUser, addr2)
-	acc2.SetCoins(types.NewTestCoins())
 	input.ak.SetCU(ctx, acc2)
 
 	var tx sdk.Tx
@@ -393,6 +422,7 @@ func TestAnteHandlerSetPubKey(t *testing.T) {
 	msgs := []sdk.Msg{msg}
 	privs, seqs := []crypto.PrivKey{priv1}, []uint64{0}
 	fee := types.NewTestStdFee()
+	input.tk.AddCoins(ctx, addr1, fee.Amount)
 	tx = types.NewTestTx(ctx, msgs, privs, seqs, fee)
 	checkValidTx(t, anteHandler, ctx, tx, false)
 
@@ -402,6 +432,9 @@ func TestAnteHandlerSetPubKey(t *testing.T) {
 	// test public key not found
 	msg = types.NewTestMsg(addr2)
 	msgs = []sdk.Msg{msg}
+
+	input.tk.AddCoins(ctx, addr2, fee.Amount)
+
 	tx = types.NewTestTx(ctx, msgs, privs, seqs, fee)
 	sigs := tx.(types.StdTx).GetSignatures()
 	sigs[0].PubKey = nil
@@ -410,6 +443,7 @@ func TestAnteHandlerSetPubKey(t *testing.T) {
 	acc2 = input.ak.GetCU(ctx, addr2)
 	require.Nil(t, acc2.GetPubKey())
 
+	input.tk.AddCoins(ctx, addr2, fee.Amount)
 	// test invalid signature and public key
 	tx = types.NewTestTx(ctx, msgs, privs, seqs, fee)
 	checkInvalidTx(t, anteHandler, ctx, tx, false, sdk.CodeInvalidPubKey)
@@ -580,10 +614,8 @@ func TestAnteHandlerSigLimitExceeded(t *testing.T) {
 
 	// set the accounts
 	acc1 := input.ak.NewCUWithAddress(ctx, sdk.CUTypeUser, addr1)
-	acc1.SetCoins(types.NewTestCoins())
 	input.ak.SetCU(ctx, acc1)
 	acc2 := input.ak.NewCUWithAddress(ctx, sdk.CUTypeUser, addr2)
-	acc2.SetCoins(types.NewTestCoins())
 	input.ak.SetCU(ctx, acc2)
 
 	var tx sdk.Tx
@@ -668,13 +700,14 @@ func TestCustomSignatureVerificationGasConsumer(t *testing.T) {
 	// verify that an secp256k1 CU gets rejected
 	priv1, _, addr1 := types.KeyTestPubAddr()
 	acc1 := input.ak.NewCUWithAddress(ctx, sdk.CUTypeUser, addr1)
-	_ = acc1.SetCoins(sdk.NewCoins(sdk.NewInt64Coin("atom", 150)))
 	input.ak.SetCU(ctx, acc1)
 
 	var tx sdk.Tx
 	msg := types.NewTestMsg(addr1)
 	privs, seqs := []crypto.PrivKey{priv1}, []uint64{0}
 	fee := types.NewTestStdFee()
+
+	input.tk.AddCoins(ctx, addr1, fee.Amount)
 	msgs := []sdk.Msg{msg}
 	tx = types.NewTestTx(ctx, msgs, privs, seqs, fee)
 	checkInvalidTx(t, anteHandler, ctx, tx, false, sdk.CodeInvalidPubKey)
@@ -684,11 +717,11 @@ func TestCustomSignatureVerificationGasConsumer(t *testing.T) {
 	pub2 := priv2.PubKey()
 	addr2 := sdk.CUAddress(pub2.Address())
 	acc2 := input.ak.NewCUWithAddress(ctx, sdk.CUTypeUser, addr2)
-	require.NoError(t, acc2.SetCoins(sdk.NewCoins(sdk.NewInt64Coin("atom", 150))))
 	input.ak.SetCU(ctx, acc2)
 	msg = types.NewTestMsg(addr2)
 	privs, seqs = []crypto.PrivKey{priv2}, []uint64{0}
 	fee = types.NewTestStdFee()
+	input.tk.AddCoins(ctx, addr2, fee.Amount)
 	msgs = []sdk.Msg{msg}
 	tx = types.NewTestTx(ctx, msgs, privs, seqs, fee)
 	checkValidTx(t, anteHandler, ctx, tx, false)

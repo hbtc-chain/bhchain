@@ -43,7 +43,7 @@ func (msg MsgKeyGen) ValidateBasic() sdk.Error {
 	if sdk.IsIllegalOrderID(msg.OrderID) {
 		return sdk.ErrInvalidTx("OrderID is invalid")
 	}
-	if msg.Symbol.String() == "" || !msg.Symbol.IsValidTokenName() {
+	if msg.Symbol.String() == "" || !msg.Symbol.IsValid() {
 		return sdk.ErrInvalidSymbol(fmt.Sprintf("Invalid Symbol %s", msg.Symbol))
 	}
 	if msg.Symbol.String() == sdk.NativeToken {

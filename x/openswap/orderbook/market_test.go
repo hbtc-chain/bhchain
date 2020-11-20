@@ -6,7 +6,6 @@ import (
 	"time"
 
 	sdk "github.com/hbtc-chain/bhchain/types"
-	"github.com/stretchr/testify/assert"
 )
 
 var (
@@ -14,7 +13,7 @@ var (
 )
 
 func TestMarketGetOrderbook(t *testing.T) {
-	market := NewMarket("btc", "usdt")
+	market := NewMarket(0, "btc", "usdt")
 
 	buyOrders := getAscendingOrders(0)
 	sellOrders := getAscendingOrders(1)
@@ -27,9 +26,6 @@ func TestMarketGetOrderbook(t *testing.T) {
 	sell, buy := market.GetAllOrders()
 	assertOrderList(t, sellOrders, reverseOrderList(sell))
 	assertOrderList(t, buyOrders, reverseOrderList(buy))
-
-	assert.Equal(t, buyOrders[len(buyOrders)-1].Price, market.GetHighestBuyOrder().Price)
-	assert.Equal(t, sellOrders[0].Price, market.GetLowestSellOrder().Price)
 
 	ctx := sdk.Context{}.WithBlockTime(time.Unix(3, 0))
 	orders := market.GetExpiredOrders(ctx)

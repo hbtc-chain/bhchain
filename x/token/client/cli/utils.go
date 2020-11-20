@@ -2,10 +2,11 @@ package cli
 
 import (
 	"encoding/json"
+	"io/ioutil"
+
 	"github.com/hbtc-chain/bhchain/codec"
 	sdk "github.com/hbtc-chain/bhchain/types"
 	"github.com/hbtc-chain/bhchain/x/token/types"
-	"io/ioutil"
 )
 
 type (
@@ -21,7 +22,7 @@ type (
 	AddTokenProposalJSON struct {
 		Title       string        `json:"title" yaml:"title"`
 		Description string        `json:"description" yaml:"description"`
-		TokenInfo   sdk.TokenInfo `json:"token_info" yaml:"token_info"`
+		TokenInfo   *sdk.IBCToken `json:"token_info" yaml:"token_info"`
 		Deposit     sdk.Coins     `json:"deposit" yaml:"deposit"`
 		VoteTime    uint32        `json:"votetime" yaml:"votetime"`
 	}
@@ -33,14 +34,6 @@ type (
 		Changes     ParamChangesJSON `json:"changes" yaml:"changes"`
 		Deposit     sdk.Coins        `json:"deposit" yaml:"deposit"`
 		VoteTime    uint32           `json:"votetime" yaml:"votetime"`
-	}
-
-	DisableTokenProposalJSON struct {
-		Title       string    `json:"title" yaml:"title"`
-		Description string    `json:"description" yaml:"description"`
-		Symbol      string    `json:"symbol" yaml:"symbol"`
-		Deposit     sdk.Coins `json:"deposit" yaml:"deposit"`
-		VoteTime    uint32    `json:"votetime" yaml:"votetime"`
 	}
 )
 
@@ -78,22 +71,6 @@ func ParseAddTokenProposalJSON(cdc *codec.Codec, proposalFile string) (AddTokenP
 // ParseTokenParamsChangeProposalJSON reads and parses a tokenParamsChangeProposalJSON from a file.
 func ParseTokenParamsChangeProposalJSON(cdc *codec.Codec, proposalFile string) (TokenParamsChangeProposalJSON, error) {
 	proposal := TokenParamsChangeProposalJSON{}
-
-	contents, err := ioutil.ReadFile(proposalFile)
-	if err != nil {
-		return proposal, err
-	}
-
-	if err := cdc.UnmarshalJSON(contents, &proposal); err != nil {
-		return proposal, err
-	}
-
-	return proposal, nil
-}
-
-// ParseDisableTokenProposalJSON reads and parses a disableTokenProposalJSON from a file.
-func ParseDisableTokenProposalJSON(cdc *codec.Codec, proposalFile string) (DisableTokenProposalJSON, error) {
-	proposal := DisableTokenProposalJSON{}
 
 	contents, err := ioutil.ReadFile(proposalFile)
 	if err != nil {

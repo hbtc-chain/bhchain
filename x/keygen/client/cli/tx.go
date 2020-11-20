@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+
 	"github.com/hbtc-chain/bhchain/client"
 	"github.com/hbtc-chain/bhchain/client/context"
 	"github.com/hbtc-chain/bhchain/codec"
@@ -9,7 +10,7 @@ import (
 	"github.com/hbtc-chain/bhchain/x/custodianunit/client/utils"
 	ctypes "github.com/hbtc-chain/bhchain/x/custodianunit/types"
 	"github.com/hbtc-chain/bhchain/x/keygen/types"
-	"github.com/satori/go.uuid"
+	uuid "github.com/satori/go.uuid"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -38,14 +39,14 @@ func GetCmdKeyGen(cdc *codec.Codec) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "keygen [from_key_or_address] [symbol] [to]",
 		Short: "keygen",
-		Long:  ` Example: keygen alice btc BHPSfYjrgEgM97gpCWRd2UStvRVRqFgw6mQ`,
+		Long:  ` Example: keygen alice btc HBCao7JRxCAUc89DkUjSf8r4nVRURyLzPb6b`,
 		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			txBldr := ctypes.NewTxBuilderFromCLI().WithTxEncoder(utils.GetTxEncoder(cdc))
 			cliCtx := context.NewCLIContextWithFrom(args[0]).WithCodec(cdc)
 
 			symbol := sdk.Symbol(args[1])
-			if !symbol.IsValidTokenName() {
+			if !symbol.IsValid() {
 				return fmt.Errorf("Invalid symbol:%v", args[1])
 			}
 
@@ -82,14 +83,14 @@ func GetCmdNewOpCU(cdc *codec.Codec) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "newopcu [from_key_or_address] [symbol] [Op_CU_address]",
 		Short: "create Op CU with address",
-		Long:  ` Example: newopcu btc BHPSfYjrgEgM97gpCWRd2UStvRVRqFgw6mQ`,
+		Long:  ` Example: newopcu btc HBCao7JRxCAUc89DkUjSf8r4nVRURyLzPb6b`,
 		Args:  cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			txBldr := ctypes.NewTxBuilderFromCLI().WithTxEncoder(utils.GetTxEncoder(cdc))
 			cliCtx := context.NewCLIContextWithFrom(args[0]).WithCodec(cdc)
 
 			symbol := sdk.Symbol(args[1])
-			if !symbol.IsValidTokenName() {
+			if !symbol.IsValid() {
 				return fmt.Errorf("Invalid symbol:%v", args[1])
 			}
 

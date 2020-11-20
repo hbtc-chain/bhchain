@@ -7,14 +7,22 @@ import (
 )
 
 const (
-	EventTypeAddLiquidity    = "add_liquidity"
-	EventTypeRemoveLiquidity = "remove_liquidity"
-	EventTypeSwap            = "swap"
-	EventTypeCancelOrders    = "cancel_orders"
-	EventTypeExpireOrders    = "expire_orders"
-	EventTypeWithdrawEarning = "withdraw_earning"
-	EventTypeMining          = "mining"
+	EventTypeCreateDex         = "create_dex"
+	EventTypeEditDex           = "edit_dex"
+	EventTypeCreateTradingPair = "create_trading_pair"
+	EventTypeEditTradingPair   = "edit_trading_pair"
+	EventTypeAddLiquidity      = "add_liquidity"
+	EventTypeRemoveLiquidity   = "remove_liquidity"
+	EventTypeSwap              = "swap"
+	EventTypeCancelOrders      = "cancel_orders"
+	EventTypeExpireOrders      = "expire_orders"
+	EventTypeWithdrawEarning   = "withdraw_earning"
+	EventTypeMining            = "mining"
+	EventTypeRepurchase        = "repurchase"
 
+	AttributeKeyDexID      = "dex_id"
+	AttributeKeyTokenA     = "token_a"
+	AttributeKeyTokenB     = "token_b"
 	AttributeKeyLiquidity  = "liquidity"
 	AttributeKeySwapResult = "swap"
 	AttributeKeyBurned     = "burned"
@@ -25,6 +33,7 @@ const (
 
 type EventLiquidity struct {
 	From                sdk.CUAddress `json:"from"`
+	DexID               uint32        `json:"dex_id"`
 	TokenA              sdk.Symbol    `json:"token_a"`
 	TokenB              sdk.Symbol    `json:"token_b"`
 	TokenAAmount        sdk.Int       `json:"token_a_amount"`
@@ -33,9 +42,10 @@ type EventLiquidity struct {
 	ChangedTokenBAmount sdk.Int       `json:"changed_b_amount"`
 }
 
-func NewEventLiquidity(from sdk.CUAddress, tokenA, tokenB sdk.Symbol, tokenAAmount, tokenBAmount, changedAAmount, changedBAmount sdk.Int) *EventLiquidity {
+func NewEventLiquidity(from sdk.CUAddress, dexID uint32, tokenA, tokenB sdk.Symbol, tokenAAmount, tokenBAmount, changedAAmount, changedBAmount sdk.Int) *EventLiquidity {
 	return &EventLiquidity{
 		From:                from,
+		DexID:               dexID,
 		TokenA:              tokenA,
 		TokenB:              tokenB,
 		TokenAAmount:        tokenAAmount,
@@ -53,6 +63,7 @@ func (e *EventLiquidity) String() string {
 type EventSwap struct {
 	From         sdk.CUAddress `json:"from"`
 	OrderID      string        `json:"order_id"`
+	DexID        uint32        `json:"dex_id"`
 	TokenA       sdk.Symbol    `json:"token_a"`
 	TokenB       sdk.Symbol    `json:"token_b"`
 	TokenAAmount sdk.Int       `json:"token_a_amount"`
@@ -62,11 +73,12 @@ type EventSwap struct {
 	AmountOut    sdk.Int       `json:"amount_out"`
 }
 
-func NewEventSwap(from sdk.CUAddress, orderID string, tokenA, tokenB, tokenIn sdk.Symbol,
+func NewEventSwap(from sdk.CUAddress, orderID string, dexID uint32, tokenA, tokenB, tokenIn sdk.Symbol,
 	tokenAAmount, tokenBAmount, amountIn, amountOut sdk.Int) *EventSwap {
 	return &EventSwap{
 		From:         from,
 		OrderID:      orderID,
+		DexID:        dexID,
 		TokenA:       tokenA,
 		TokenB:       tokenB,
 		TokenAAmount: tokenAAmount,

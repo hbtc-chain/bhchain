@@ -14,7 +14,7 @@ func TestSupply(t *testing.T) {
 	initTokens := sdk.TokensFromConsensusPower(initialPower)
 	nAccs := int64(4)
 
-	ctx, _, keeper := createTestInput(t, false, initialPower, nAccs)
+	ctx, _, keeper, _ := createTestInput(t, false, initialPower, nAccs)
 
 	total := keeper.GetSupply(ctx).GetTotal()
 	expectedTotal := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, initTokens.MulRaw(nAccs)))
@@ -25,7 +25,7 @@ func TestSupply(t *testing.T) {
 func TestValidatePermissions(t *testing.T) {
 	nAccs := int64(0)
 	initialPower := int64(100)
-	_, _, keeper := createTestInput(t, false, initialPower, nAccs)
+	_, _, keeper, _ := createTestInput(t, false, initialPower, nAccs)
 
 	err := keeper.ValidatePermissions(multiPermAcc)
 	require.NoError(t, err)

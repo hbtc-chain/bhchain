@@ -9,7 +9,7 @@ import (
 )
 
 func TestSetWithdrawAddr(t *testing.T) {
-	ctx, _, keeper, _, _ := CreateTestInputDefault(t, false, 1000)
+	ctx, _, _, keeper, _, _ := CreateTestInputDefault(t, false, 1000)
 
 	keeper.SetWithdrawAddrEnabled(ctx, false)
 
@@ -26,7 +26,7 @@ func TestSetWithdrawAddr(t *testing.T) {
 }
 
 func TestWithdrawValidatorCommission(t *testing.T) {
-	ctx, ak, keeper, sk, _ := CreateTestInputDefault(t, false, 1000)
+	ctx, _, tk, keeper, sk, _ := CreateTestInputDefault(t, false, 1000)
 
 	valCommission := sdk.DecCoins{
 		sdk.NewDecCoinFromDec("mytoken", sdk.NewDec(5).Quo(sdk.NewDec(4))),
@@ -35,14 +35,15 @@ func TestWithdrawValidatorCommission(t *testing.T) {
 
 	// set module CU coins
 	distrAcc := keeper.GetDistributionAccount(ctx)
-	distrAcc.SetCoins(sdk.NewCoins(
+	tk.AddCoins(ctx, distrAcc.GetAddress(), sdk.NewCoins(
 		sdk.NewCoin("mytoken", sdk.NewInt(2)),
 		sdk.NewCoin(sk.BondDenom(ctx), sdk.NewInt(2)),
 	))
+
 	keeper.supplyKeeper.SetModuleAccount(ctx, distrAcc)
 
 	// check initial balance
-	balance := ak.GetCU(ctx, sdk.CUAddress(valOpAddr3)).GetCoins()
+	balance := tk.GetAllBalance(ctx, sdk.CUAddress(valOpAddr3))
 	expTokens := sdk.TokensFromConsensusPower(1000)
 	expCoins := sdk.NewCoins(sdk.NewCoin(sk.BondDenom(ctx), expTokens))
 	require.Equal(t, expCoins, balance)
@@ -57,7 +58,7 @@ func TestWithdrawValidatorCommission(t *testing.T) {
 	keeper.WithdrawValidatorCommission(ctx, valOpAddr3)
 
 	// check balance increase
-	balance = ak.GetCU(ctx, sdk.CUAddress(valOpAddr3)).GetCoins()
+	balance = tk.GetAllBalance(ctx, sdk.CUAddress(valOpAddr3))
 	require.Equal(t, sdk.NewCoins(
 		sdk.NewCoin("mytoken", sdk.NewInt(1)),
 		sdk.NewCoin(sk.BondDenom(ctx), expTokens.AddRaw(1)),
@@ -74,7 +75,7 @@ func TestWithdrawValidatorCommission(t *testing.T) {
 }
 
 func TestGetTotalRewards(t *testing.T) {
-	ctx, _, keeper, sk, _ := CreateTestInputDefault(t, false, 1000)
+	ctx, _, _, keeper, sk, _ := CreateTestInputDefault(t, false, 1000)
 
 	valCommission := sdk.DecCoins{
 		sdk.NewDecCoinFromDec("mytoken", sdk.NewDec(5).Quo(sdk.NewDec(4))),

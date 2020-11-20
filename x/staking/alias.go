@@ -91,10 +91,13 @@ var (
 	ErrNoValidatorFound                = types.ErrNoValidatorFound
 	ErrValidatorOwnerExists            = types.ErrValidatorOwnerExists
 	ErrValidatorPubKeyExists           = types.ErrValidatorPubKeyExists
-	ErrKeyNodeDeny                     = types.ErrKeyNodeDeny
+	ErrNoQualification                 = types.ErrNoQualification
+	ErrKeyNodeNumExceeds               = types.ErrKeyNodeNumExceeds
 	ErrValidatorPubKeyTypeNotSupported = types.ErrValidatorPubKeyTypeNotSupported
 	ErrValidatorJailed                 = types.ErrValidatorJailed
-	ErrBadRemoveValidator              = types.ErrBadRemoveValidator
+	ErrRemoveTooManyKeyNodes           = types.ErrRemoveTooManyKeyNodes
+	ErrRemoveNotKeyNode                = types.ErrRemoveNotKeyNode
+	ErrAddDuplicatedKeyNode            = types.ErrAddDuplicatedKeyNode
 	ErrDescriptionLength               = types.ErrDescriptionLength
 	ErrCommissionNegative              = types.ErrCommissionNegative
 	ErrCommissionHuge                  = types.ErrCommissionHuge
@@ -135,6 +138,8 @@ var (
 	ErrBothShareMsgsGiven              = types.ErrBothShareMsgsGiven
 	ErrNeitherShareMsgsGiven           = types.ErrNeitherShareMsgsGiven
 	ErrMissingSignature                = types.ErrMissingSignature
+	ErrDuplicatedValidatorAddr         = types.ErrDuplicatedValidatorAddr
+	ErrBadUpdateKeyNodesTime           = types.ErrBadUpdateKeyNodesTime
 	NewGenesisState                    = types.NewGenesisState
 	DefaultGenesisState                = types.DefaultGenesisState
 	NewMultiStakingHooks               = types.NewMultiStakingHooks

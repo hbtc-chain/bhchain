@@ -2,6 +2,7 @@ package token
 
 import (
 	"encoding/json"
+
 	"github.com/hbtc-chain/bhchain/client/context"
 	"github.com/hbtc-chain/bhchain/codec"
 	sdk "github.com/hbtc-chain/bhchain/types"
@@ -45,7 +46,7 @@ func (AppModuleBasic) ValidateGenesis(bz json.RawMessage) error {
 	if err != nil {
 		return err
 	}
-	_, err = ValidateGenesis(data)
+	err = ValidateGenesis(data)
 	return err
 }
 

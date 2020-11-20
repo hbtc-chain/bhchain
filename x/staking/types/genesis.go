@@ -13,6 +13,7 @@ type GenesisState struct {
 	Delegations          Delegations           `json:"delegations" yaml:"delegations"`
 	UnbondingDelegations []UnbondingDelegation `json:"unbonding_delegations" yaml:"unbonding_delegations"`
 	Redelegations        []Redelegation        `json:"redelegations" yaml:"redelegations"`
+	KeyNodes             []sdk.CUAddress       `json:"key_nodes" yaml:"key_nodes"`
 	Exported             bool                  `json:"exported" yaml:"exported"`
 }
 
@@ -22,11 +23,12 @@ type LastValidatorPower struct {
 	Power   int64
 }
 
-func NewGenesisState(params Params, validators []Validator, delegations []Delegation) GenesisState {
+func NewGenesisState(params Params, validators []Validator, delegations []Delegation, keyNodes []sdk.CUAddress) GenesisState {
 	return GenesisState{
 		Params:      params,
 		Validators:  validators,
 		Delegations: delegations,
+		KeyNodes:    keyNodes,
 	}
 }
 

@@ -89,7 +89,7 @@ func (k *Keeper) getProcessOrderListBySingleType(ctx sdk.Context, orderType sdk.
 }
 
 func (k *Keeper) NewOrderKeyGen(ctx sdk.Context, from sdk.CUAddress, orderID string, symbol string,
-	keyNodes []sdk.CUAddress, signThreshold uint64, to sdk.CUAddress, openFee sdk.Coins) *sdk.OrderKeyGen {
+	keyNodes []sdk.CUAddress, signThreshold uint64, to sdk.CUAddress, openFee sdk.Coin) *sdk.OrderKeyGen {
 	ordBase := sdk.OrderBase{
 		CUAddress: from,
 		ID:        orderID,

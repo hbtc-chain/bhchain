@@ -1,10 +1,10 @@
 package keeper
 
 import (
+	"bytes"
 	"fmt"
 
 	sdk "github.com/hbtc-chain/bhchain/types"
-	"github.com/hbtc-chain/bhchain/x/custodianunit/exported"
 	"github.com/hbtc-chain/bhchain/x/transfer/types"
 )
 
@@ -33,32 +33,28 @@ func (keeper BaseKeeper) OpcuAssetTransfer(ctx sdk.Context, opCUAddr sdk.CUAddre
 		return sdk.ErrInvalidTx("Opcu has unfinished order").Result()
 	}
 
-	opCU := keeper.ck.GetCU(ctx, opCUAddr)
-	if opCU == nil {
+	opCUAst := keeper.ik.GetCUIBCAsset(ctx, opCUAddr)
+	if opCUAst == nil {
 		return sdk.ErrInvalidAccount(opCUAddr.String()).Result()
 	}
 
-	if opCU.GetCUType() != sdk.CUTypeOp {
+	if opCUAst.GetCUType() != sdk.CUTypeOp {
 		return sdk.ErrInvalidTx(fmt.Sprintf("opcutransfer from a non op CU :%v", opCUAddr)).Result()
 	}
 
-	if !sdk.Symbol(symbol).IsValidTokenName() {
-		return sdk.ErrInvalidSymbol(symbol).Result()
-	}
-	if !keeper.tk.IsTokenSupported(ctx, sdk.Symbol(symbol)) {
+	tokenInfo := keeper.tk.GetIBCToken(ctx, sdk.Symbol(symbol))
+	if tokenInfo == nil {
 		return sdk.ErrUnSupportToken(symbol).Result()
 	}
-
-	tokenInfo := keeper.tk.GetTokenInfo(ctx, sdk.Symbol(symbol))
 	chain := tokenInfo.Chain.String()
-	fromAddr := opCU.GetAssetAddress(chain, curEpoch.Index-1)
+	fromAddr := opCUAst.GetAssetAddress(chain, curEpoch.Index-1)
 	if fromAddr == "" {
-		opCU.SetMigrationStatus(sdk.MigrationFinish)
-		keeper.ck.SetCU(ctx, opCU)
-		keeper.checkOpcusMigrationStatus(ctx, curEpoch)
+		opCUAst.SetMigrationStatus(sdk.MigrationFinish)
+		keeper.ik.SetCUIBCAsset(ctx, opCUAst)
+		keeper.checkOpcusMigrationStatus(ctx)
 		return sdk.Result{}
 	}
-	if !opCU.IsEnabledSendTx(chain, fromAddr) {
+	if !opCUAst.IsEnabledSendTx(chain, fromAddr) {
 		return sdk.ErrInvalidTx(fmt.Sprintf("opcutransfer not sendable tx now :%v", opCUAddr)).Result()
 	}
 
@@ -67,9 +63,9 @@ func (keeper BaseKeeper) OpcuAssetTransfer(ctx sdk.Context, opCUAddr sdk.CUAddre
 		return sdk.ErrInvalidAddr(fmt.Sprintf("%v is not a valid address", toAddr)).Result()
 	}
 
-	toAsset := opCU.GetAssetByAddr(symbol, canonicalToAddr)
+	toAsset := opCUAst.GetAssetByAddr(symbol, canonicalToAddr)
 	if toAsset == sdk.NilAsset {
-		return sdk.ErrInvalidAddr(fmt.Sprintf("%v does not belong to cu %v", canonicalToAddr, opCU.GetAddress().String())).Result()
+		return sdk.ErrInvalidAddr(fmt.Sprintf("%v does not belong to cu %v", canonicalToAddr, opCUAst.GetAddress().String())).Result()
 	}
 	if toAsset.Epoch != curEpoch.Index {
 		return sdk.ErrInvalidAddr("to addr not belong to currenct epoch").Result()
@@ -77,16 +73,16 @@ func (keeper BaseKeeper) OpcuAssetTransfer(ctx sdk.Context, opCUAddr sdk.CUAddre
 
 	if tokenInfo.TokenType == sdk.UtxoBased {
 		if items[0].Amount.IsZero() {
-			if keeper.checkUtxoOpcuAstTransferFinish(ctx, fromAddr, symbol, opCU) {
-				opCU.SetMigrationStatus(sdk.MigrationFinish)
-				keeper.ck.SetCU(ctx, opCU)
-				keeper.checkOpcusMigrationStatus(ctx, curEpoch)
+			if keeper.checkUtxoOpcuAstTransferFinish(ctx, fromAddr, symbol, opCUAddr) {
+				opCUAst.SetMigrationStatus(sdk.MigrationFinish)
+				keeper.ik.SetCUIBCAsset(ctx, opCUAst)
+				keeper.checkOpcusMigrationStatus(ctx)
 				return sdk.Result{}
 			}
 			return sdk.ErrInvalidTx("Opcu transfer items are empty").Result()
 		}
 
-		depositList := keeper.ck.GetDepositList(ctx, symbol, opCU.GetAddress())
+		depositList := keeper.ik.GetDepositList(ctx, symbol, opCUAst.GetAddress())
 		depositList = depositList.Filter(func(d sdk.DepositItem) bool {
 			return d.ExtAddress == fromAddr && d.Status == sdk.DepositItemStatusConfirmed
 		})
@@ -100,7 +96,7 @@ func (keeper BaseKeeper) OpcuAssetTransfer(ctx sdk.Context, opCUAddr sdk.CUAddre
 
 		sum := sdk.ZeroInt()
 		for _, item := range items {
-			depositItem := keeper.ck.GetDeposit(ctx, symbol, opCUAddr, item.Hash, item.Index)
+			depositItem := keeper.ik.GetDeposit(ctx, symbol, opCUAddr, item.Hash, item.Index)
 			if depositItem == sdk.DepositNil || !depositItem.Amount.Equal(item.Amount) ||
 				depositItem.Status == sdk.DepositItemStatusInProcess || depositItem.ExtAddress != fromAddr {
 				return sdk.ErrInvalidTx(fmt.Sprintf("Invalid DepositItem(%v)", item.Hash)).Result()
@@ -110,22 +106,22 @@ func (keeper BaseKeeper) OpcuAssetTransfer(ctx sdk.Context, opCUAddr sdk.CUAddre
 
 		if sum.LTE(keeper.utxoOpcuAstTransferThreshold(len(items), tokenInfo)) {
 			for _, item := range items {
-				keeper.ck.DelDeposit(ctx, symbol, opCUAddr, item.Hash, item.Index)
+				keeper.ik.DelDeposit(ctx, symbol, opCUAddr, item.Hash, item.Index)
 			}
 			burnedCoins := sdk.NewCoins(sdk.NewCoin(symbol, sum))
-			opCU.SubAssetCoins(burnedCoins)
-			opCU.AddGasUsed(burnedCoins)
-			keeper.ck.SetCU(ctx, opCU)
-			if keeper.checkUtxoOpcuAstTransferFinish(ctx, fromAddr, symbol, opCU) {
-				opCU.SetMigrationStatus(sdk.MigrationFinish)
-				keeper.ck.SetCU(ctx, opCU)
-				keeper.checkOpcusMigrationStatus(ctx, curEpoch)
+			opCUAst.SubAssetCoins(burnedCoins)
+			opCUAst.AddGasUsed(burnedCoins)
+			keeper.ik.SetCUIBCAsset(ctx, opCUAst)
+			if keeper.checkUtxoOpcuAstTransferFinish(ctx, fromAddr, symbol, opCUAddr) {
+				opCUAst.SetMigrationStatus(sdk.MigrationFinish)
+				keeper.ik.SetCUIBCAsset(ctx, opCUAst)
+				keeper.checkOpcusMigrationStatus(ctx)
 			}
 			return sdk.Result{}
 		}
 
 		for _, item := range items {
-			_ = keeper.ck.SetDepositStatus(ctx, symbol, opCUAddr, item.Hash, item.Index, sdk.DepositItemStatusInProcess)
+			_ = keeper.ik.SetDepositStatus(ctx, symbol, opCUAddr, item.Hash, item.Index, sdk.DepositItemStatusInProcess)
 		}
 
 	} else if tokenInfo.TokenType == sdk.AccountBased {
@@ -133,35 +129,38 @@ func (keeper BaseKeeper) OpcuAssetTransfer(ctx sdk.Context, opCUAddr sdk.CUAddre
 			return sdk.ErrInvalidTx("opcu transfer is locked, not suitable").Result()
 		}
 
+		opCU := keeper.ck.GetCU(ctx, opCUAddr)
 		opcuSymbol := opCU.GetSymbol()
-		status := opCU.GetMigrationStatus()
+		status := opCUAst.GetMigrationStatus()
 		if opcuSymbol != symbol && symbol == chain && status == sdk.MigrationKeyGenFinish {
 			return sdk.ErrInvalidTx(fmt.Sprintf("opcu transfer should transfer symbol(%v) first", opcuSymbol)).Result()
 		}
 
-		have := opCU.GetAssetCoins().AmountOf(symbol)
+		have := opCUAst.GetAssetCoins().AmountOf(symbol)
 		if !items[0].Amount.Equal(have) {
 			return sdk.ErrInvalidTx(fmt.Sprintf("opcu transfer amount not equal,need:%v, actual have:%v", items[0].Amount, have)).Result()
 		}
 
 		if symbol == chain {
 			if items[0].Amount.LT(tokenInfo.SysTransferAmount()) {
-				opCU.SubAssetCoins(sdk.NewCoins(sdk.NewCoin(chain, items[0].Amount)))
-				opCU.AddGasUsed(sdk.NewCoins(sdk.NewCoin(chain, items[0].Amount)))
-				opCU.SetMigrationStatus(sdk.MigrationFinish)
-				keeper.ck.SetCU(ctx, opCU)
-				keeper.checkOpcusMigrationStatus(ctx, curEpoch)
+				opCUAst.SubAssetCoins(sdk.NewCoins(sdk.NewCoin(chain, items[0].Amount)))
+				opCUAst.AddGasUsed(sdk.NewCoins(sdk.NewCoin(chain, items[0].Amount)))
+				opCUAst.SetMigrationStatus(sdk.MigrationFinish)
+				keeper.ik.SetCUIBCAsset(ctx, opCUAst)
+				keeper.checkOpcusMigrationStatus(ctx)
 				return sdk.Result{}
 			}
 		} else {
 			if items[0].Amount.IsZero() {
-				opCU.SetMigrationStatus(sdk.MigrationMainTokenFinish)
-				keeper.ck.SetCU(ctx, opCU)
+				opCUAst.SetMigrationStatus(sdk.MigrationMainTokenFinish)
+				keeper.ik.SetCUIBCAsset(ctx, opCUAst)
 				return sdk.Result{}
 			}
 		}
 
-		opCU.SetEnableSendTx(false, chain, fromAddr)
+		if tokenInfo.IsNonceBased {
+			opCUAst.SetEnableSendTx(false, chain, fromAddr)
+		}
 	} else {
 		return sdk.ErrInvalidTx(fmt.Sprintf("UnSupported tokenType:%v", tokenInfo.TokenType)).Result()
 	}
@@ -173,8 +172,8 @@ func (keeper BaseKeeper) OpcuAssetTransfer(ctx sdk.Context, opCUAddr sdk.CUAddre
 	keeper.ok.SetOrder(ctx, opCUAstTransferOrder)
 
 	//onhold needed coins
-	opCU.SetMigrationStatus(sdk.MigrationAssetBegin)
-	keeper.ck.SetCU(ctx, opCU)
+	opCUAst.SetMigrationStatus(sdk.MigrationAssetBegin)
+	keeper.ik.SetCUIBCAsset(ctx, opCUAst)
 
 	var flows []sdk.Flow
 	flows = append(flows, keeper.rk.NewOrderFlow(sdk.Symbol(symbol), opCUAddr, orderID, sdk.OrderTypeOpcuAssetTransfer, sdk.OrderStatusBegin))
@@ -186,7 +185,7 @@ func (keeper BaseKeeper) OpcuAssetTransfer(ctx sdk.Context, opCUAddr sdk.CUAddre
 	return result
 }
 
-func (keeper BaseKeeper) OpcuAssetTransferWaitSign(ctx sdk.Context, orderID string, signHashes []string, rawData []byte) sdk.Result {
+func (keeper BaseKeeper) OpcuAssetTransferWaitSign(ctx sdk.Context, orderID string, signHashes [][]byte, rawData []byte) sdk.Result {
 	tokenInfo, order, err := keeper.checkOpcuTransferOrder(ctx, orderID, sdk.OrderStatusBegin)
 	if err != nil {
 		return err.Result()
@@ -197,11 +196,11 @@ func (keeper BaseKeeper) OpcuAssetTransferWaitSign(ctx sdk.Context, orderID stri
 	symbol := order.GetSymbol()
 	chain := tokenInfo.Chain.String()
 
-	opCU := keeper.ck.GetCU(ctx, order.GetCUAddress())
+	opCUAst := keeper.ik.GetCUIBCAsset(ctx, order.GetCUAddress())
 	//Retrieve gas Price
 	gasPrice := tokenInfo.GasPrice
 	if chain != symbol {
-		ti := keeper.tk.GetTokenInfo(ctx, sdk.Symbol(chain))
+		ti := keeper.tk.GetIBCToken(ctx, sdk.Symbol(chain))
 		if ti == nil {
 			return sdk.ErrInvalidSymbol(fmt.Sprintf("%s does not exist", chain)).Result()
 		}
@@ -219,7 +218,7 @@ func (keeper BaseKeeper) OpcuAssetTransferWaitSign(ctx sdk.Context, orderID stri
 			return sdk.ErrInvalidTx(err.Error()).Result()
 		}
 		for _, vin := range vins {
-			item := keeper.ck.GetDeposit(ctx, symbol, opCU.GetAddress(), vin.Hash, vin.Index)
+			item := keeper.ik.GetDeposit(ctx, symbol, opCUAst.GetAddress(), vin.Hash, vin.Index)
 			if item == sdk.DepositNil {
 				return sdk.ErrInvalidTx(fmt.Sprintf("vin %v %v does not exist", vin.Hash, vin.Index)).Result()
 			}
@@ -272,7 +271,7 @@ func (keeper BaseKeeper) OpcuAssetTransferWaitSign(ctx sdk.Context, orderID stri
 		}
 
 		for i := 0; i < len(hashes); i++ {
-			if string(hashes[i]) != signHashes[i] {
+			if !bytes.Equal(hashes[i], signHashes[i]) {
 				return sdk.ErrInvalidTx(fmt.Sprintf("mismatch hashes, expected:%v, have:%v", hashes[i], signHashes[i])).Result()
 			}
 		}
@@ -316,7 +315,7 @@ func (keeper BaseKeeper) OpcuAssetTransferWaitSign(ctx sdk.Context, orderID stri
 			return sdk.ErrInvalidTx(fmt.Sprintf("Unexpected opcu asset transfer contract address:%v, expected:%v", tx.ContractAddress, tokenInfo.Issuer)).Result()
 		}
 
-		if string(hash) != signHashes[0] {
+		if !bytes.Equal(hash, signHashes[0]) {
 			return sdk.ErrInvalidTx(fmt.Sprintf("hash mismatch, expected:%v, have:%v", hash, signHashes[0])).Result()
 		}
 
@@ -332,7 +331,7 @@ func (keeper BaseKeeper) OpcuAssetTransferWaitSign(ctx sdk.Context, orderID stri
 			return sdk.ErrInvalidTx(fmt.Sprintf("gas price is too low, actual:%v, lowlimit:%v", tx.GasPrice, priceLowLimit)).Result()
 		}
 
-		lastAsset := opCU.GetAsset(tokenInfo.Chain.String(), curEpoch.Index-1)
+		lastAsset := opCUAst.GetAsset(tokenInfo.Chain.String(), curEpoch.Index-1)
 		if lastAsset == sdk.NilAsset {
 			return sdk.ErrInvalidTx("asset not found").Result()
 		}
@@ -344,7 +343,7 @@ func (keeper BaseKeeper) OpcuAssetTransferWaitSign(ctx sdk.Context, orderID stri
 		coins := sdk.NewCoins(sdk.NewCoin(symbol, tx.Amount))
 		coins = coins.Add(feeCoins)
 
-		have := opCU.GetAssetCoins()
+		have := opCUAst.GetAssetCoins()
 		if chain == symbol {
 			if have.AmountOf(chain).LT(coins.AmountOf(chain)) {
 				return sdk.ErrInsufficientCoins(fmt.Sprintf("opCU has insufficient coins, need:%v, actual have:%v", coins, have)).Result()
@@ -374,7 +373,7 @@ func (keeper BaseKeeper) OpcuAssetTransferWaitSign(ctx sdk.Context, orderID stri
 	return result
 }
 
-func (keeper BaseKeeper) OpcuAssetTransferSignFinish(ctx sdk.Context, orderID string, signedTx []byte, txHash string) sdk.Result {
+func (keeper BaseKeeper) OpcuAssetTransferSignFinish(ctx sdk.Context, orderID string, signedTx []byte) sdk.Result {
 	tokenInfo, order, err := keeper.checkOpcuTransferOrder(ctx, orderID, sdk.OrderStatusWaitSign)
 	if err != nil {
 		return err.Result()
@@ -385,12 +384,13 @@ func (keeper BaseKeeper) OpcuAssetTransferSignFinish(ctx sdk.Context, orderID st
 	symbol := tokenInfo.Symbol.String()
 	chain := tokenInfo.Chain.String()
 
-	opCU := keeper.ck.GetCU(ctx, order.GetCUAddress())
+	opCUAst := keeper.ik.GetCUIBCAsset(ctx, order.GetCUAddress())
 
-	lastAsset := opCU.GetAsset(symbol, curEpoch.Index-1)
+	lastAsset := opCUAst.GetAsset(symbol, curEpoch.Index-1)
 	if lastAsset == sdk.NilAsset {
 		return sdk.ErrInvalidTx("asset not found").Result()
 	}
+	var txHash string
 	switch tokenInfo.TokenType {
 	case sdk.UtxoBased:
 		result, hash := keeper.verifyUtxoBasedSignedTx(ctx, nil, order.GetCUAddress(), chain, symbol, order.RawData, signedTx)
@@ -418,7 +418,7 @@ func (keeper BaseKeeper) OpcuAssetTransferSignFinish(ctx sdk.Context, orderID st
 
 	var flows []sdk.Flow
 	flows = append(flows, keeper.rk.NewOrderFlow(sdk.Symbol(symbol), order.GetCUAddress(), orderID, sdk.OrderTypeOpcuAssetTransfer, sdk.OrderStatusSignFinish))
-	flows = append(flows, keeper.rk.NewOpcuAssetTransferSignFinishFlow(orderID, signedTx, txHash))
+	flows = append(flows, keeper.rk.NewOpcuAssetTransferSignFinishFlow(orderID, signedTx))
 
 	result := sdk.Result{}
 	receipt := keeper.rk.NewReceipt(sdk.CategoryTypeOpcuAssetTransfer, flows)
@@ -448,9 +448,9 @@ func (keeper BaseKeeper) OpcuAssetTransferFinish(ctx sdk.Context, fromCUAddr sdk
 	symbol := tokenInfo.Symbol.String()
 	chain := tokenInfo.Chain.String()
 
-	opCU := keeper.ck.GetCU(ctx, order.GetCUAddress())
+	opCUAst := keeper.ik.GetCUIBCAsset(ctx, order.GetCUAddress())
 	curEpoch := keeper.sk.GetCurrentEpoch(ctx)
-	lastAsset := opCU.GetAsset(chain, curEpoch.Index-1)
+	lastAsset := opCUAst.GetAsset(chain, curEpoch.Index-1)
 	if lastAsset == sdk.NilAsset {
 		return sdk.ErrInvalidTx("asset not found").Result()
 	}
@@ -463,7 +463,7 @@ func (keeper BaseKeeper) OpcuAssetTransferFinish(ctx sdk.Context, fromCUAddr sdk
 		}
 
 		for _, vin := range vins {
-			item := keeper.ck.GetDeposit(ctx, symbol, opCU.GetAddress(), vin.Hash, vin.Index)
+			item := keeper.ik.GetDeposit(ctx, symbol, opCUAst.GetAddress(), vin.Hash, vin.Index)
 			if item == sdk.DepositNil {
 				return sdk.ErrInvalidTx(fmt.Sprintf("vin %v %v does not exist", vin.Hash, vin.Index)).Result()
 			}
@@ -490,42 +490,42 @@ func (keeper BaseKeeper) OpcuAssetTransferFinish(ctx sdk.Context, fromCUAddr sdk
 				if err != nil {
 					return sdk.ErrInvalidOrder(fmt.Sprintf("fail to create deposit item, %v %v %v", vin.Hash, vin.Index, vin.Amount)).Result()
 				}
-				_ = keeper.ck.SaveDeposit(ctx, symbol, opCU.GetAddress(), depositItem)
+				_ = keeper.ik.SaveDeposit(ctx, symbol, opCUAst.GetAddress(), depositItem)
 			}
 		}
 
 		//delete used Vins from opCU
 		for _, vin := range tx.Vins {
-			item := keeper.ck.GetDeposit(ctx, symbol, opCU.GetAddress(), vin.Hash, vin.Index)
+			item := keeper.ik.GetDeposit(ctx, symbol, opCUAst.GetAddress(), vin.Hash, vin.Index)
 			if item == sdk.DepositNil {
 				return sdk.ErrInvalidOrder(fmt.Sprintf("deposit item%v %v does not exist", vin.Hash, vin.Index)).Result()
 			}
-			keeper.ck.DelDeposit(ctx, symbol, order.GetCUAddress(), vin.Hash, vin.Index)
+			keeper.ik.DelDeposit(ctx, symbol, order.GetCUAddress(), vin.Hash, vin.Index)
 		}
 
-		opCU.SubAssetCoins(sdk.NewCoins(sdk.NewCoin(chain, costFee)))
-		opCU.AddGasUsed(sdk.NewCoins(sdk.NewCoin(chain, costFee)))
+		opCUAst.SubAssetCoins(sdk.NewCoins(sdk.NewCoin(chain, costFee)))
+		opCUAst.AddGasUsed(sdk.NewCoins(sdk.NewCoin(chain, costFee)))
 
-		if keeper.checkUtxoOpcuAstTransferFinish(ctx, lastAsset.Address, symbol, opCU) {
-			opCU.SetMigrationStatus(sdk.MigrationFinish)
+		if keeper.checkUtxoOpcuAstTransferFinish(ctx, lastAsset.Address, symbol, opCUAst.GetAddress()) {
+			opCUAst.SetMigrationStatus(sdk.MigrationFinish)
 		}
 
 	case sdk.AccountBased:
 		//update opcu's assetcoinshold, and refund unused gas fee if necessary
 		feeCoins := sdk.NewCoins(sdk.NewCoin(chain, costFee))
-		opCU.SubAssetCoins(feeCoins)
-		opCU.AddGasUsed(feeCoins)
+		opCUAst.SubAssetCoins(feeCoins)
+		opCUAst.AddGasUsed(feeCoins)
 
 		if symbol != chain {
-			opCU.SetMigrationStatus(sdk.MigrationMainTokenFinish)
+			opCUAst.SetMigrationStatus(sdk.MigrationMainTokenFinish)
 		} else {
-			opCU.SetMigrationStatus(sdk.MigrationFinish)
+			opCUAst.SetMigrationStatus(sdk.MigrationFinish)
 		}
 
 		if tokenInfo.IsNonceBased {
-			opCU.SetNonce(chain, lastAsset.Nonce+1, lastAsset.Address)
+			opCUAst.SetNonce(chain, lastAsset.Nonce+1, lastAsset.Address)
+			opCUAst.SetEnableSendTx(true, chain, lastAsset.Address)
 		}
-		opCU.SetEnableSendTx(true, chain, lastAsset.Address)
 
 	case sdk.AccountSharedBased:
 		return sdk.ErrInvalidTx("Not support AccountSharedBased temporary").Result()
@@ -535,9 +535,9 @@ func (keeper BaseKeeper) OpcuAssetTransferFinish(ctx sdk.Context, fromCUAddr sdk
 	order.Status = sdk.OrderStatusFinish
 	order.CostFee = costFee
 	keeper.ok.SetOrder(ctx, order)
-	keeper.ck.SetCU(ctx, opCU)
+	keeper.ik.SetCUIBCAsset(ctx, opCUAst)
 
-	keeper.checkOpcusMigrationStatus(ctx, curEpoch)
+	keeper.checkOpcusMigrationStatus(ctx)
 
 	var flows []sdk.Flow
 	flows = append(flows, keeper.rk.NewOrderFlow(sdk.Symbol(symbol), order.GetCUAddress(), orderID, sdk.OrderTypeOpcuAssetTransfer, sdk.OrderStatusFinish))
@@ -549,7 +549,7 @@ func (keeper BaseKeeper) OpcuAssetTransferFinish(ctx sdk.Context, fromCUAddr sdk
 	return result
 }
 
-func (keeper BaseKeeper) checkOpcuTransferOrder(ctx sdk.Context, orderID string, orderStatus sdk.OrderStatus) (tokenInfo *sdk.TokenInfo, opcuTransferOrder *sdk.OrderOpcuAssetTransfer, err sdk.Error) {
+func (keeper BaseKeeper) checkOpcuTransferOrder(ctx sdk.Context, orderID string, orderStatus sdk.OrderStatus) (tokenInfo *sdk.IBCToken, opcuTransferOrder *sdk.OrderOpcuAssetTransfer, err sdk.Error) {
 	order := keeper.ok.GetOrder(ctx, orderID)
 	if order == nil {
 		err = sdk.ErrNotFoundOrder(fmt.Sprintf("orderid:%v does not exist", orderID))
@@ -563,7 +563,7 @@ func (keeper BaseKeeper) checkOpcuTransferOrder(ctx sdk.Context, orderID string,
 	}
 
 	symbol := order.GetSymbol()
-	tokenInfo = keeper.tk.GetTokenInfo(ctx, sdk.Symbol(symbol))
+	tokenInfo = keeper.tk.GetIBCToken(ctx, sdk.Symbol(symbol))
 
 	if !orderStatus.Match(opcuTransferOrder.Status) {
 		err = sdk.ErrInvalidOrder(fmt.Sprintf("order %v status doesn't match expctedStatus:%v", opcuTransferOrder, orderStatus))
@@ -587,8 +587,8 @@ func (keeper BaseKeeper) checkOpcuTransferOrder(ctx sdk.Context, orderID string,
 	return
 }
 
-func (keeper BaseKeeper) checkUtxoOpcuAstTransferFinish(ctx sdk.Context, lastAddr, symbol string, opCU exported.CustodianUnit) bool {
-	depositList := keeper.ck.GetDepositList(ctx, symbol, opCU.GetAddress())
+func (keeper BaseKeeper) checkUtxoOpcuAstTransferFinish(ctx sdk.Context, lastAddr, symbol string, opcuAddr sdk.CUAddress) bool {
+	depositList := keeper.ik.GetDepositList(ctx, symbol, opcuAddr)
 	depositList = depositList.Filter(func(d sdk.DepositItem) bool {
 		return d.ExtAddress == lastAddr
 	})

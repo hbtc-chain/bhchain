@@ -18,6 +18,7 @@ import (
 	"github.com/hbtc-chain/bhchain/x/custodianunit/exported"
 	cutypes "github.com/hbtc-chain/bhchain/x/custodianunit/types"
 	"github.com/hbtc-chain/bhchain/x/distribution"
+	"github.com/hbtc-chain/bhchain/x/ibcasset"
 	"github.com/hbtc-chain/bhchain/x/keygen"
 	"github.com/hbtc-chain/bhchain/x/keygen/types"
 	"github.com/hbtc-chain/bhchain/x/mint"
@@ -48,6 +49,8 @@ func TestHandleMsgNewOpCU(t *testing.T) {
 	ctx := input.Ctx
 	cuKeeper := input.Ck.(custodianunit.CUKeeper)
 	keygenkeeper := input.Kk
+
+	tk := input.Tk
 	from := sdk.NewCUAddress()
 	opcuAddress := sdk.NewCUAddress()
 
@@ -63,7 +66,7 @@ func TestHandleMsgNewOpCU(t *testing.T) {
 	assert.False(t, res.IsOK())
 
 	// too many OP CU
-	for i := 0; uint64(i) < cuKeeper.GetTokenKeeper(ctx).GetMaxOpCUNumber(ctx, sdk.Symbol(ethToken)); i++ {
+	for i := 0; uint64(i) < tk.GetIBCToken(ctx, sdk.Symbol(ethToken)).MaxOpCUNumber; i++ {
 		msg = types.NewMsgNewOpCU(ethToken, sdk.NewCUAddress(), from)
 		keygen.HandleMsgNewOpCUForTest(ctx, keygenkeeper, msg)
 		assert.False(t, res.IsOK())
@@ -88,17 +91,24 @@ func TestHandleMsgKeyGen(t *testing.T) {
 	ctx := input.Ctx
 	cuKeeper := input.Ck.(custodianunit.CUKeeper)
 	keygenkeeper := input.Kk
+	ik := input.Ik
+	trk := input.Trk
 
+	ethSymbol := sdk.Symbol(ethToken)
 	pubkey := ed25519.GenPrivKey().PubKey()
 	toAddr := sdk.CUAddress(pubkey.Address())
+
 	toOpCUAddr := sdk.NewCUAddress()
 	fromCU := cuKeeper.NewCUWithAddress(ctx, sdk.CUTypeUser, keygenFromAddr)
 	toCU := cuKeeper.NewCUWithAddress(ctx, sdk.CUTypeUser, toAddr)
 	validator := cuKeeper.NewCUWithAddress(ctx, sdk.CUTypeUser, validatorAddr1)
 	toOpCU := cuKeeper.NewCUWithAddress(ctx, sdk.CUTypeOp, toOpCUAddr)
-	toOpCU.AddAsset(ethToken, "", 0)
+	toOpCU.SetSymbol(ethSymbol.String())
+	cuAsset := ik.GetOrNewCUIBCAsset(ctx, sdk.CUTypeOp, toOpCU.GetAddress())
+	cuAsset.AddAsset(ethToken, "", 0)
+	ik.SetCUIBCAsset(ctx, cuAsset)
 	toNoExist := sdk.NewCUAddress()
-	ethSymbol := sdk.Symbol(ethToken)
+
 	cuKeeper.SetCU(ctx, fromCU)
 	cuKeeper.SetCU(ctx, toCU)
 	cuKeeper.SetCU(ctx, toOpCU)
@@ -137,18 +147,19 @@ func TestHandleMsgKeyGen(t *testing.T) {
 	assert.Equal(t, tcs[caseNo].Ok, res.IsOK(), "case No:", caseNo)
 
 	caseNo = 2 // should ok
-	fromCU.AddCoins(sdk.Coins{sdk.NewCoin(sdk.NativeToken, sdk.NewIntWithDecimal(1, 20))})
+	trk.AddCoins(ctx, fromCU.GetAddress(), sdk.Coins{sdk.NewCoin(sdk.NativeToken, sdk.NewIntWithDecimal(1, 20))})
+	//fromCU.AddCoins(sdk.Coins{sdk.NewCoin(sdk.NativeToken, sdk.NewIntWithDecimal(1, 20))})
 	cuKeeper.SetCU(ctx, fromCU)
 	msg = types.NewMsgKeyGen(tcs[caseNo].OrderID, tcs[caseNo].Symbol, tcs[caseNo].From, tcs[caseNo].To)
-	originCoin := cuKeeper.GetCU(ctx, msg.From).GetCoins().AmountOf(sdk.NativeToken)
-	originHold := cuKeeper.GetCU(ctx, msg.From).GetCoinsHold().AmountOf(sdk.NativeToken)
+	originCoin := trk.GetAllBalance(ctx, msg.From).AmountOf(sdk.NativeToken)
+	originHold := trk.GetAllHoldBalance(ctx, msg.From).AmountOf(sdk.NativeToken)
 	res = keygen.HandleMsgKeyGenForTest(ctx, keygenkeeper, msg)
 	assert.Equal(t, tcs[caseNo].Ok, res.IsOK(), "case No:", caseNo)
 	fromCU = cuKeeper.GetCU(ctx, keygenFromAddr)
 	// check fromcu.coinshold
-	openFee := input.Tk.GetTokenInfo(ctx, ethSymbol).OpenFee
-	assert.True(t, originHold.Equal(cuKeeper.GetCU(ctx, msg.From).GetCoinsHold().AmountOf(sdk.NativeToken).Sub(openFee)))
-	assert.True(t, originCoin.Equal(cuKeeper.GetCU(ctx, msg.From).GetCoins().AmountOf(sdk.NativeToken).Add(openFee)))
+	openFee := input.Tk.GetIBCToken(ctx, ethSymbol).OpenFee
+	assert.True(t, originHold.Equal(trk.GetAllHoldBalance(ctx, msg.From).AmountOf(sdk.NativeToken).Sub(openFee)))
+	assert.True(t, originCoin.Equal(trk.GetAllBalance(ctx, msg.From).AmountOf(sdk.NativeToken).Add(openFee)))
 	// check order & flows
 	orderGot := input.Ok.GetOrder(ctx, tcs[caseNo].OrderID)
 	if tcs[caseNo].Ok {
@@ -158,15 +169,15 @@ func TestHandleMsgKeyGen(t *testing.T) {
 
 	caseNo = 3 // should ok, to cu not exist
 	msg = types.NewMsgKeyGen(tcs[caseNo].OrderID, tcs[caseNo].Symbol, tcs[caseNo].From, tcs[caseNo].To)
-	originCoin = cuKeeper.GetCU(ctx, msg.From).GetCoins().AmountOf(sdk.NativeToken)
-	originHold = cuKeeper.GetCU(ctx, msg.From).GetCoinsHold().AmountOf(sdk.NativeToken)
+	originCoin = trk.GetAllBalance(ctx, msg.From).AmountOf(sdk.NativeToken)
+	originHold = trk.GetAllHoldBalance(ctx, msg.From).AmountOf(sdk.NativeToken)
 	res = keygen.HandleMsgKeyGenForTest(ctx, keygenkeeper, msg)
 	assert.Equal(t, tcs[caseNo].Ok, res.IsOK(), "case No:", caseNo)
 	// check to cu should exist
 	assert.NotNil(t, cuKeeper.GetCU(ctx, toNoExist))
-	openFee = input.Tk.GetTokenInfo(ctx, ethSymbol).OpenFee
-	assert.True(t, originHold.Equal(cuKeeper.GetCU(ctx, msg.From).GetCoinsHold().AmountOf(sdk.NativeToken).Sub(openFee)))
-	assert.True(t, originCoin.Equal(cuKeeper.GetCU(ctx, msg.From).GetCoins().AmountOf(sdk.NativeToken).Add(openFee)))
+	openFee = input.Tk.GetIBCToken(ctx, ethSymbol).OpenFee
+	assert.True(t, originHold.Equal(trk.GetAllHoldBalance(ctx, msg.From).AmountOf(sdk.NativeToken).Sub(openFee)))
+	assert.True(t, originCoin.Equal(trk.GetAllBalance(ctx, msg.From).AmountOf(sdk.NativeToken).Add(openFee)))
 	// check order & flows
 	if tcs[caseNo].Ok {
 		orderGot = input.Ok.GetOrder(ctx, tcs[caseNo].OrderID)
@@ -176,14 +187,14 @@ func TestHandleMsgKeyGen(t *testing.T) {
 
 	caseNo = 4 // should ok, to = from cu
 	msg = types.NewMsgKeyGen(tcs[caseNo].OrderID, tcs[caseNo].Symbol, tcs[caseNo].From, tcs[caseNo].To)
-	originCoin = cuKeeper.GetCU(ctx, msg.From).GetCoins().AmountOf(sdk.NativeToken)
-	originHold = cuKeeper.GetCU(ctx, msg.From).GetCoinsHold().AmountOf(sdk.NativeToken)
+	originCoin = trk.GetAllBalance(ctx, msg.From).AmountOf(sdk.NativeToken)
+	originHold = trk.GetAllHoldBalance(ctx, msg.From).AmountOf(sdk.NativeToken)
 	res = keygen.HandleMsgKeyGenForTest(ctx, keygenkeeper, msg)
 	assert.Equal(t, tcs[caseNo].Ok, res.IsOK(), "case No:", caseNo)
 	// check fromcu.coinshold
-	openFee = input.Tk.GetTokenInfo(ctx, ethSymbol).OpenFee
-	assert.True(t, originHold.Equal(cuKeeper.GetCU(ctx, msg.From).GetCoinsHold().AmountOf(sdk.NativeToken).Sub(openFee)))
-	assert.True(t, originCoin.Equal(cuKeeper.GetCU(ctx, msg.From).GetCoins().AmountOf(sdk.NativeToken).Add(openFee)))
+	openFee = input.Tk.GetIBCToken(ctx, ethSymbol).OpenFee
+	assert.True(t, originHold.Equal(trk.GetAllHoldBalance(ctx, msg.From).AmountOf(sdk.NativeToken).Sub(openFee)))
+	assert.True(t, originCoin.Equal(trk.GetAllBalance(ctx, msg.From).AmountOf(sdk.NativeToken).Add(openFee)))
 	// check order & flows
 	if tcs[caseNo].Ok {
 		orderGot = input.Ok.GetOrder(ctx, tcs[caseNo].OrderID)
@@ -193,13 +204,13 @@ func TestHandleMsgKeyGen(t *testing.T) {
 
 	caseNo = 5 // create address for OpCU ,should fail,from must be validator
 	msg = types.NewMsgKeyGen(tcs[caseNo].OrderID, tcs[caseNo].Symbol, tcs[caseNo].From, tcs[caseNo].To)
-	originCoin = cuKeeper.GetCU(ctx, msg.From).GetCoins().AmountOf(sdk.NativeToken)
-	originHold = cuKeeper.GetCU(ctx, msg.From).GetCoinsHold().AmountOf(sdk.NativeToken)
+	originCoin = trk.GetAllBalance(ctx, msg.From).AmountOf(sdk.NativeToken)
+	originHold = trk.GetAllHoldBalance(ctx, msg.From).AmountOf(sdk.NativeToken)
 	res = keygen.HandleMsgKeyGenForTest(ctx, keygenkeeper, msg)
 	assert.Equal(t, tcs[caseNo].Ok, res.IsOK(), "case No:", caseNo)
 	openFee = sdk.ZeroInt()
-	assert.True(t, originHold.Equal(cuKeeper.GetCU(ctx, msg.From).GetCoinsHold().AmountOf(sdk.NativeToken).Sub(openFee)))
-	assert.True(t, originCoin.Equal(cuKeeper.GetCU(ctx, msg.From).GetCoins().AmountOf(sdk.NativeToken).Add(openFee)))
+	assert.True(t, originHold.Equal(trk.GetAllHoldBalance(ctx, msg.From).AmountOf(sdk.NativeToken).Sub(openFee)))
+	assert.True(t, originCoin.Equal(trk.GetAllBalance(ctx, msg.From).AmountOf(sdk.NativeToken).Add(openFee)))
 	// check order & flows
 	if tcs[caseNo].Ok {
 		orderGot = input.Ok.GetOrder(ctx, tcs[caseNo].OrderID)
@@ -209,17 +220,18 @@ func TestHandleMsgKeyGen(t *testing.T) {
 
 	caseNo = 6 // create address for OpCU,should ok, from must be validator
 	validator = cuKeeper.GetCU(ctx, validatorAddr1)
-	validator.AddCoins(sdk.NewCoins(sdk.NewCoin(sdk.NativeToken, sdk.NewIntWithDecimal(1, 22))))
+	trk.AddCoins(ctx, validator.GetAddress(), sdk.NewCoins(sdk.NewCoin(sdk.NativeToken, sdk.NewIntWithDecimal(1, 22))))
+
 	cuKeeper.SetCU(ctx, validator)
 	msg = types.NewMsgKeyGen(tcs[caseNo].OrderID, tcs[caseNo].Symbol, tcs[caseNo].From, tcs[caseNo].To)
-	originCoin = cuKeeper.GetCU(ctx, msg.From).GetCoins().AmountOf(sdk.NativeToken)
-	originHold = cuKeeper.GetCU(ctx, msg.From).GetCoinsHold().AmountOf(sdk.NativeToken)
+	originCoin = trk.GetAllBalance(ctx, msg.From).AmountOf(sdk.NativeToken)
+	originHold = trk.GetAllHoldBalance(ctx, msg.From).AmountOf(sdk.NativeToken)
 	res = keygen.HandleMsgKeyGenForTest(ctx, keygenkeeper, msg)
 	assert.Equal(t, tcs[caseNo].Ok, res.IsOK(), "case No:", caseNo)
 	// check fromcu.coinshold
-	openFee = input.Tk.GetTokenInfo(ctx, ethSymbol).SysOpenFee
-	assert.True(t, originHold.Equal(cuKeeper.GetCU(ctx, msg.From).GetCoinsHold().AmountOf(sdk.NativeToken).Sub(openFee)))
-	assert.True(t, originCoin.Equal(cuKeeper.GetCU(ctx, msg.From).GetCoins().AmountOf(sdk.NativeToken).Add(openFee)))
+	openFee = input.Tk.GetIBCToken(ctx, ethSymbol).SysOpenFee
+	assert.True(t, originHold.Equal(trk.GetAllHoldBalance(ctx, msg.From).AmountOf(sdk.NativeToken).Sub(openFee)))
+	assert.True(t, originCoin.Equal(trk.GetAllBalance(ctx, msg.From).AmountOf(sdk.NativeToken).Add(openFee)))
 	// check order & flows
 	if tcs[caseNo].Ok {
 		orderGot = input.Ok.GetOrder(ctx, tcs[caseNo].OrderID)
@@ -230,17 +242,19 @@ func TestHandleMsgKeyGen(t *testing.T) {
 	caseNo = 7 // should ok, pubkey exist
 	input.ChainNode.On("ConvertAddressFromSerializedPubKey", "eth", pubkey.Bytes()).Return(pubkey.Address().String(), nil)
 	tocu := cuKeeper.GetCU(ctx, tcs[caseNo].To)
-	tocu.SetAssetPubkey(pubkey.Bytes(), 1)
-	cuKeeper.SetCU(ctx, tocu)
+	cuAsset = ik.GetOrNewCUIBCAsset(ctx, sdk.CUTypeUser, tocu.GetAddress())
+	cuAsset.SetAssetPubkey(pubkey.Bytes(), 1)
+	ik.SetCUIBCAsset(ctx, cuAsset)
+
 	msg = types.NewMsgKeyGen(tcs[caseNo].OrderID, tcs[caseNo].Symbol, tcs[caseNo].From, tcs[caseNo].To)
-	originCoin = cuKeeper.GetCU(ctx, msg.From).GetCoins().AmountOf(sdk.NativeToken)
-	originHold = cuKeeper.GetCU(ctx, msg.From).GetCoinsHold().AmountOf(sdk.NativeToken)
+	originCoin = trk.GetAllBalance(ctx, msg.From).AmountOf(sdk.NativeToken)
+	originHold = trk.GetAllHoldBalance(ctx, msg.From).AmountOf(sdk.NativeToken)
 	res = keygen.HandleMsgKeyGenForTest(ctx, keygenkeeper, msg)
 	// to has processing order
 	assert.Equal(t, false, res.IsOK(), "case No:", caseNo)
 	openFee = sdk.ZeroInt()
-	assert.True(t, originHold.Equal(cuKeeper.GetCU(ctx, msg.From).GetCoinsHold().AmountOf(sdk.NativeToken).Sub(openFee)))
-	assert.True(t, originCoin.Equal(cuKeeper.GetCU(ctx, msg.From).GetCoins().AmountOf(sdk.NativeToken).Add(openFee)))
+	assert.True(t, originHold.Equal(trk.GetAllHoldBalance(ctx, msg.From).AmountOf(sdk.NativeToken).Sub(openFee)))
+	assert.True(t, originCoin.Equal(trk.GetAllBalance(ctx, msg.From).AmountOf(sdk.NativeToken).Add(openFee)))
 	ol := input.Ok.GetProcessOrderListByType(input.Ctx, sdk.OrderTypeKeyGen)
 	for _, orderid := range ol {
 		input.Ok.RemoveProcessOrder(input.Ctx, sdk.OrderTypeKeyGen, orderid)
@@ -249,18 +263,21 @@ func TestHandleMsgKeyGen(t *testing.T) {
 	caseNo = 7 // should ok, pubkey exist
 	input.ChainNode.On("ConvertAddressFromSerializedPubKey", "eth", pubkey.Bytes()).Return(pubkey.Address().String(), nil)
 	tocu = cuKeeper.GetCU(ctx, tcs[caseNo].To)
-	tocu.SetAssetPubkey(pubkey.Bytes(), 1)
+	cuAsset = ik.GetOrNewCUIBCAsset(ctx, sdk.CUTypeUser, tocu.GetAddress())
+	cuAsset.SetAssetPubkey(pubkey.Bytes(), 1)
+	ik.SetCUIBCAsset(ctx, cuAsset)
 	cuKeeper.SetCU(ctx, tocu)
 	msg = types.NewMsgKeyGen(tcs[caseNo].OrderID, tcs[caseNo].Symbol, tcs[caseNo].From, tcs[caseNo].To)
-	originCoin = cuKeeper.GetCU(ctx, msg.From).GetCoins().AmountOf(sdk.NativeToken)
-	originHold = cuKeeper.GetCU(ctx, msg.From).GetCoinsHold().AmountOf(sdk.NativeToken)
+	originCoin = trk.GetAllBalance(ctx, msg.From).AmountOf(sdk.NativeToken)
+	originHold = trk.GetAllHoldBalance(ctx, msg.From).AmountOf(sdk.NativeToken)
 	res = keygen.HandleMsgKeyGenForTest(ctx, keygenkeeper, msg)
 	assert.Equal(t, tcs[caseNo].Ok, res.IsOK(), "case No:", caseNo)
 	openFee = sdk.ZeroInt()
-	assert.True(t, originHold.Equal(cuKeeper.GetCU(ctx, msg.From).GetCoinsHold().AmountOf(sdk.NativeToken).Sub(openFee)))
-	assert.True(t, originCoin.Equal(cuKeeper.GetCU(ctx, msg.From).GetCoins().AmountOf(sdk.NativeToken).Add(openFee)))
+	assert.True(t, originHold.Equal(trk.GetAllHoldBalance(ctx, msg.From).AmountOf(sdk.NativeToken).Sub(openFee)))
+	assert.True(t, originCoin.Equal(trk.GetAllBalance(ctx, msg.From).AmountOf(sdk.NativeToken).Add(openFee)))
 	// check the asset address created by chainode
-	assert.EqualValues(t, pubkey.Address().String(), cuKeeper.GetCU(ctx, tcs[caseNo].To).GetAssetAddress(tcs[caseNo].Symbol.String(), 1))
+	cuAsset = ik.GetOrNewCUIBCAsset(ctx, sdk.CUTypeUser, tocu.GetAddress())
+	assert.EqualValues(t, pubkey.Address().String(), cuAsset.GetAssetAddress(tcs[caseNo].Symbol.String(), 1))
 	receip, err := input.Rk.GetReceiptFromResult(&res)
 	assert.NotNil(t, err)
 	// no flows
@@ -274,20 +291,23 @@ func TestHandleMsgKeyGen(t *testing.T) {
 	// eth address is from case7
 	cuKeeper.RemoveCU(ctx, toCU)
 	toCU = cuKeeper.NewCUWithAddress(ctx, sdk.CUTypeUser, tcs[caseNo].To)
-	tocu.SetAssetPubkey(pubkey.Bytes(), 1)
+	cuAsset = ik.NewCUIBCAssetWithAddress(ctx, sdk.CUTypeUser, toCU.GetAddress())
+	cuAsset.SetAssetPubkey(pubkey.Bytes(), 1)
 	ethAddr := "ethaddr"
-	tocu.SetAssetAddress("eth", ethAddr, 1)
+	cuAsset.SetAssetAddress("eth", ethAddr, 1)
+	ik.SetCUIBCAsset(ctx, cuAsset)
 	cuKeeper.SetCU(ctx, tocu)
 	msg = types.NewMsgKeyGen(tcs[caseNo].OrderID, tcs[caseNo].Symbol, tcs[caseNo].From, tcs[caseNo].To)
-	originCoin = cuKeeper.GetCU(ctx, msg.From).GetCoins().AmountOf(sdk.NativeToken)
-	originHold = cuKeeper.GetCU(ctx, msg.From).GetCoinsHold().AmountOf(sdk.NativeToken)
+	originCoin = trk.GetAllBalance(ctx, msg.From).AmountOf(sdk.NativeToken)
+	originHold = trk.GetAllHoldBalance(ctx, msg.From).AmountOf(sdk.NativeToken)
 	res = keygen.HandleMsgKeyGenForTest(ctx, keygenkeeper, msg)
 	assert.Equal(t, tcs[caseNo].Ok, res.IsOK(), "case No:", caseNo)
 	openFee = sdk.ZeroInt()
-	assert.True(t, originHold.Equal(cuKeeper.GetCU(ctx, msg.From).GetCoinsHold().AmountOf(sdk.NativeToken).Sub(openFee)))
-	assert.True(t, originCoin.Equal(cuKeeper.GetCU(ctx, msg.From).GetCoins().AmountOf(sdk.NativeToken).Add(openFee)))
+	assert.True(t, originHold.Equal(trk.GetAllHoldBalance(ctx, msg.From).AmountOf(sdk.NativeToken).Sub(openFee)))
+	assert.True(t, originCoin.Equal(trk.GetAllBalance(ctx, msg.From).AmountOf(sdk.NativeToken).Add(openFee)))
 	// check the asset address created by chainode
-	assert.EqualValues(t, ethAddr, cuKeeper.GetCU(ctx, tcs[caseNo].To).GetAssetAddress(tcs[caseNo].Symbol.String(), 1))
+	cuAsset = ik.GetOrNewCUIBCAsset(ctx, sdk.CUTypeUser, tcs[caseNo].To)
+	assert.EqualValues(t, ethAddr, cuAsset.GetAssetAddress(tcs[caseNo].Symbol.String(), 1))
 	receip, err = input.Rk.GetReceiptFromResult(&res)
 	assert.NotNil(t, err)
 	// no flows
@@ -298,6 +318,8 @@ func TestHandleMsgKeyGen(t *testing.T) {
 
 	caseNo = 9 // should ok, use prekeygen order
 	cuKeeper.RemoveCU(ctx, toCU)
+	cuAsset = ik.NewCUIBCAssetWithAddress(ctx, sdk.CUTypeUser, toCU.GetAddress())
+	ik.SetCUIBCAsset(ctx, cuAsset)
 	toCU = cuKeeper.NewCUWithAddress(ctx, sdk.CUTypeUser, tcs[caseNo].To)
 	cuKeeper.SetCU(ctx, toCU)
 	preKeyGenOrderID := uuid.NewV4().String()
@@ -314,15 +336,16 @@ func TestHandleMsgKeyGen(t *testing.T) {
 	keygenkeeper.AddWaitAssignKeyGenOrderID(ctx, preKeyGenOrderID)
 	input.ChainNode.On("ConvertAddressFromSerializedPubKey", "eth", preKeyGenOrder.Pubkey).Return(pubkey.Address().String(), nil)
 	msg = types.NewMsgKeyGen(tcs[caseNo].OrderID, tcs[caseNo].Symbol, tcs[caseNo].From, tcs[caseNo].To)
-	originCoin = cuKeeper.GetCU(ctx, msg.From).GetCoins().AmountOf(sdk.NativeToken)
-	originHold = cuKeeper.GetCU(ctx, msg.From).GetCoinsHold().AmountOf(sdk.NativeToken)
+	originCoin = trk.GetAllBalance(ctx, msg.From).AmountOf(sdk.NativeToken)
+	originHold = trk.GetAllHoldBalance(ctx, msg.From).AmountOf(sdk.NativeToken)
 	res = keygen.HandleMsgKeyGenForTest(ctx, keygenkeeper, msg)
 	assert.Equal(t, tcs[caseNo].Ok, res.IsOK(), "case No:", caseNo)
-	openFee = input.Tk.GetTokenInfo(ctx, ethSymbol).OpenFee
+	openFee = input.Tk.GetIBCToken(ctx, ethSymbol).OpenFee
 	// 只扣费，不冻结
-	assert.True(t, originHold.Equal(cuKeeper.GetCU(ctx, msg.From).GetCoinsHold().AmountOf(sdk.NativeToken)))
-	assert.True(t, originCoin.Equal(cuKeeper.GetCU(ctx, msg.From).GetCoins().AmountOf(sdk.NativeToken).Add(openFee)))
-	assert.EqualValues(t, pubkey.Address().String(), cuKeeper.GetCU(ctx, tcs[caseNo].To).GetAssetAddress(tcs[caseNo].Symbol.String(), 1))
+	assert.True(t, originHold.Equal(trk.GetAllHoldBalance(ctx, msg.From).AmountOf(sdk.NativeToken)))
+	assert.True(t, originCoin.Equal(trk.GetAllBalance(ctx, msg.From).AmountOf(sdk.NativeToken).Add(openFee)))
+	cuAsset = ik.GetOrNewCUIBCAsset(ctx, sdk.CUTypeUser, tcs[caseNo].To)
+	assert.EqualValues(t, pubkey.Address().String(), cuAsset.GetAssetAddress(tcs[caseNo].Symbol.String(), 1))
 	orderGot = input.Ok.GetOrder(ctx, tcs[caseNo].OrderID)
 	assert.Nil(t, orderGot)
 	order := input.Ok.GetOrder(ctx, preKeyGenOrderID)
@@ -340,9 +363,9 @@ func checkKeygenOrder(t *testing.T, input testInput, orderGot sdk.Order, msg typ
 	assert.EqualValues(t, msg.OrderID, orderGot.GetID())
 	assert.EqualValues(t, len(input.Sk.GetAllValidators(input.Ctx)), len(keyGenOrder.KeyNodes))
 	if input.Ck.GetCU(input.Ctx, msg.To).GetCUType() == sdk.CUTypeOp {
-		assert.EqualValues(t, input.Tk.GetSysOpenFee(input.Ctx, msg.Symbol), keyGenOrder.OpenFee.AmountOf(sdk.NativeToken))
+		assert.EqualValues(t, input.Tk.GetIBCToken(input.Ctx, msg.Symbol).OpenFee, keyGenOrder.OpenFee.Amount)
 	} else {
-		assert.EqualValues(t, input.Tk.GetOpenFee(input.Ctx, msg.Symbol), keyGenOrder.OpenFee.AmountOf(sdk.NativeToken))
+		assert.EqualValues(t, input.Tk.GetIBCToken(input.Ctx, msg.Symbol).OpenFee, keyGenOrder.OpenFee.Amount)
 	}
 	assert.EqualValues(t, sdk.Majority23(len(input.Sk.GetAllValidators(input.Ctx))), keyGenOrder.SignThreshold)
 
@@ -387,6 +410,8 @@ func TestHandleMsgKeyGenFinish(t *testing.T) {
 	ctx := input.Ctx
 	cuKeeper := input.Ck.(custodianunit.CUKeeper)
 	keygenkeeper := input.Kk
+	trk := input.Trk
+	ik := input.Ik
 	keygenFinishFromAddr := sdk.NewCUAddress()
 	pubkey := ed25519.GenPrivKey().PubKey()
 	to := sdk.CUAddress(pubkey.Address())
@@ -420,7 +445,8 @@ func TestHandleMsgKeyGenFinish(t *testing.T) {
 	keygenorder := newTestKeyGenOrder(input, msg, to)
 	input.Ok.SetOrder(input.Ctx, keygenorder)
 	keygenFromCU := cuKeeper.NewCUWithAddress(ctx, sdk.CUTypeUser, keygenFromAddr)
-	keygenFromCU.AddCoinsHold(sdk.NewCoins(sdk.Coin{sdk.NativeToken, input.Tk.GetTokenInfo(ctx, ethSymbol).OpenFee}))
+	trk.AddCoinsHold(ctx, keygenFromCU.GetAddress(), sdk.NewCoins(sdk.Coin{sdk.NativeToken, input.Tk.GetIBCToken(ctx, ethSymbol).OpenFee}))
+
 	cuKeeper.SetCU(ctx, keygenFromCU)
 
 	// case7 toCU is opcu,symbol != msg.symbol
@@ -462,7 +488,9 @@ func TestHandleMsgKeyGenFinish(t *testing.T) {
 	keygenorder.CUAddress = validatorAddr1
 	input.Ok.SetOrder(input.Ctx, keygenorder)
 	toCU = cuKeeper.NewOpCUWithAddress(ctx, "eth", to)
-	toCU.SetAssetAddress(ethToken, "0xc6452b4a3", 1)
+	cuAsset := ik.GetOrNewCUIBCAsset(ctx, sdk.CUTypeUser, to)
+	cuAsset.SetAssetAddress(ethToken, "0xc6452b4a3", 1)
+	ik.SetCUIBCAsset(ctx, cuAsset)
 	cuKeeper.SetCU(ctx, toCU)
 	res = keygen.HandleMsgKeyGenWaitSignForTest(ctx, keygenkeeper, msg)
 	assert.False(t, res.IsOK())
@@ -479,7 +507,8 @@ func TestHandleMsgKeyGenFinish(t *testing.T) {
 	assert.False(t, res.IsOK())
 
 	// case13 msg no signature . verify sign failed
-	fromCU.AddCoinsHold(sdk.NewCoins(sdk.Coin{sdk.NativeToken, input.Tk.GetTokenInfo(ctx, ethSymbol).OpenFee}))
+	trk.AddCoinsHold(ctx, fromCU.GetAddress(), sdk.NewCoins(sdk.Coin{sdk.NativeToken, input.Tk.GetIBCToken(ctx, ethSymbol).OpenFee}))
+
 	cuKeeper.SetCU(ctx, fromCU)
 	msg.PubKey = pubkey.Bytes()
 	msg.From = keygenFinishFromAddr
@@ -517,6 +546,8 @@ func TestHandleMsgKeyGenFinish(t *testing.T) {
 
 	// case 16 ok ,to.cutype == user cu
 	cuKeeper.RemoveCU(ctx, toCU)
+	cuAsset = ik.NewCUIBCAssetWithAddress(ctx, sdk.CUTypeUser, toCU.GetAddress())
+	ik.SetCUIBCAsset(ctx, cuAsset)
 	toCU = cuKeeper.NewCUWithAddress(ctx, sdk.CUTypeUser, to)
 	cuKeeper.SetCU(ctx, toCU)
 	sigs = []cutypes.StdSignature{}
@@ -526,7 +557,7 @@ func TestHandleMsgKeyGenFinish(t *testing.T) {
 	sig2, _ = validatorPriv2.Sign(signmsg.GetSignBytes())
 	msg.KeySigs = []cutypes.StdSignature{cutypes.StdSignature{Signature: sig1, PubKey: validatorPriv1.PubKey()},
 		cutypes.StdSignature{Signature: sig2, PubKey: validatorPriv2.PubKey()}}
-	originHold := cuKeeper.GetCU(ctx, keygenFromAddr).GetCoinsHold().AmountOf(sdk.NativeToken)
+	originHold := trk.GetAllHoldBalance(ctx, keygenFromAddr).AmountOf(sdk.NativeToken)
 	res = keygen.HandleMsgKeyGenWaitSignForTest(ctx, keygenkeeper, msg)
 	assert.True(t, res.IsOK())
 	// check order closed
@@ -535,7 +566,7 @@ func TestHandleMsgKeyGenFinish(t *testing.T) {
 	// check keygenFinishFromAddr.coinshold (set in case 13)
 	cu := cuKeeper.GetCU(ctx, keygenFromAddr)
 
-	assert.True(t, originHold.Equal(cu.GetCoinsHold().AmountOf(sdk.NativeToken)))
+	assert.True(t, originHold.Equal(trk.GetAllHoldBalance(ctx, cu.GetAddress()).AmountOf(sdk.NativeToken)))
 }
 
 func newTestKeyGenOrder(input testInput, msg types.MsgKeyGenWaitSign, to sdk.CUAddress) *sdk.OrderKeyGen {
@@ -547,14 +578,14 @@ func newTestKeyGenOrder(input testInput, msg types.MsgKeyGenWaitSign, to sdk.CUA
 		Symbol:    ethToken,
 	}
 
-	tokenInfo := input.Tk.GetTokenInfo(input.Ctx, sdk.Symbol(ethToken))
+	tokenInfo := input.Tk.GetIBCToken(input.Ctx, sdk.Symbol(ethToken))
 	orderKeyGen := sdk.OrderKeyGen{
 		OrderBase:        ordBase,
 		KeyNodes:         msg.KeyNodes,
 		SignThreshold:    3,
 		To:               to,
 		MultiSignAddress: "",
-		OpenFee:          sdk.NewCoins(sdk.NewCoin(sdk.NativeToken, tokenInfo.OpenFee)),
+		OpenFee:          sdk.NewCoin(sdk.NativeToken, tokenInfo.OpenFee),
 	}
 
 	order := input.Ok.NewOrder(input.Ctx, &orderKeyGen)
@@ -572,6 +603,8 @@ func SetupTestInput() testInput {
 	receipt.RegisterCodec(cdc)
 	order.RegisterCodec(cdc)
 	codec.RegisterCrypto(cdc)
+	token.RegisterCodec(cdc)
+	ibcasset.RegisterCodec(cdc)
 
 	cuKey := sdk.NewKVStoreKey("cuKey")
 	keyParams := sdk.NewKVStoreKey("subspace")
@@ -584,6 +617,7 @@ func SetupTestInput() testInput {
 	Supplykey := sdk.NewKVStoreKey(supply.StoreKey)
 	transferKey := sdk.NewKVStoreKey(transfer.StoreKey)
 	distrKey := sdk.NewKVStoreKey(distribution.StoreKey)
+	keyIbcAsset := sdk.NewKVStoreKey(ibcasset.StoreKey)
 
 	pk := params.NewKeeper(cdc, keyParams, tkeyParams, params.DefaultCodespace)
 
@@ -598,17 +632,20 @@ func SetupTestInput() testInput {
 	ms.MountStoreWithDB(stakingKey, sdk.StoreTypeIAVL, db)
 	ms.MountStoreWithDB(stakingKeyT, sdk.StoreTypeTransient, db)
 	ms.MountStoreWithDB(distrKey, sdk.StoreTypeIAVL, db)
+	ms.MountStoreWithDB(keyIbcAsset, sdk.StoreTypeIAVL, db)
+	ms.MountStoreWithDB(transferKey, sdk.StoreTypeIAVL, db)
 	ms.LoadLatestVersion()
 
 	ctx := sdk.NewContext(ms, abci.Header{ChainID: "test-chain-id"}, false, log.NewNopLogger())
 
 	ps := subspace.NewSubspace(cdc, keyParams, tkeyParams, types.DefaultParamspace)
 	rk := receipt.NewKeeper(cdc)
-	tk := token.NewKeeper(tokenKey, cdc, subspace.NewSubspace(cdc, keyParams, tkeyParams, token.DefaultParamspace))
-	ck := custodianunit.NewCUKeeper(cdc, cuKey, &tk, ps, cutypes.ProtoBaseCU)
+	tk := token.NewKeeper(tokenKey, cdc)
+	ck := custodianunit.NewCUKeeper(cdc, cuKey, ps, cutypes.ProtoBaseCU)
 	ok := order.NewKeeper(cdc, orderkey, subspace.NewSubspace(cdc, keyParams, tkeyParams, order.DefaultParamspace))
+	ik := ibcasset.NewKeeper(cdc, keyIbcAsset, ck, &tk, ibcasset.ProtoBaseCUIBCAsset)
 	chainnode := new(chainnode.MockChainnode)
-	transferK := transfer.NewBaseKeeper(cdc, transferKey, ck, &tk, &ok, rk, nil, chainnode, pk.Subspace(transfer.DefaultParamspace), transfer.DefaultCodespace, nil)
+	transferK := transfer.NewBaseKeeper(cdc, transferKey, ck, ik, &tk, &ok, rk, nil, chainnode, pk.Subspace(transfer.DefaultParamspace), transfer.DefaultCodespace, nil)
 
 	maccPerms := map[string][]string{
 		custodianunit.FeeCollectorName: nil,
@@ -637,25 +674,20 @@ func SetupTestInput() testInput {
 	stakingSubspace := subspace.NewSubspace(cdc, keyParams, tkeyParams, staking.DefaultParamspace)
 	stakingK := staking.NewKeeper(cdc, stakingKey, stakingKeyT, supplyKeeper, stakingSubspace, staking.DefaultCodespace)
 
-	distrKeeper := distribution.NewKeeper(cdc, distrKey, pk.Subspace(distribution.DefaultParamspace), stakingK, supplyKeeper, distribution.DefaultCodespace,
+	distrKeeper := distribution.NewKeeper(cdc, distrKey, pk.Subspace(distribution.DefaultParamspace), stakingK, supplyKeeper, transferK, distribution.DefaultCodespace,
 		custodianunit.FeeCollectorName, nil)
 
-	kk := keygen.NewKeeper(keygenKey, cdc, &tk, ck, &ok, rk, stakingK, distrKeeper, chainnode)
+	kk := keygen.NewKeeper(keygenKey, cdc, &tk, ck, ik, &ok, rk, stakingK, distrKeeper, transferK, chainnode)
 
 	ck.SetParams(ctx, cutypes.DefaultParams())
 	//init token info
 	for _, tokenInfo := range token.TestTokenData {
-		token := token.NewTokenInfo(tokenInfo.Symbol, tokenInfo.Chain, tokenInfo.Issuer, tokenInfo.TokenType,
-			tokenInfo.IsSendEnabled, tokenInfo.IsDepositEnabled, tokenInfo.IsWithdrawalEnabled, tokenInfo.Decimals,
-			tokenInfo.TotalSupply, tokenInfo.CollectThreshold, tokenInfo.DepositThreshold, tokenInfo.OpenFee,
-			tokenInfo.SysOpenFee, tokenInfo.WithdrawalFeeRate, tokenInfo.SysTransferNum, tokenInfo.OpCUSysTransferNum,
-			tokenInfo.GasLimit, tokenInfo.GasPrice, tokenInfo.MaxOpCUNumber, tokenInfo.Confirmations, tokenInfo.IsNonceBased) //WithdrawalAddress and depositAddress will be added later.
-		tk.SetTokenInfo(ctx, token)
+		tk.SetToken(ctx, tokenInfo)
 	}
 
 	//init staking info，set validators
-	val1 := stakingtypes.NewValidator(sdk.ValAddress(validatorAddr1), ed25519.GenPrivKey().PubKey(), stakingtypes.Description{}, true)
-	val2 := stakingtypes.NewValidator(sdk.ValAddress(validatorAddr2), ed25519.GenPrivKey().PubKey(), stakingtypes.Description{}, true)
+	val1 := stakingtypes.NewValidator(sdk.ValAddress(validatorAddr1), ed25519.GenPrivKey().PubKey(), stakingtypes.Description{})
+	val2 := stakingtypes.NewValidator(sdk.ValAddress(validatorAddr2), ed25519.GenPrivKey().PubKey(), stakingtypes.Description{})
 	stakingK.SetValidator(ctx, val1)
 	stakingK.SetValidator(ctx, val2)
 	vals := []sdk.CUAddress{}
@@ -668,7 +700,7 @@ func SetupTestInput() testInput {
 	feePool.CommunityPool = sdk.DecCoins{}
 	distrKeeper.SetFeePool(ctx, feePool)
 
-	return testInput{Cdc: cdc, Ctx: ctx, Ck: ck, Kk: kk, Tk: tk, Ok: ok, Rk: *rk, Sk: stakingK, Dk: distrKeeper, ChainNode: chainnode}
+	return testInput{Cdc: cdc, Ctx: ctx, Ck: ck, Kk: kk, Tk: tk, Ok: ok, Rk: *rk, Sk: stakingK, Dk: distrKeeper, Trk: transferK, Ik: ik, ChainNode: chainnode}
 }
 
 type testInput struct {
@@ -681,5 +713,7 @@ type testInput struct {
 	Ck        custodianunit.CUKeeperI
 	Sk        staking.Keeper
 	Dk        distribution.Keeper
+	Trk       transfer.Keeper
+	Ik        ibcasset.Keeper
 	ChainNode *chainnode.MockChainnode
 }

@@ -7,6 +7,10 @@ import (
 	"github.com/stretchr/testify/require"
 	dbm "github.com/tendermint/tm-db"
 
+	abci "github.com/tendermint/tendermint/abci/types"
+	"github.com/tendermint/tendermint/crypto/secp256k1"
+	"github.com/tendermint/tendermint/libs/log"
+
 	"github.com/hbtc-chain/bhchain/codec"
 	"github.com/hbtc-chain/bhchain/store"
 	sdk "github.com/hbtc-chain/bhchain/types"
@@ -16,9 +20,6 @@ import (
 	"github.com/hbtc-chain/bhchain/x/evidence/types/mocks"
 	"github.com/hbtc-chain/bhchain/x/params"
 	stakingtypes "github.com/hbtc-chain/bhchain/x/staking/types"
-	abci "github.com/tendermint/tendermint/abci/types"
-	"github.com/tendermint/tendermint/crypto/secp256k1"
-	"github.com/tendermint/tendermint/libs/log"
 )
 
 type testEnv struct {
@@ -30,9 +31,9 @@ type testEnv struct {
 
 func TestKeeperHandleBehaviourAllMis(t *testing.T) {
 	startBlock := 5
-	max := 10
-
 	env := setupUnitTestEnv()
+	max := int(env.keeper.MaxMisbehaviourCount(env.ctx, types.VoteBehaviourKey))
+
 	env.stakingKeeper.On("JailByOperator", mock.Anything, env.validators[0].OperatorAddress)
 	env.stakingKeeper.On("SlashByOperator", mock.Anything, env.validators[0].OperatorAddress, int64(startBlock+max), mock.Anything)
 	env.stakingKeeper.On("SlashByOperator", mock.Anything, env.validators[0].OperatorAddress, int64(startBlock+(max+1)*2-1), mock.Anything)
@@ -49,15 +50,17 @@ func TestKeeperHandleBehaviourRevert(t *testing.T) {
 
 	env := setupUnitTestEnv()
 
-	for i := 0; i < 200; i++ {
-		env.keeper.HandleBehaviour(env.ctx, types.VoteBehaviourKey, env.validators[0].OperatorAddress, uint64(startBlock+i), i >= 10)
+	window := int(env.keeper.BehaviourWindow(env.ctx, types.VoteBehaviourKey))
+
+	for i := 0; i < window*2; i++ {
+		env.keeper.HandleBehaviour(env.ctx, types.VoteBehaviourKey, env.validators[0].OperatorAddress, uint64(startBlock+i), i >= window/10)
 		validatorBehavior := env.keeper.GetValidatorBehaviour(env.ctx, types.VoteBehaviourKey, env.validators[0].OperatorAddress)
-		if i < 10 {
+		if i < window/10 {
 			require.EqualValues(t, i+1, validatorBehavior.MisbehaviourCounter)
-		} else if i < 100 {
-			require.EqualValues(t, 10, validatorBehavior.MisbehaviourCounter)
-		} else if i < 110 {
-			require.EqualValues(t, 10-(i-100+1), validatorBehavior.MisbehaviourCounter)
+		} else if i < window {
+			require.EqualValues(t, window/10, validatorBehavior.MisbehaviourCounter)
+		} else if i < window+window/10 {
+			require.EqualValues(t, window/10-(i-window+1), validatorBehavior.MisbehaviourCounter)
 		} else {
 			require.EqualValues(t, 0, validatorBehavior.MisbehaviourCounter)
 		}

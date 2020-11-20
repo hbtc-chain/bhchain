@@ -262,7 +262,7 @@ func (msg MsgDeposit) ValidateBasic() sdk.Error {
 	if msg.ToCU == nil || !msg.ToCU.IsValidAddr() {
 		return sdk.ErrInvalidAddr(fmt.Sprintf("TO CU address: %s is invalid", msg.ToCU.String()))
 	}
-	if !msg.Symbol.IsValidTokenName() {
+	if !msg.Symbol.IsValid() {
 		return sdk.ErrInvalidSymbol(fmt.Sprintf("Invalid Symbol %s", msg.Symbol))
 	}
 
@@ -413,16 +413,14 @@ func (msg MsgCollectWaitSign) IsSettleOnlyMsg() bool {
 type MsgCollectSignFinish struct {
 	OrderIDs  []string `json:"order_ids"`
 	SignedTx  []byte   `json:"signed_tx"`
-	TxHash    string   `json:"txhash"`
 	Validator string   `json:"validator"`
 }
 
-func NewMsgCollectSignFinish(valAddr string, ids []string, signedTx []byte, txHash string) MsgCollectSignFinish {
+func NewMsgCollectSignFinish(valAddr string, ids []string, signedTx []byte) MsgCollectSignFinish {
 	msg := MsgCollectSignFinish{
 		OrderIDs:  make([]string, len(ids)),
 		SignedTx:  make([]byte, len(signedTx)),
 		Validator: valAddr,
-		TxHash:    txHash,
 	}
 
 	copy(msg.OrderIDs, ids)
@@ -666,22 +664,21 @@ func (msg MsgWithdrawalConfirm) IsSettleOnlyMsg() bool {
 type MsgWithdrawalWaitSign struct {
 	OpCU       string   `json:"opcu"`
 	OrderIDs   []string `json:"order_ids"`
-	SignHashes []string `json:"sign_hashes"`
+	SignHashes [][]byte `json:"sign_hashes"`
 	RawData    []byte   `json:"raw_data"`
 	Validator  string   `json:"validator"`
 }
 
-func NewMsgWithdrawalWaitSign(opCUAddr, valAddr string, ids, signHashes []string, rawdata []byte) MsgWithdrawalWaitSign {
+func NewMsgWithdrawalWaitSign(opCUAddr, valAddr string, ids []string, signHashes [][]byte, rawdata []byte) MsgWithdrawalWaitSign {
 	msg := MsgWithdrawalWaitSign{
 		OpCU:       opCUAddr,
 		OrderIDs:   make([]string, len(ids)),
-		SignHashes: make([]string, len(signHashes)),
+		SignHashes: signHashes,
 		RawData:    make([]byte, len(rawdata)),
 		Validator:  valAddr,
 	}
 
 	copy(msg.OrderIDs, ids)
-	copy(msg.SignHashes, signHashes)
 	copy(msg.RawData, rawdata)
 	return msg
 }
@@ -743,15 +740,13 @@ type MsgWithdrawalSignFinish struct {
 	OrderIDs  []string `json:"order_ids"`
 	SignedTx  []byte   `json:"signed_tx"`
 	Validator string   `json:"validator"`
-	TxHash    string   `json:"txhash"`
 }
 
-func NewMsgWithdrawalSignFinish(valAddr string, ids []string, signedTx []byte, txHash string) MsgWithdrawalSignFinish {
+func NewMsgWithdrawalSignFinish(valAddr string, ids []string, signedTx []byte) MsgWithdrawalSignFinish {
 	msg := MsgWithdrawalSignFinish{
 		OrderIDs:  make([]string, len(ids)),
 		SignedTx:  make([]byte, len(signedTx)),
 		Validator: valAddr,
-		TxHash:    txHash,
 	}
 
 	copy(msg.OrderIDs, ids)
@@ -944,12 +939,12 @@ func (msg MsgSysTransfer) IsSettleOnlyMsg() bool {
 //________________________________
 type MsgSysTransferWaitSign struct {
 	OrderID   string `json:"order_id"`
-	SignHash  string `json:"sign_hash"`
+	SignHash  []byte `json:"sign_hash"`
 	RawData   []byte `json:"raw_data"`
 	Validator string `json:"validator"`
 }
 
-func NewMsgSysTransferWaitSign(valAddr string, orderid, signHash string, rawdata []byte) MsgSysTransferWaitSign {
+func NewMsgSysTransferWaitSign(valAddr string, orderid string, signHash []byte, rawdata []byte) MsgSysTransferWaitSign {
 	msg := MsgSysTransferWaitSign{
 		OrderID:   orderid,
 		SignHash:  signHash,
@@ -1004,16 +999,14 @@ func (msg MsgSysTransferWaitSign) IsSettleOnlyMsg() bool {
 type MsgSysTransferSignFinish struct {
 	OrderID   string `json:"order_id"`
 	SignedTx  []byte `json:"signed_tx"`
-	TxHash    string `json:"txhash"`
 	Validator string `json:"validator"`
 }
 
-func NewMsgSysTransferSignFinish(valAddr, orderid string, signedTx []byte, txHash string) MsgSysTransferSignFinish {
+func NewMsgSysTransferSignFinish(valAddr, orderid string, signedTx []byte) MsgSysTransferSignFinish {
 	msg := MsgSysTransferSignFinish{
 		OrderID:   orderid,
 		SignedTx:  make([]byte, len(signedTx)),
 		Validator: valAddr,
-		TxHash:    txHash,
 	}
 
 	copy(msg.SignedTx, signedTx)
@@ -1196,20 +1189,19 @@ func (msg MsgOpcuAssetTransfer) IsSettleOnlyMsg() bool {
 //________________________________
 type MsgOpcuAssetTransferWaitSign struct {
 	OrderID    string   `json:"order_id"`
-	SignHashes []string `json:"sign_hashes"`
+	SignHashes [][]byte `json:"sign_hashes"`
 	RawData    []byte   `json:"raw_data"`
 	Validator  string   `json:"validator"`
 }
 
-func NewMsgOpcuAssetTransferWaitSign(valAddr, id string, signHashes []string, rawdata []byte) MsgOpcuAssetTransferWaitSign {
+func NewMsgOpcuAssetTransferWaitSign(valAddr, id string, signHashes [][]byte, rawdata []byte) MsgOpcuAssetTransferWaitSign {
 	msg := MsgOpcuAssetTransferWaitSign{
 		OrderID:    id,
-		SignHashes: make([]string, len(signHashes)),
+		SignHashes: signHashes,
 		RawData:    make([]byte, len(rawdata)),
 		Validator:  valAddr,
 	}
 
-	copy(msg.SignHashes, signHashes)
 	copy(msg.RawData, rawdata)
 	return msg
 }
@@ -1258,15 +1250,13 @@ type MsgOpcuAssetTransferSignFinish struct {
 	OrderID   string `json:"order_id"`
 	SignedTx  []byte `json:"signed_tx"`
 	Validator string `json:"validator"`
-	TxHash    string `json:"txhash"`
 }
 
-func NewMsgOpcuAssetTransferSignFinish(valAddr, id string, signedTx []byte, txHash string) MsgOpcuAssetTransferSignFinish {
+func NewMsgOpcuAssetTransferSignFinish(valAddr, id string, signedTx []byte) MsgOpcuAssetTransferSignFinish {
 	msg := MsgOpcuAssetTransferSignFinish{
 		OrderID:   id,
 		SignedTx:  make([]byte, len(signedTx)),
 		Validator: valAddr,
-		TxHash:    txHash,
 	}
 
 	copy(msg.SignedTx, signedTx)

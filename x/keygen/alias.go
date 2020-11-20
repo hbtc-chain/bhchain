@@ -14,6 +14,7 @@ const (
 
 	MaxWaitAssignKeyOrders = types.MaxWaitAssignKeyOrders
 	MaxPreKeyGenOrders     = types.MaxPreKeyGenOrders
+	MaxKeyNodeHeartbeat    = types.MaxKeyNodeHeartbeat
 )
 
 var (

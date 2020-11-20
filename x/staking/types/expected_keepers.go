@@ -35,6 +35,11 @@ type SupplyKeeper interface {
 	BurnCoins(ctx sdk.Context, name string, amt sdk.Coins) sdk.Error
 }
 
+type TransferKeeper interface {
+	GetBalance(ctx sdk.Context, addr sdk.CUAddress, symbol string) sdk.Int
+	AddCoins(ctx sdk.Context, addr sdk.CUAddress, coins sdk.Coins) (sdk.Coins, []sdk.Flow, sdk.Error)
+}
+
 // ValidatorSet expected properties for the set of all validators (noalias)
 type ValidatorSet interface {
 	// iterate through validators by operator address, execute func for each validator

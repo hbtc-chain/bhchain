@@ -1,9 +1,10 @@
 package types
 
 import (
-	"github.com/stretchr/testify/assert"
 	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestOrderKeygen(t *testing.T) {
@@ -24,7 +25,7 @@ func TestOrderKeygen(t *testing.T) {
 		KeyNodes:         keyNodes,
 		SignThreshold:    uint64(3),
 		To:               to,
-		OpenFee:          Coins{NewCoin(NativeToken, NewInt(10))},
+		OpenFee:          NewCoin(NativeToken, NewInt(10)),
 		MultiSignAddress: "0x12321cae2b",
 	}
 
@@ -39,7 +40,7 @@ func TestOrderKeygen(t *testing.T) {
 	secondOrder.KeyNodes = keyNodes
 	secondOrder.SignThreshold = uint64(3)
 	secondOrder.To = to
-	secondOrder.OpenFee = Coins{NewCoin(NativeToken, NewInt(10))}
+	secondOrder.OpenFee = NewCoin(NativeToken, NewInt(10))
 	secondOrder.MultiSignAddress = "0x12321cae2b"
 
 	b := reflect.DeepEqual(firstOrder, secondOrder)

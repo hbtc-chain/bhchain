@@ -12,15 +12,6 @@ import (
 func handleAddMappingProposal(ctx sdk.Context, keeper Keeper, proposal types.AddMappingProposal) sdk.Result {
 	ctx.Logger().Info("handleAddMappingProposal", "proposal", proposal)
 
-	fromCUAddr, err := sdk.CUAddressFromBase58(proposal.From)
-	if err != nil {
-		return sdk.ErrInvalidAddr(fmt.Sprintf("invalid from CU:%v", proposal.From)).Result()
-	}
-	fromCU := keeper.ck.GetCU(ctx, fromCUAddr)
-	if fromCU == nil {
-		return sdk.ErrInvalidAccount("from CU does not exist").Result()
-	}
-
 	if keeper.GetMappingInfo(ctx, proposal.IssueSymbol) != nil {
 		return types.ErrDuplicatedIssueSymbol(DefaultCodespace, "duplicated issuer symbol").Result()
 	}
@@ -33,42 +24,41 @@ func handleAddMappingProposal(ctx sdk.Context, keeper Keeper, proposal types.Add
 			"issue symbol is used as target symbol in another mapping").Result()
 	}
 
-	issueTokenInfo := keeper.tk.GetTokenInfo(ctx, proposal.IssueSymbol)
+	issueTokenInfo := keeper.tk.GetToken(ctx, proposal.IssueSymbol)
 	if issueTokenInfo == nil {
 		return sdk.ErrInvalidSymbol("issuer symbol does not exist").Result()
 	}
-	if issueTokenInfo.Chain == issueTokenInfo.Symbol {
+	if issueTokenInfo.GetChain() == issueTokenInfo.GetSymbol() {
 		return sdk.ErrInvalidSymbol("issuer symbol cannot be chain token").Result()
 	}
 
-	targetTokenInfo := keeper.tk.GetTokenInfo(ctx, proposal.TargetSymbol)
+	targetTokenInfo := keeper.tk.GetToken(ctx, proposal.TargetSymbol)
 	if targetTokenInfo == nil {
 		return sdk.ErrInvalidSymbol("target symbol does not exist").Result()
 	}
 
-	if !issueTokenInfo.TotalSupply.Equal(proposal.TotalSupply) {
+	if !issueTokenInfo.GetTotalSupply().Equal(proposal.TotalSupply) {
 		return types.ErrInvalidInitialIssuePool(DefaultCodespace,
 			"initial issue pool does not match issue total supply").Result()
 	}
 
-	if issueTokenInfo.Decimals != targetTokenInfo.Decimals {
+	if issueTokenInfo.GetDecimals() != targetTokenInfo.GetDecimals() {
 		return types.ErrUnmatchedDecimals(DefaultCodespace,
 			"issue decimals do not match target decimals").Result()
 	}
 
-	if !fromCU.GetCoins().AmountOf(proposal.IssueSymbol.String()).Equal(proposal.TotalSupply) {
-		return sdk.ErrInsufficientCoins("from CU's token balance does not match total supply of issue symbol").Result()
+	fromCUAddr := proposal.From
+	have := keeper.trk.GetBalance(ctx, fromCUAddr, proposal.IssueSymbol.String())
+	if !have.Equal(proposal.TotalSupply) {
+		return sdk.ErrInsufficientCoins(fmt.Sprintf("from CU's token balance %s is not equal to total supply of issue symbol %s", have.String(), proposal.TotalSupply.String())).Result()
 	}
-	fee := keeper.NewMappingFee(ctx)
-	if fromCU.GetCoins().AmountOf(sdk.NativeToken).LT(fee) {
-		return sdk.ErrInsufficientCoins("from CU's token balance cannot pay for fee").Result()
-	}
-	fromCU.ResetBalanceFlows()
-	pledgeCoin := sdk.NewCoin(proposal.IssueSymbol.ToDenomName(), proposal.TotalSupply)
-	feeCoin := sdk.NewCoin(sdk.NativeToken, fee)
+	pledgeCoin := sdk.NewCoin(proposal.IssueSymbol.String(), proposal.TotalSupply)
+	feeCoin := sdk.NewCoin(sdk.NativeToken, keeper.NewMappingFee(ctx))
 	need := sdk.NewCoins(pledgeCoin, feeCoin)
-	fromCU.SubCoins(need)
-	keeper.ck.SetCU(ctx, fromCU)
+	_, flows, err := keeper.trk.SubCoins(ctx, fromCUAddr, need)
+	if err != nil {
+		return err.Result()
+	}
 
 	mappingInfo := &types.MappingInfo{
 		IssueSymbol:  proposal.IssueSymbol,
@@ -79,16 +69,11 @@ func handleAddMappingProposal(ctx sdk.Context, keeper Keeper, proposal types.Add
 	}
 	keeper.SetMappingInfo(ctx, mappingInfo)
 
-	var flows []sdk.Flow
-	for _, balanceFlow := range fromCU.GetBalanceFlows() {
-		flows = append(flows, balanceFlow)
-	}
 	flows = append(flows, MappingBalanceFlow{
 		IssueSymbol:       proposal.IssueSymbol,
 		PreviousIssuePool: sdk.ZeroInt(),
 		IssuePoolChange:   proposal.TotalSupply,
 	})
-	fromCU.ResetBalanceFlows()
 
 	receipt := keeper.rk.NewReceipt(sdk.CategoryTypeMapping, flows)
 	res := sdk.Result{}
@@ -97,7 +82,7 @@ func handleAddMappingProposal(ctx sdk.Context, keeper Keeper, proposal types.Add
 	ctx.EventManager().EmitEvent(
 		sdk.NewEvent(
 			types.EventTypeExecuteAddMappingProposal,
-			sdk.NewAttribute(types.AttributeKeyFrom, proposal.From),
+			sdk.NewAttribute(types.AttributeKeyFrom, proposal.From.String()),
 			sdk.NewAttribute(types.AttributeKeyIssueToken, proposal.IssueSymbol.String()),
 			sdk.NewAttribute(types.AttributeKeyTargetToken, proposal.TargetSymbol.String()),
 			sdk.NewAttribute(types.AttributeKeyTotalSupply, proposal.TotalSupply.String()),

@@ -11,7 +11,7 @@ import (
 )
 
 func TestInvalidMsg(t *testing.T) {
-	h := NewHandler(nil)
+	h := NewHandler(BaseKeeper{})
 
 	res := h(sdk.NewContext(nil, abci.Header{}, false, nil), sdk.NewTestMsg())
 	require.False(t, res.IsOK())

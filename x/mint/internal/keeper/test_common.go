@@ -67,8 +67,8 @@ func newTestInput(t *testing.T) testInput {
 	blacklistedAddrs[minterAcc.String()] = true
 
 	paramsKeeper := params.NewKeeper(types.ModuleCdc, keyParams, tkeyParams, params.DefaultCodespace)
-	cuKeeper := custodianunit.NewCUKeeper(types.ModuleCdc, keyAcc, nil, paramsKeeper.Subspace(custodianunit.DefaultParamspace), custodianunit.ProtoBaseCU)
-	bankKeeper := transfer.NewBaseKeeper(types.ModuleCdc, keyTransfer, cuKeeper, nil, nil, nil, nil, nil, paramsKeeper.Subspace(transfer.DefaultParamspace), transfer.DefaultCodespace, blacklistedAddrs)
+	cuKeeper := custodianunit.NewCUKeeper(types.ModuleCdc, keyAcc, paramsKeeper.Subspace(custodianunit.DefaultParamspace), custodianunit.ProtoBaseCU)
+	bankKeeper := transfer.NewBaseKeeper(types.ModuleCdc, keyTransfer, cuKeeper, nil, nil, nil, nil, nil, nil, paramsKeeper.Subspace(transfer.DefaultParamspace), transfer.DefaultCodespace, blacklistedAddrs)
 	maccPerms := map[string][]string{
 		custodianunit.FeeCollectorName: nil,
 		types.ModuleName:               []string{supply.Minter},

@@ -37,6 +37,7 @@ import (
 var (
 	flagNodeDirPrefix     = "node-dir-prefix"
 	flagNumValidators     = "v"
+	flagNumKeyNodes       = "key-nodes"
 	flagOutputDir         = "output-dir"
 	flagNodeDaemonHome    = "node-daemon-home"
 	flagNodeCLIHome       = "node-cli-home"
@@ -71,18 +72,24 @@ Example:
 			nodeCLIHome := viper.GetString(flagNodeCLIHome)
 			startingIPAddress := viper.GetString(flagStartingIPAddress)
 			numValidators := viper.GetInt(flagNumValidators)
+			numKeyNodes := viper.GetInt(flagNumKeyNodes)
+			if numKeyNodes <= 0 || numKeyNodes > numValidators {
+				numKeyNodes = numValidators
+			}
 			if viper.GetBool(flagSameIPAddress) {
 				return InitTestnetSameIPDiffPort(cmd, config, cdc, mbm, genAccIterator, outputDir, chainID,
-					minGasPrices, nodeDirPrefix, nodeDaemonHome, nodeCLIHome, startingIPAddress, numValidators)
+					minGasPrices, nodeDirPrefix, nodeDaemonHome, nodeCLIHome, startingIPAddress, numValidators, numKeyNodes)
 			} else {
 				return InitTestnet(cmd, config, cdc, mbm, genAccIterator, outputDir, chainID,
-					minGasPrices, nodeDirPrefix, nodeDaemonHome, nodeCLIHome, startingIPAddress, numValidators)
+					minGasPrices, nodeDirPrefix, nodeDaemonHome, nodeCLIHome, startingIPAddress, numValidators, numKeyNodes)
 			}
 		},
 	}
 
 	cmd.Flags().Int(flagNumValidators, 4,
 		"Number of validators to initialize the testnet with")
+	cmd.Flags().Int(flagNumKeyNodes, 0,
+		"Number of key nodes to initialize the testnet with")
 	cmd.Flags().StringP(flagOutputDir, "o", "./testnet",
 		"Directory to store initialization data for the testnet")
 	cmd.Flags().String(flagNodeDirPrefix, "node",
@@ -108,7 +115,7 @@ const nodeDirPerm = 0755
 func InitTestnet(cmd *cobra.Command, config *tmconfig.Config, cdc *codec.Codec,
 	mbm module.BasicManager, genAccIterator genutiltypes.GenesisCUsIterator,
 	outputDir, chainID, minGasPrices, nodeDirPrefix, nodeDaemonHome,
-	nodeCLIHome, startingIPAddress string, numValidators int) error {
+	nodeCLIHome, startingIPAddress string, numValidators, numKeyNodes int) error {
 
 	if chainID == "" {
 		chainID = "chain-" + cmn.RandStr(6)
@@ -124,6 +131,7 @@ func InitTestnet(cmd *cobra.Command, config *tmconfig.Config, cdc *codec.Codec,
 	var (
 		accs     []genaccounts.GenesisCU
 		genFiles []string
+		keyNodes []sdk.CUAddress
 	)
 
 	// generate private keys, node IDs, and initial transactions
@@ -208,7 +216,7 @@ func InitTestnet(cmd *cobra.Command, config *tmconfig.Config, cdc *codec.Codec,
 			return err
 		}
 
-		accStakingTokens := sdk.TokensFromConsensusPower(21000000)
+		accStakingTokens := sdk.TokensFromConsensusPower(1000000)
 		accs = append(accs, genaccounts.GenesisCU{
 			Address: addr,
 			Coins: sdk.Coins{
@@ -224,7 +232,6 @@ func InitTestnet(cmd *cobra.Command, config *tmconfig.Config, cdc *codec.Codec,
 			staking.NewDescription(nodeDirName, "", "", ""),
 			staking.NewCommissionRates(sdk.ZeroDec(), sdk.ZeroDec(), sdk.ZeroDec()),
 			stakingtypes.DefaultMinValidatorDelegation,
-			true,
 		)
 		kb, err := keys.NewKeyBaseFromDir(clientDir)
 		if err != nil {
@@ -253,9 +260,13 @@ func InitTestnet(cmd *cobra.Command, config *tmconfig.Config, cdc *codec.Codec,
 
 		bhConfigFilePath := filepath.Join(nodeDir, "config/hbtcchain.toml")
 		srvconfig.WriteConfigFile(bhConfigFilePath, bhConfig)
+
+		if i < numKeyNodes {
+			keyNodes = append(keyNodes, addr)
+		}
 	}
 
-	if err := initGenFiles(cdc, mbm, chainID, accs, genFiles, numValidators); err != nil {
+	if err := initGenFiles(cdc, mbm, chainID, accs, genFiles, numValidators, keyNodes); err != nil {
 		return err
 	}
 
@@ -276,7 +287,7 @@ func InitTestnet(cmd *cobra.Command, config *tmconfig.Config, cdc *codec.Codec,
 func InitTestnetSameIPDiffPort(cmd *cobra.Command, config *tmconfig.Config, cdc *codec.Codec,
 	mbm module.BasicManager, genAccIterator genutiltypes.GenesisCUsIterator,
 	outputDir, chainID, minGasPrices, nodeDirPrefix, nodeDaemonHome,
-	nodeCLIHome, startingIPAddress string, numValidators int) error {
+	nodeCLIHome, startingIPAddress string, numValidators, numKeyNodes int) error {
 
 	if chainID == "" {
 		chainID = "chain-" + cmn.RandStr(6)
@@ -292,6 +303,7 @@ func InitTestnetSameIPDiffPort(cmd *cobra.Command, config *tmconfig.Config, cdc 
 	var (
 		accs     []genaccounts.GenesisCU
 		genFiles []string
+		keyNodes []sdk.CUAddress
 	)
 
 	// generate private keys, node IDs, and initial transactions
@@ -373,12 +385,10 @@ func InitTestnetSameIPDiffPort(cmd *cobra.Command, config *tmconfig.Config, cdc 
 			return err
 		}
 
-		//accTokens := sdk.TokensFromConsensusPower(1000)
-		accStakingTokens := sdk.TokensFromConsensusPower(21000000)
+		accStakingTokens := sdk.TokensFromConsensusPower(1000000)
 		accs = append(accs, genaccounts.GenesisCU{
 			Address: addr,
 			Coins: sdk.Coins{
-				//sdk.NewCoin(fmt.Sprintf("%stoken", nodeDirName), accTokens),
 				sdk.NewCoin(sdk.DefaultBondDenom, accStakingTokens),
 			},
 		})
@@ -391,7 +401,6 @@ func InitTestnetSameIPDiffPort(cmd *cobra.Command, config *tmconfig.Config, cdc 
 			staking.NewDescription(nodeDirName, "", "", ""),
 			staking.NewCommissionRates(sdk.ZeroDec(), sdk.ZeroDec(), sdk.ZeroDec()),
 			stakingtypes.DefaultMinValidatorDelegation,
-			true,
 		)
 		kb, err := keys.NewKeyBaseFromDir(clientDir)
 		if err != nil {
@@ -420,9 +429,13 @@ func InitTestnetSameIPDiffPort(cmd *cobra.Command, config *tmconfig.Config, cdc 
 
 		bhConfigFilePath := filepath.Join(nodeDir, "config/hbtcchain.toml")
 		srvconfig.WriteConfigFile(bhConfigFilePath, bhConfig)
+
+		if i < numKeyNodes {
+			keyNodes = append(keyNodes, addr)
+		}
 	}
 
-	if err := initGenFiles(cdc, mbm, chainID, accs, genFiles, numValidators); err != nil {
+	if err := initGenFiles(cdc, mbm, chainID, accs, genFiles, numValidators, keyNodes); err != nil {
 		return err
 	}
 
@@ -439,9 +452,12 @@ func InitTestnetSameIPDiffPort(cmd *cobra.Command, config *tmconfig.Config, cdc 
 }
 
 func initGenFiles(cdc *codec.Codec, mbm module.BasicManager, chainID string,
-	accs []genaccounts.GenesisCU, genFiles []string, numValidators int) error {
+	accs []genaccounts.GenesisCU, genFiles []string, numValidators int, keyNodes []sdk.CUAddress) error {
 
 	appGenState := mbm.DefaultGenesis()
+	stakingState := staking.DefaultGenesisState()
+	stakingState.KeyNodes = keyNodes
+	appGenState[staking.ModuleName] = cdc.MustMarshalJSON(stakingState)
 
 	// set the accounts in the genesis state
 	appGenState = genaccounts.SetGenesisStateInAppState(cdc, appGenState, accs)

@@ -43,12 +43,6 @@ func (k Keeper) BondDenom(ctx sdk.Context) (res string) {
 	return
 }
 
-// ElectionPeriod
-func (k Keeper) ElectionPeriod(ctx sdk.Context) (res uint64) {
-	k.paramstore.Get(ctx, types.KeyElectionPeriod, &res)
-	return
-}
-
 func (k Keeper) MaxKeyNodes(ctx sdk.Context) (res uint16) {
 	k.paramstore.Get(ctx, types.KeyMaxKeyNodes, &res)
 	return
@@ -61,11 +55,6 @@ func (k Keeper) MinValidatorDelegation(ctx sdk.Context) (res sdk.Int) {
 
 func (k Keeper) MinKeyNodeDelegation(ctx sdk.Context) (res sdk.Int) {
 	k.paramstore.Get(ctx, types.KeyMinKeyNodeDelegation, &res)
-	return
-}
-
-func (k Keeper) MaxKeyNodeHeartbeatInterval(ctx sdk.Context) (res uint64) {
-	k.paramstore.Get(ctx, types.KeyMaxKeyNodeHeartbeatInterval, &res)
 	return
 }
 
@@ -82,10 +71,8 @@ func (k Keeper) GetParams(ctx sdk.Context) types.Params {
 		k.MaxKeyNodes(ctx),
 		k.MaxEntries(ctx),
 		k.BondDenom(ctx),
-		k.ElectionPeriod(ctx),
 		k.MinValidatorDelegation(ctx),
 		k.MinKeyNodeDelegation(ctx),
-		k.MaxKeyNodeHeartbeatInterval(ctx),
 		k.MaxCandidateKeyNodeHeartbeatInterval(ctx),
 	)
 }

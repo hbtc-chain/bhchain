@@ -7,6 +7,7 @@ import (
 
 	sdk "github.com/hbtc-chain/bhchain/types"
 	"github.com/hbtc-chain/bhchain/x/supply/internal/types"
+	"github.com/hbtc-chain/bhchain/x/transfer"
 )
 
 const initialPower = int64(100)
@@ -22,29 +23,28 @@ var (
 	initCoins  = sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, initTokens))
 )
 
-func getCoinsByName(ctx sdk.Context, k Keeper, moduleName string) sdk.Coins {
+func getCoinsByName(ctx sdk.Context, k Keeper, trk transfer.Keeper, moduleName string) sdk.Coins {
 	moduleAddress := k.GetModuleAddress(moduleName)
 	macc := k.ck.GetCU(ctx, moduleAddress)
 	if macc == nil {
 		return sdk.Coins(nil)
 	}
-	return macc.GetCoins()
+	return trk.GetAllBalance(ctx, macc.GetAddress())
 }
 
 func TestSendCoins(t *testing.T) {
 	nAccs := int64(4)
-	ctx, ck, keeper := createTestInput(t, false, initialPower, nAccs)
+	ctx, ck, keeper, trk := createTestInput(t, false, initialPower, nAccs)
 	//TODO  module cu == user cu ?
 	baseAcc := ck.NewCUWithAddress(ctx, sdk.CUTypeUser, types.NewModuleAddress("baseAcc"))
-
-	err := holderAcc.SetCoins(initCoins)
-	require.NoError(t, err)
+	testSetCUCoins(ctx, trk, holderAcc.Address, initCoins)
+	//err := holderAcc.SetCoins(initCoins)
 
 	keeper.SetModuleAccount(ctx, holderAcc)
 	keeper.SetModuleAccount(ctx, burnerAcc)
 	ck.SetCU(ctx, baseAcc)
 
-	_, err = keeper.SendCoinsFromModuleToModule(ctx, "", holderAcc.GetName(), initCoins)
+	_, err := keeper.SendCoinsFromModuleToModule(ctx, "", holderAcc.GetName(), initCoins)
 	require.Error(t, err)
 
 	require.Panics(t, func() {
@@ -59,24 +59,24 @@ func TestSendCoins(t *testing.T) {
 
 	_, err = keeper.SendCoinsFromModuleToModule(ctx, holderAcc.GetName(), types.Burner, initCoins)
 	require.NoError(t, err)
-	require.Equal(t, sdk.Coins(nil), getCoinsByName(ctx, keeper, holderAcc.GetName()))
-	require.Equal(t, initCoins, getCoinsByName(ctx, keeper, types.Burner))
+	require.Equal(t, sdk.Coins(nil), getCoinsByName(ctx, keeper, trk, holderAcc.GetName()))
+	require.Equal(t, initCoins, getCoinsByName(ctx, keeper, trk, types.Burner))
 
 	_, err = keeper.SendCoinsFromModuleToAccount(ctx, types.Burner, baseAcc.GetAddress(), initCoins)
 	require.NoError(t, err)
-	require.Equal(t, sdk.Coins(nil), getCoinsByName(ctx, keeper, types.Burner))
+	require.Equal(t, sdk.Coins(nil), getCoinsByName(ctx, keeper, trk, types.Burner))
 
-	require.Equal(t, initCoins, keeper.ck.GetCU(ctx, baseAcc.GetAddress()).GetCoins())
+	require.Equal(t, initCoins, trk.GetAllBalance(ctx, baseAcc.GetAddress()))
 
 	_, err = keeper.SendCoinsFromAccountToModule(ctx, baseAcc.GetAddress(), types.Burner, initCoins)
 	require.NoError(t, err)
-	require.Equal(t, sdk.Coins(nil), keeper.ck.GetCU(ctx, baseAcc.GetAddress()).GetCoins())
-	require.Equal(t, initCoins, getCoinsByName(ctx, keeper, types.Burner))
+	require.Equal(t, sdk.Coins(nil), trk.GetAllBalance(ctx, baseAcc.GetAddress()))
+	require.Equal(t, initCoins, getCoinsByName(ctx, keeper, trk, types.Burner))
 }
 
 func TestMintCoins(t *testing.T) {
 	nAccs := int64(4)
-	ctx, _, keeper := createTestInput(t, false, initialPower, nAccs)
+	ctx, _, keeper, trk := createTestInput(t, false, initialPower, nAccs)
 
 	keeper.SetModuleAccount(ctx, burnerAcc)
 	keeper.SetModuleAccount(ctx, minterAcc)
@@ -93,7 +93,7 @@ func TestMintCoins(t *testing.T) {
 
 	err := keeper.MintCoins(ctx, types.Minter, initCoins)
 	require.NoError(t, err)
-	require.Equal(t, initCoins, getCoinsByName(ctx, keeper, types.Minter))
+	require.Equal(t, initCoins, getCoinsByName(ctx, keeper, trk, types.Minter))
 	require.Equal(t, initialSupply.GetTotal().Add(initCoins), keeper.GetSupply(ctx).GetTotal())
 
 	// test same functionality on module CU with multiple permissions
@@ -101,7 +101,7 @@ func TestMintCoins(t *testing.T) {
 
 	err = keeper.MintCoins(ctx, multiPermAcc.GetName(), initCoins)
 	require.NoError(t, err)
-	require.Equal(t, initCoins, getCoinsByName(ctx, keeper, multiPermAcc.GetName()))
+	require.Equal(t, initCoins, getCoinsByName(ctx, keeper, trk, multiPermAcc.GetName()))
 	require.Equal(t, initialSupply.GetTotal().Add(initCoins), keeper.GetSupply(ctx).GetTotal())
 
 	require.Panics(t, func() { keeper.MintCoins(ctx, types.Burner, initCoins) })
@@ -109,9 +109,10 @@ func TestMintCoins(t *testing.T) {
 
 func TestBurnCoins(t *testing.T) {
 	nAccs := int64(4)
-	ctx, _, keeper := createTestInput(t, false, initialPower, nAccs)
+	ctx, _, keeper, trk := createTestInput(t, false, initialPower, nAccs)
 
-	require.NoError(t, burnerAcc.SetCoins(initCoins))
+	testSetCUCoins(ctx, trk, burnerAcc.Address, initCoins)
+
 	keeper.SetModuleAccount(ctx, burnerAcc)
 
 	initialSupply := keeper.GetSupply(ctx)
@@ -125,7 +126,7 @@ func TestBurnCoins(t *testing.T) {
 
 	err := keeper.BurnCoins(ctx, types.Burner, initCoins)
 	require.NoError(t, err)
-	require.Equal(t, sdk.Coins(nil), getCoinsByName(ctx, keeper, types.Burner))
+	require.Equal(t, sdk.Coins(nil), getCoinsByName(ctx, keeper, trk, types.Burner))
 	require.Equal(t, initialSupply.GetTotal().Sub(initCoins), keeper.GetSupply(ctx).GetTotal())
 
 	// test same functionality on module CU with multiple permissions
@@ -133,11 +134,12 @@ func TestBurnCoins(t *testing.T) {
 	initialSupply = initialSupply.Inflate(initCoins)
 	keeper.SetSupply(ctx, initialSupply)
 
-	require.NoError(t, multiPermAcc.SetCoins(initCoins))
+	testSetCUCoins(ctx, trk, multiPermAcc.Address, initCoins)
+
 	keeper.SetModuleAccount(ctx, multiPermAcc)
 
 	err = keeper.BurnCoins(ctx, multiPermAcc.GetName(), initCoins)
 	require.NoError(t, err)
-	require.Equal(t, sdk.Coins(nil), getCoinsByName(ctx, keeper, multiPermAcc.GetName()))
+	require.Equal(t, sdk.Coins(nil), getCoinsByName(ctx, keeper, trk, multiPermAcc.GetName()))
 	require.Equal(t, initialSupply.GetTotal().Sub(initCoins), keeper.GetSupply(ctx).GetTotal())
 }

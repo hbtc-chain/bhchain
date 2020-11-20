@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"testing"
 
-	sdk "github.com/hbtc-chain/bhchain/types"
-	"github.com/hbtc-chain/bhchain/x/evidence/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+
+	sdk "github.com/hbtc-chain/bhchain/types"
+	"github.com/hbtc-chain/bhchain/x/evidence/types"
 )
 
 func TestVote(t *testing.T) {
@@ -45,7 +46,9 @@ func TestRecordMisbehaviourVoter(t *testing.T) {
 	env.stakingKeeper.On("GetCurrentEpoch", mock.Anything).Return(mockEpoch)
 	env.stakingKeeper.On("GetEpochByHeight", mock.Anything, mock.Anything).Return(mockEpoch)
 
-	for i := 1; i <= 11; i++ {
+	max := int(env.keeper.MaxMisbehaviourCount(env.ctx, types.VoteBehaviourKey))
+
+	for i := 1; i <= max+1; i++ {
 		env.keeper.Vote(env.ctx, fmt.Sprintf("vote-%d", i), addr1, types.BoolVote(true), uint64(i))
 		env.keeper.Vote(env.ctx, fmt.Sprintf("vote-%d", i), addr2, types.BoolVote(true), uint64(i))
 		env.keeper.Vote(env.ctx, fmt.Sprintf("vote-%d", i), addr3, types.BoolVote(true), uint64(i))
@@ -53,15 +56,15 @@ func TestRecordMisbehaviourVoter(t *testing.T) {
 
 	env.stakingKeeper.On("JailByOperator", mock.Anything, env.validators[3].OperatorAddress)
 	env.stakingKeeper.On("SlashByOperator", mock.Anything, env.validators[3].OperatorAddress, mock.Anything, mock.Anything)
-	env.ctx = env.ctx.WithBlockHeight(20)
+	env.ctx = env.ctx.WithBlockHeight(1)
 	env.keeper.RecordMisbehaviourVoter(env.ctx)
 	env.stakingKeeper.AssertNotCalled(t, "JailByOperator")
 	env.stakingKeeper.AssertNotCalled(t, "SlashByOperator")
-	env.ctx = env.ctx.WithBlockHeight(21)
+	env.ctx = env.ctx.WithBlockHeight(int64(uint64(max) + types.BehaviourCountDelayBlock + 1))
 	env.keeper.RecordMisbehaviourVoter(env.ctx)
 	env.stakingKeeper.AssertNumberOfCalls(t, "JailByOperator", 1)
 	env.stakingKeeper.AssertNumberOfCalls(t, "SlashByOperator", 1)
-	env.ctx = env.ctx.WithBlockHeight(31)
+	env.ctx = env.ctx.WithBlockHeight(int64(uint64(max) + types.BehaviourCountDelayBlock + 1000))
 	env.keeper.RecordMisbehaviourVoter(env.ctx)
 	env.stakingKeeper.AssertNumberOfCalls(t, "JailByOperator", 1)
 	env.stakingKeeper.AssertNumberOfCalls(t, "SlashByOperator", 1)

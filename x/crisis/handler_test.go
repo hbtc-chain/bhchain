@@ -12,6 +12,7 @@ import (
 	"github.com/hbtc-chain/bhchain/x/crisis"
 	"github.com/hbtc-chain/bhchain/x/custodianunit"
 	distr "github.com/hbtc-chain/bhchain/x/distribution"
+	"github.com/hbtc-chain/bhchain/x/transfer"
 )
 
 var (
@@ -21,10 +22,10 @@ var (
 	addrs                 = distr.TestAddrs
 )
 
-func CreateTestInput(t *testing.T) (sdk.Context, crisis.Keeper, custodianunit.CUKeeper, distr.Keeper) {
+func CreateTestInput(t *testing.T) (sdk.Context, crisis.Keeper, custodianunit.CUKeeper, distr.Keeper, transfer.Keeper) {
 
 	communityTax := sdk.NewDecWithPrec(2, 2)
-	ctx, accKeeper, _, distrKeeper, sk, paramsKeeper, supplyKeeper :=
+	ctx, accKeeper, transferKeeper, distrKeeper, sk, paramsKeeper, supplyKeeper :=
 		distr.CreateTestInputAdvanced(t, false, 10, communityTax)
 
 	paramSpace := paramsKeeper.Subspace(crisis.DefaultParamspace)
@@ -40,15 +41,17 @@ func CreateTestInput(t *testing.T) (sdk.Context, crisis.Keeper, custodianunit.CU
 	feePool.CommunityPool = sdk.NewDecCoins(sdk.NewCoins(constantFee))
 	distrKeeper.SetFeePool(ctx, feePool)
 
-	return ctx, crisisKeeper, accKeeper, distrKeeper
+	return ctx, crisisKeeper, accKeeper, distrKeeper, transferKeeper
 }
 
 //____________________________________________________________________________
 
 func TestHandleMsgVerifyInvariantWithNotEnoughSenderCoins(t *testing.T) {
-	ctx, crisisKeeper, accKeeper, _ := CreateTestInput(t)
+	ctx, crisisKeeper, _, _, transferKeeper := CreateTestInput(t)
+
 	sender := addrs[0]
-	coin := accKeeper.GetCU(ctx, sender).GetCoins()[0]
+
+	coin := transferKeeper.GetAllBalance(ctx, sender)[0]
 	excessCoins := sdk.NewCoin(coin.Denom, coin.Amount.AddRaw(1))
 	crisisKeeper.SetConstantFee(ctx, excessCoins)
 
@@ -58,7 +61,7 @@ func TestHandleMsgVerifyInvariantWithNotEnoughSenderCoins(t *testing.T) {
 }
 
 func TestHandleMsgVerifyInvariantWithBadInvariant(t *testing.T) {
-	ctx, crisisKeeper, _, _ := CreateTestInput(t)
+	ctx, crisisKeeper, _, _, _ := CreateTestInput(t)
 	sender := addrs[0]
 
 	h := crisis.NewHandler(crisisKeeper)
@@ -68,7 +71,7 @@ func TestHandleMsgVerifyInvariantWithBadInvariant(t *testing.T) {
 }
 
 func TestHandleMsgVerifyInvariantWithInvariantBroken(t *testing.T) {
-	ctx, crisisKeeper, _, _ := CreateTestInput(t)
+	ctx, crisisKeeper, _, _, _ := CreateTestInput(t)
 	sender := addrs[0]
 
 	h := crisis.NewHandler(crisisKeeper)
@@ -80,7 +83,7 @@ func TestHandleMsgVerifyInvariantWithInvariantBroken(t *testing.T) {
 }
 
 func TestHandleMsgVerifyInvariantWithInvariantBrokenAndNotEnoughPoolCoins(t *testing.T) {
-	ctx, crisisKeeper, _, distrKeeper := CreateTestInput(t)
+	ctx, crisisKeeper, _, distrKeeper, _ := CreateTestInput(t)
 	sender := addrs[0]
 
 	// set the community pool to empty
@@ -97,7 +100,7 @@ func TestHandleMsgVerifyInvariantWithInvariantBrokenAndNotEnoughPoolCoins(t *tes
 }
 
 func TestHandleMsgVerifyInvariantWithInvariantNotBroken(t *testing.T) {
-	ctx, crisisKeeper, _, _ := CreateTestInput(t)
+	ctx, crisisKeeper, _, _, _ := CreateTestInput(t)
 	sender := addrs[0]
 
 	h := crisis.NewHandler(crisisKeeper)

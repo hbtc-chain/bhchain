@@ -74,6 +74,12 @@ func queryParams(ctx sdk.Context, path []string, req abci.RequestQuery, k Keeper
 			return nil, sdk.ErrInternal(sdk.AppendMsgToErr("could not marshal result to JSON", err.Error()))
 		}
 		return bz, nil
+	case types.ParamKeyNodeReward:
+		bz, err := codec.MarshalJSONIndent(k.cdc, k.GetKeyNodeReward(ctx))
+		if err != nil {
+			return nil, sdk.ErrInternal(sdk.AppendMsgToErr("could not marshal result to JSON", err.Error()))
+		}
+		return bz, nil
 	default:
 		return nil, sdk.ErrUnknownRequest(fmt.Sprintf("%s is not a valid query request path", req.Path))
 	}

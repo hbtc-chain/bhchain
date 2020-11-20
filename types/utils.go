@@ -81,6 +81,12 @@ func Uint64ToBigEndian(i uint64) []byte {
 	return b
 }
 
+func Uint32ToBigEndian(i uint32) []byte {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint32(b, i)
+	return b
+}
+
 // Slight modification of the RFC3339Nano but it right pads all zeros and drops the time zone info
 const SortableTimeFormat = "2006-01-02T15:04:05.000000000"
 
@@ -125,7 +131,7 @@ func Majority34(num int) int {
 	return 3*num/4 + 1
 }
 
-func OneSixthCeil(num uint16) uint16 {
+func OneSixthCeil(num int) int {
 	return (num + 5) / 6
 }
 
@@ -146,6 +152,14 @@ type TxFinishNodeData struct {
 */
 func EstimateSignedUtxoTxSize(numVin, numVout int) Int {
 	return NewInt(int64(BytesPerUtxoVin*numVin + BytesPerUtxoVout*numVout))
+}
+
+func DefaultUtxoWithdrawTxSize() Int {
+	return NewInt(int64(BytesPerUtxoVin + BytesPerUtxoVout*2))
+}
+
+func DefaultUtxoCollectTxSize() Int {
+	return NewInt(int64(BytesPerUtxoVin + BytesPerUtxoVout))
 }
 
 // StringsIndex returns the index of the first instance of string `want` in string slice `s`, or -1 if `want` is not present in `s`.

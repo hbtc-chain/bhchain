@@ -4,9 +4,9 @@ package gov
 import (
 	"bytes"
 	"fmt"
-
 	"log"
 	"sort"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -18,6 +18,7 @@ import (
 	"github.com/hbtc-chain/bhchain/x/custodianunit"
 	distrkeeper "github.com/hbtc-chain/bhchain/x/distribution/keeper"
 	distrtype "github.com/hbtc-chain/bhchain/x/distribution/types"
+	"github.com/hbtc-chain/bhchain/x/genaccounts"
 	"github.com/hbtc-chain/bhchain/x/gov/types"
 	"github.com/hbtc-chain/bhchain/x/mock"
 	"github.com/hbtc-chain/bhchain/x/receipt"
@@ -40,6 +41,7 @@ type testInput struct {
 	router   Router
 	sk       staking.Keeper
 	dk       DistributionKeeper
+	tk       transfer.Keeper
 	addrs    []sdk.CUAddress
 	pubKeys  []crypto.PubKey
 	privKeys []crypto.PrivKey
@@ -59,7 +61,7 @@ func getMockApp(t *testing.T, numGenAccs int, genState GenesisState, genAccs []c
 	keyGov := sdk.NewKVStoreKey(StoreKey)
 	keySupply := sdk.NewKVStoreKey(supply.StoreKey)
 	keyDistr := sdk.NewKVStoreKey(distrtype.StoreKey)
-	keyTransfer := sdk.NewKVStoreKey(transfer.StoreKey)
+	keyTransfer := mApp.KeyTransfer
 
 	govAcc := supply.NewEmptyModuleAccount(types.ModuleName, supply.Burner)
 	notBondedPool := supply.NewEmptyModuleAccount(staking.NotBondedPoolName, supply.Burner, supply.Staking)
@@ -71,11 +73,11 @@ func getMockApp(t *testing.T, numGenAccs int, genState GenesisState, genAccs []c
 	blacklistedAddrs[bondPool.String()] = true
 
 	pk := mApp.ParamsKeeper
-	rk := mApp.ReceiptKeeper
+
 	rtr := NewRouter().
 		AddRoute(RouterKey, ProposalHandler)
 
-	bk := transfer.NewBaseKeeper(mApp.Cdc, keyTransfer, mApp.CUKeeper, nil, nil, rk, nil, nil, mApp.ParamsKeeper.Subspace(transfer.DefaultParamspace), transfer.DefaultCodespace, blacklistedAddrs)
+	bk := mApp.TransferKeeper
 
 	maccPerms := map[string][]string{
 		types.ModuleName:          []string{supply.Burner},
@@ -86,9 +88,11 @@ func getMockApp(t *testing.T, numGenAccs int, genState GenesisState, genAccs []c
 	supplyKeeper := supply.NewKeeper(mApp.Cdc, keySupply, mApp.CUKeeper, bk, maccPerms)
 	sk := staking.NewKeeper(mApp.Cdc, keyStaking, tKeyStaking, supplyKeeper, pk.Subspace(staking.DefaultParamspace), staking.DefaultCodespace)
 
-	dk := distrkeeper.NewKeeper(mApp.Cdc, keyDistr, pk.Subspace(distrkeeper.DefaultParamspace), sk, supplyKeeper, distrtype.DefaultCodespace, custodianunit.FeeCollectorName, nil)
+	sk.SetTransferKeeper(mApp.TransferKeeper)
 
-	keeper := NewKeeper(mApp.Cdc, keyGov, pk, pk.Subspace(DefaultParamspace), supplyKeeper, sk, dk, DefaultCodespace, rtr)
+	dk := distrkeeper.NewKeeper(mApp.Cdc, keyDistr, pk.Subspace(distrkeeper.DefaultParamspace), sk, supplyKeeper, mApp.TransferKeeper, distrtype.DefaultCodespace, custodianunit.FeeCollectorName, blacklistedAddrs)
+
+	keeper := NewKeeper(mApp.Cdc, keyGov, pk, pk.Subspace(DefaultParamspace), supplyKeeper, sk, dk, mApp.TransferKeeper, DefaultCodespace, rtr)
 
 	mApp.Router().AddRoute(RouterKey, NewHandler(keeper))
 	mApp.QueryRouter().AddRoute(QuerierRoute, NewQuerier(keeper))
@@ -97,21 +101,29 @@ func getMockApp(t *testing.T, numGenAccs int, genState GenesisState, genAccs []c
 	mApp.SetInitChainer(getInitChainer(mApp, keeper, sk, *supplyKeeper, dk, genAccs, genState,
 		[]supplyexported.ModuleAccountI{govAcc, notBondedPool, bondPool}))
 
-	require.NoError(t, mApp.CompleteSetup(keyStaking, tKeyStaking, keyGov, keySupply, keyDistr))
+	require.NoError(t, mApp.CompleteSetup(keyStaking, tKeyStaking, keyGov, keySupply, keyDistr, keyTransfer))
 
 	var (
 		addrs    []sdk.CUAddress
 		pubKeys  []crypto.PubKey
 		privKeys []crypto.PrivKey
 	)
-
+	genAccounts := []genaccounts.GenesisCU{}
 	if genAccs == nil || len(genAccs) == 0 {
-		genAccs, addrs, pubKeys, privKeys = mock.CreateGenAccounts(numGenAccs, valCoins)
+		genAccounts, addrs, pubKeys, privKeys = mock.CreateGenAccounts(numGenAccs, valCoins)
+	} else {
+		for _, acc := range genAccs {
+			genAccounts = append(genAccounts, genaccounts.GenesisCU{
+				Type:     acc.GetCUType(),
+				PubKey:   acc.GetPubKey(),
+				Sequence: acc.GetSequence(),
+			})
+		}
 	}
 
-	mock.SetGenesis(mApp, genAccs)
+	mock.SetGenesis(mApp, genAccounts)
 
-	return testInput{mApp, keeper, rtr, sk, dk, addrs, pubKeys, privKeys}
+	return testInput{mApp, keeper, rtr, sk, dk, bk, addrs, pubKeys, privKeys}
 }
 
 // gov and staking endblocker
@@ -253,10 +265,25 @@ func createValidators(t *testing.T, stakingHandler sdk.Handler, ctx sdk.Context,
 		valTokens := sdk.TokensFromConsensusPower(powerAmt[i])
 		valCreateMsg := staking.NewMsgCreateValidator(
 			addrs[i], pubkeys[i], sdk.NewCoin(sdk.DefaultBondDenom, valTokens),
-			testDescription, testCommissionRates, sdk.OneInt(), true,
+			testDescription, testCommissionRates, sdk.OneInt(),
 		)
 
 		res := stakingHandler(ctx, valCreateMsg)
 		require.True(t, res.IsOK())
 	}
+}
+
+func readProposalID(t *testing.T, res sdk.Result) uint64 {
+	require.True(t, res.IsOK())
+	for _, event := range res.Events {
+		if event.Type == "submit_proposal" {
+			for _, attribute := range event.Attributes {
+				if string(attribute.Key) == "proposal_id" {
+					proposalID, _ := strconv.ParseInt(string(attribute.Value), 10, 64)
+					return uint64(proposalID)
+				}
+			}
+		}
+	}
+	return 0
 }

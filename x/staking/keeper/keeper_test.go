@@ -11,7 +11,6 @@ import (
 func TestParams(t *testing.T) {
 	ctx, _, keeper, _ := CreateTestInput(t, false, 0)
 	expParams := types.DefaultParams()
-	expParams.ElectionPeriod = 5
 
 	//check that the empty keeper loads the default
 	resParams := keeper.GetParams(ctx)

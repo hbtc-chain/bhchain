@@ -19,7 +19,10 @@ import (
 	"github.com/hbtc-chain/bhchain/x/custodianunit/exported"
 	distr "github.com/hbtc-chain/bhchain/x/distribution"
 	"github.com/hbtc-chain/bhchain/x/evidence"
+	evitypes "github.com/hbtc-chain/bhchain/x/evidence/types"
 	"github.com/hbtc-chain/bhchain/x/gov"
+	"github.com/hbtc-chain/bhchain/x/ibcasset"
+	ibcexported "github.com/hbtc-chain/bhchain/x/ibcasset/exported"
 	"github.com/hbtc-chain/bhchain/x/order"
 	"github.com/hbtc-chain/bhchain/x/receipt"
 	"github.com/hbtc-chain/bhchain/x/slashing"
@@ -72,8 +75,161 @@ type testInput struct {
 	cn             types.Chainnode
 	pk             params.Keeper
 	validators     []staking.Validator
-	opcu           exported.CustodianUnit
+	ik             ibcasset.Keeper
+	opcu           *testCU
 	evidenceKeeper evidence.Keeper
+	trk            transfer.Keeper
+}
+
+type testCU struct {
+	custodianunit.CU
+	ctx sdk.Context
+	trk transfer.Keeper
+	ik  ibcasset.Keeper
+}
+
+func newTestCU(ctx sdk.Context, trk transfer.Keeper, ik ibcasset.Keeper, cu custodianunit.CU) *testCU {
+	return &testCU{CU: cu, ctx: ctx, ik: ik, trk: trk}
+}
+
+func (t *testCU) SetCoins(coins sdk.Coins) error {
+	curCoins := t.trk.GetAllBalance(t.ctx, t.CU.GetAddress())
+	t.trk.SubCoins(t.ctx, t.CU.GetAddress(), curCoins)
+	t.trk.AddCoins(t.ctx, t.CU.GetAddress(), coins)
+	return nil
+}
+
+func (t *testCU) SetCoinsHold(coins sdk.Coins) error {
+	curCoins := t.trk.GetAllHoldBalance(t.ctx, t.CU.GetAddress())
+	t.trk.SubCoinsHold(t.ctx, t.CU.GetAddress(), curCoins)
+	t.trk.AddCoinsHold(t.ctx, t.CU.GetAddress(), coins)
+	return nil
+}
+
+func (t *testCU) GetCoins() sdk.Coins {
+	return t.trk.GetAllBalance(t.ctx, t.CU.GetAddress())
+}
+
+func (t *testCU) AddCoins(coins sdk.Coins) {
+	t.trk.AddCoins(t.ctx, t.CU.GetAddress(), coins)
+}
+
+func (t *testCU) GetMigrationStatus() sdk.MigrationStatus {
+	asset := t.ik.GetOrNewCUIBCAsset(t.ctx, t.CU.GetCUType(), t.CU.GetAddress())
+	return asset.GetMigrationStatus()
+}
+
+func (t *testCU) IsEnabledSendTx(chain string, addr string) bool {
+	asset := t.ik.GetOrNewCUIBCAsset(t.ctx, t.CU.GetCUType(), t.CU.GetAddress())
+	return asset.IsEnabledSendTx(chain, addr)
+}
+
+func (t *testCU) SetEnableSendTx(enabled bool, chain string, addr string) {
+	asset := t.ik.GetOrNewCUIBCAsset(t.ctx, t.CU.GetCUType(), t.CU.GetAddress())
+	asset.SetEnableSendTx(enabled, chain, addr)
+	t.ik.SetCUIBCAsset(t.ctx, asset)
+}
+
+func (t *testCU) GetAssetAddress(denom string, epoch uint64) string {
+	asset := t.ik.GetOrNewCUIBCAsset(t.ctx, t.CU.GetCUType(), t.CU.GetAddress())
+	return asset.GetAssetAddress(denom, epoch)
+}
+
+func (t *testCU) SetAssetAddress(denom, address string, epoch uint64) error {
+	asset := t.ik.GetOrNewCUIBCAsset(t.ctx, t.CU.GetCUType(), t.CU.GetAddress())
+	err := asset.SetAssetAddress(denom, address, epoch)
+	if err != nil {
+		return err
+	}
+	t.ik.SetCUIBCAsset(t.ctx, asset)
+	return nil
+}
+
+func (t *testCU) GetIBCAsset() ibcexported.CUIBCAsset {
+	asset := t.ik.GetOrNewCUIBCAsset(t.ctx, t.CU.GetCUType(), t.CU.GetAddress())
+	return asset
+}
+
+func (t *testCU) GetAssetPubkey(epoch uint64) []byte {
+	asset := t.ik.GetOrNewCUIBCAsset(t.ctx, t.CU.GetCUType(), t.CU.GetAddress())
+	return asset.GetAssetPubkey(epoch)
+}
+
+func (t *testCU) SetAssetPubkey(pubkey []byte, epoch uint64) error {
+	asset := t.ik.GetOrNewCUIBCAsset(t.ctx, t.CU.GetCUType(), t.CU.GetAddress())
+	err := asset.SetAssetPubkey(pubkey, epoch)
+	if err != nil {
+		return err
+	}
+	t.ik.SetCUIBCAsset(t.ctx, asset)
+	return nil
+}
+
+func (t *testCU) AddAsset(denom, address string, epoch uint64) error {
+	asset := t.ik.GetOrNewCUIBCAsset(t.ctx, t.CU.GetCUType(), t.CU.GetAddress())
+	err := asset.AddAsset(denom, address, epoch)
+	if err != nil {
+		return err
+	}
+	t.ik.SetCUIBCAsset(t.ctx, asset)
+	return nil
+}
+
+func (t *testCU) GetAssetCoinsHold() sdk.Coins {
+	asset := t.ik.GetOrNewCUIBCAsset(t.ctx, t.CU.GetCUType(), t.CU.GetAddress())
+	return asset.GetAssetCoinsHold()
+}
+
+func (t *testCU) GetAssetCoins() sdk.Coins {
+	asset := t.ik.GetOrNewCUIBCAsset(t.ctx, t.CU.GetCUType(), t.CU.GetAddress())
+	return asset.GetAssetCoins()
+}
+
+func (t *testCU) GetCoinsHold() sdk.Coins {
+	return t.trk.GetAllHoldBalance(t.ctx, t.CU.GetAddress())
+}
+
+func (t *testCU) AddGasReceived(coins sdk.Coins) sdk.Coins {
+	asset := t.ik.GetOrNewCUIBCAsset(t.ctx, t.CU.GetCUType(), t.CU.GetAddress())
+	ret := asset.AddGasReceived(coins)
+	t.ik.SetCUIBCAsset(t.ctx, asset)
+	return ret
+}
+
+func (t *testCU) GetGasReceived() sdk.Coins {
+	asset := t.ik.GetOrNewCUIBCAsset(t.ctx, t.CU.GetCUType(), t.CU.GetAddress())
+	return asset.GetGasReceived()
+}
+
+func (t *testCU) GetGasUsed() sdk.Coins {
+	asset := t.ik.GetOrNewCUIBCAsset(t.ctx, t.CU.GetCUType(), t.CU.GetAddress())
+	return asset.GetGasUsed()
+}
+
+func (t *testCU) AddAssetCoins(coins sdk.Coins) sdk.Coins {
+	asset := t.ik.GetOrNewCUIBCAsset(t.ctx, t.CU.GetCUType(), t.CU.GetAddress())
+	ret := asset.AddAssetCoins(coins)
+	t.ik.SetCUIBCAsset(t.ctx, asset)
+	return ret
+}
+
+func (t *testCU) SubAssetCoins(coins sdk.Coins) sdk.Coins {
+	asset := t.ik.GetOrNewCUIBCAsset(t.ctx, t.CU.GetCUType(), t.CU.GetAddress())
+	ret := asset.SubAssetCoins(coins)
+	t.ik.SetCUIBCAsset(t.ctx, asset)
+	return ret
+}
+
+func (t *testCU) AddGasRemained(chain string, addr string, amt sdk.Int) {
+	asset := t.ik.GetOrNewCUIBCAsset(t.ctx, t.CU.GetCUType(), t.CU.GetAddress())
+	asset.AddGasRemained(chain, addr, amt)
+	t.ik.SetCUIBCAsset(t.ctx, asset)
+}
+
+func (t *testCU) SubGasRemained(chain string, addr string, amt sdk.Int) {
+	asset := t.ik.GetOrNewCUIBCAsset(t.ctx, t.CU.GetCUType(), t.CU.GetAddress())
+	asset.SubGasRemained(chain, addr, amt)
+	t.ik.SetCUIBCAsset(t.ctx, asset)
 }
 
 var mockCN chainnode.MockChainnode
@@ -94,6 +250,7 @@ func setupTestInput(t *testing.T) testInput {
 	keyTransfer := sdk.NewKVStoreKey(types.StoreKey)
 	keyDistr := sdk.NewKVStoreKey(distr.StoreKey)
 	keyEvid := sdk.NewKVStoreKey(evidence.StoreKey)
+	keyIbcAsset := sdk.NewKVStoreKey(ibcasset.StoreKey)
 
 	db := dbm.NewMemDB()
 	ms := store.NewCommitMultiStore(db)
@@ -112,6 +269,7 @@ func setupTestInput(t *testing.T) testInput {
 	ms.MountStoreWithDB(keyTransfer, sdk.StoreTypeIAVL, db)
 	ms.MountStoreWithDB(keyDistr, sdk.StoreTypeIAVL, db)
 	ms.MountStoreWithDB(keyEvid, sdk.StoreTypeIAVL, db)
+	ms.MountStoreWithDB(keyIbcAsset, sdk.StoreTypeIAVL, db)
 	err := ms.LoadLatestVersion()
 	require.Nil(t, err)
 
@@ -130,6 +288,8 @@ func setupTestInput(t *testing.T) testInput {
 	distr.RegisterCodec(cdc)
 	types.RegisterCodec(cdc)
 	evidence.RegisterCodec(cdc)
+	ibcasset.RegisterCodec(cdc)
+	cdc.RegisterConcrete(&testCU{}, "hbtcchain/test/testCU", nil)
 
 	feeCollectorAcc := supply.NewEmptyModuleAccount(custodianunit.FeeCollectorName)
 	notBondedPool := supply.NewEmptyModuleAccount(staking.NotBondedPoolName, supply.Burner, supply.Staking)
@@ -144,16 +304,17 @@ func setupTestInput(t *testing.T) testInput {
 	ctx := sdk.NewContext(ms, abci.Header{ChainID: "test-chain-id"}, false, log.NewNopLogger())
 
 	pk := params.NewKeeper(cdc, keyParams, tkeyParams, params.DefaultCodespace)
-	tk := token.NewKeeper(keyToken, cdc, pk.Subspace(token.DefaultParamspace))
+	tk := token.NewKeeper(keyToken, cdc)
 	rk := receipt.NewKeeper(cdc)
 	ok := order.NewKeeper(cdc, keyOrder, pk.Subspace(order.DefaultParamspace))
 	ck := custodianunit.NewCUKeeper(
-		cdc, keyAcc, &tk, pk.Subspace(custodianunit.DefaultParamspace), custodianunit.ProtoBaseCU,
+		cdc, keyAcc, pk.Subspace(custodianunit.DefaultParamspace), custodianunit.ProtoBaseCU,
 	)
 	ck.SetParams(ctx, custodianunit.DefaultParams())
+	ik := ibcasset.NewKeeper(cdc, keyIbcAsset, ck, &tk, ibcasset.ProtoBaseCUIBCAsset)
 
-	bankKeeper := keeper.NewBaseKeeper(cdc, keyTransfer, ck, &tk, &ok, rk, nil, &mockCN, pk.Subspace(types.DefaultParamspace), types.DefaultCodespace, blacklistedAddrs)
-	transfer.InitGenesis(ctx, bankKeeper, transfer.DefaultGenesisState())
+	bankKeeper := keeper.NewBaseKeeper(cdc, keyTransfer, ck, ik, &tk, &ok, rk, nil, &mockCN, pk.Subspace(types.DefaultParamspace), types.DefaultCodespace, blacklistedAddrs)
+	transfer.InitGenesis(ctx, *bankKeeper, transfer.DefaultGenesisState())
 
 	maccPerms := map[string][]string{
 		custodianunit.FeeCollectorName: nil,
@@ -166,7 +327,8 @@ func setupTestInput(t *testing.T) testInput {
 	initTokens := sdk.TokensFromConsensusPower(initPower)
 	initCoins := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, initTokens))
 	totalSupply := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, initTokens.MulRaw(int64(numValidators))))
-	notBondedPool.SetCoins(totalSupply)
+	testSetCUCoins(ctx, bankKeeper, notBondedPool.Address, totalSupply)
+	//notBondedPool.SetCoins(totalSupply)
 
 	supplyKeeper.SetSupply(ctx, supply.NewSupply(totalSupply))
 	supplyKeeper.SetModuleAccount(ctx, feeCollectorAcc)
@@ -178,8 +340,16 @@ func setupTestInput(t *testing.T) testInput {
 	stakingKeeper.SetParams(ctx, params)
 
 	evidenceKeeper := evidence.NewKeeper(cdc, keyEvid, pk.Subspace(evidence.DefaultParamspace), stakingKeeper)
-	evidence.InitGenesis(ctx, evidenceKeeper, evidence.DefaultGenesisState())
 
+	evidence.InitGenesis(ctx, evidenceKeeper, evidence.DefaultGenesisState())
+	eviParams := evitypes.BehaviourParams{
+		MaxMisbehaviourCount:   10,
+		BehaviourWindow:        100,
+		BehaviourSlashFraction: sdk.NewDecFromIntWithPrec(sdk.NewInt(1), 1),
+	}
+
+	evidenceKeeper.SetBehaviourParams(ctx, string(evitypes.VoteBehaviourKey), eviParams)
+	evidenceKeeper.SetBehaviourParams(ctx, string(evitypes.DsignBehaviourKey), eviParams)
 	//fill all the addresses with some coins, set the loose pool tokens simultaneously
 	//for _, addr := range Addrs {
 	//	_, err := bankKeeper.AddCoins(ctx, addr, initCoins)
@@ -187,7 +357,7 @@ func setupTestInput(t *testing.T) testInput {
 	//		panic(err)
 	//	}
 	//}
-	bankKeeper.SetStakingKeeper(ctx, stakingKeeper)
+	bankKeeper.SetStakingKeeper(stakingKeeper)
 	tk.SetStakingKeeper(stakingKeeper)
 
 	//create 4 validators
@@ -197,10 +367,10 @@ func setupTestInput(t *testing.T) testInput {
 		valAddr := sdk.ValAddress(valPubKey.Address().Bytes())
 		_, _, err := bankKeeper.AddCoins(ctx, sdk.CUAddress(valAddr), initCoins)
 		require.Nil(t, err)
-		require.Equal(t, initTokens, bankKeeper.GetCoins(ctx, sdk.CUAddress(valAddr)).AmountOf(sdk.DefaultBondDenom))
+		require.Equal(t, initTokens, bankKeeper.GetAllBalance(ctx, sdk.CUAddress(valAddr)).AmountOf(sdk.DefaultBondDenom))
 
 		valTokens := sdk.TokensFromConsensusPower(initPower)
-		validator := staking.NewValidator(valAddr, valPubKey, staking.Description{}, true)
+		validator := staking.NewValidator(valAddr, valPubKey, staking.Description{})
 		validator, _ = validator.AddTokensFromDel(valTokens)
 		require.Equal(t, sdk.Unbonded, validator.Status)
 		require.Equal(t, valTokens, validator.Tokens)
@@ -225,11 +395,14 @@ func setupTestInput(t *testing.T) testInput {
 
 	//Setup TokenInfo
 	setupTokenInfo(ctx, tk)
-	opcu := setupAccounts(ctx, ck)
+	opcu := setupAccounts(ctx, ck, ik, bankKeeper)
+	opcuAsset := ik.GetOrNewCUIBCAsset(ctx, sdk.CUTypeOp, opcu.GetAddress())
+	ik.SetCUIBCAsset(ctx, opcuAsset)
+	opTestcu := newTestCU(ctx, bankKeeper, ik, opcu)
 
 	bankKeeper.SetEvidenceKeeper(evidenceKeeper)
 
-	return testInput{cdc: cdc, ctx: ctx, k: *bankKeeper, ck: ck, tk: tk, ok: ok, rk: *rk, cn: &mockCN, pk: pk, validators: vals, opcu: opcu,
+	return testInput{cdc: cdc, ctx: ctx, k: *bankKeeper, ck: ck, tk: tk, ok: ok, ik: ik, trk: bankKeeper, rk: *rk, cn: &mockCN, pk: pk, validators: vals, opcu: opTestcu,
 		evidenceKeeper: evidenceKeeper, stakingkeeper: stakingKeeper,
 	}
 }
@@ -237,34 +410,38 @@ func setupTestInput(t *testing.T) testInput {
 //___________________setup tokeninfo_________
 func setupTokenInfo(ctx sdk.Context, tk token.Keeper) {
 	for _, info := range token.TestTokenData {
-		tk.SetTokenInfo(ctx, token.NewTokenInfo(info.Symbol, info.Chain, info.Issuer, info.TokenType,
-			info.IsSendEnabled, info.IsDepositEnabled, info.IsWithdrawalEnabled, info.Decimals,
-			info.TotalSupply, info.CollectThreshold, info.DepositThreshold, info.OpenFee,
-			info.SysOpenFee, info.WithdrawalFeeRate, info.SysTransferNum, info.OpCUSysTransferNum,
-			info.GasLimit, info.GasPrice, info.MaxOpCUNumber, info.Confirmations, info.IsNonceBased))
+		tk.SetToken(ctx, info)
 	}
 }
 
 //___________________setup accounts___________
-func setupAccounts(ctx sdk.Context, ck custodianunit.CUKeeper) exported.CustodianUnit {
+func setupAccounts(ctx sdk.Context, ck custodianunit.CUKeeper, ik ibcasset.Keeper, trk transfer.Keeper) exported.CustodianUnit {
 	cuAddr, _ := sdk.CUAddressFromBase58("HBCLmQcskpdQivEkRrh1gNPm7c9aVB8hh1fy")
 	cu := ck.NewCUWithAddress(ctx, sdk.CUTypeUser, cuAddr)
-	cu.SetCoins(sdk.NewCoins(sdk.NewCoin(sdk.NativeToken, sdk.NewInt(10000000000))))
+	trk.AddCoins(ctx, cu.GetAddress(), sdk.NewCoins(sdk.NewCoin(sdk.NativeToken, sdk.NewInt(10000000000))))
+	//	asset.SetCoins(sdk.NewCoins(sdk.NewCoin(sdk.NativeToken, sdk.NewInt(10000000000))))
 	ck.SetCU(ctx, cu)
 
 	cuAddr, _ = sdk.CUAddressFromBase58("HBCLG5zCH4FtXi3G6wZps8TNfYYWgzb1Rr2q")
 	cu = ck.NewCUWithAddress(ctx, sdk.CUTypeUser, cuAddr)
-	cu.SetCoins(sdk.NewCoins(sdk.NewCoin(sdk.NativeToken, sdk.NewInt(20000000000))))
+	asset := ik.GetOrNewCUIBCAsset(ctx, cu.GetCUType(), cu.GetAddress())
+	ik.SetCUIBCAsset(ctx, asset)
+	trk.AddCoins(ctx, cu.GetAddress(), sdk.NewCoins(sdk.NewCoin(sdk.NativeToken, sdk.NewInt(20000000000))))
+	//cu.SetCoins(sdk.NewCoins(sdk.NewCoin(sdk.NativeToken, sdk.NewInt(20000000000))))
 	ck.SetCU(ctx, cu)
 
 	cuAddr, _ = sdk.CUAddressFromBase58("HBCPoshPen4yTWCwCvCVuwbfSmrb3EzNbXTo")
 	cu = ck.NewOpCUWithAddress(ctx, "btc", cuAddr)
-	cu.SetCoins(sdk.NewCoins(sdk.NewCoin(sdk.NativeToken, sdk.NewInt(80000000000))))
+	asset = ik.GetOrNewCUIBCAsset(ctx, cu.GetCUType(), cu.GetAddress())
+	ik.SetCUIBCAsset(ctx, asset)
+	trk.AddCoins(ctx, cu.GetAddress(), sdk.NewCoins(sdk.NewCoin(sdk.NativeToken, sdk.NewInt(80000000000))))
+	//cu.SetCoins(sdk.NewCoins(sdk.NewCoin(sdk.NativeToken, sdk.NewInt(80000000000))))
 	ck.SetCU(ctx, cu)
 
 	cuAddr, _ = sdk.CUAddressFromBase58("HBCLXBebMwEWaEZYsqJij7xcpBayzJqdrKJP")
 	cu = ck.NewOpCUWithAddress(ctx, "eth", cuAddr)
-	cu.SetCoins(sdk.NewCoins(sdk.NewCoin(sdk.NativeToken, sdk.NewInt(80000000000))))
+	//cu.SetCoins(sdk.NewCoins(sdk.NewCoin(sdk.NativeToken, sdk.NewInt(80000000000))))
+	trk.AddCoins(ctx, cu.GetAddress(), sdk.NewCoins(sdk.NewCoin(sdk.NativeToken, sdk.NewInt(80000000000))))
 	ck.SetCU(ctx, cu)
 	return cu
 }
@@ -342,4 +519,10 @@ func testAddr(addr string, bech string) sdk.CUAddress {
 	}
 
 	return res
+}
+
+func testSetCUCoins(ctx sdk.Context, trk transfer.Keeper, cu sdk.CUAddress, coins sdk.Coins) {
+	curCoins := trk.GetAllBalance(ctx, cu)
+	trk.SubCoins(ctx, cu, curCoins)
+	trk.AddCoins(ctx, cu, coins)
 }

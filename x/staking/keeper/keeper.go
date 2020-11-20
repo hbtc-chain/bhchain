@@ -26,6 +26,7 @@ type Keeper struct {
 	storeTKey          sdk.StoreKey
 	cdc                *codec.Codec
 	supplyKeeper       types.SupplyKeeper
+	transferKeeper     types.TransferKeeper
 	hooks              types.StakingHooks
 	paramstore         params.Subspace
 	validatorCache     map[string]cachedValidator
@@ -64,6 +65,14 @@ func NewKeeper(cdc *codec.Codec, key, tkey sdk.StoreKey, supplyKeeper types.Supp
 // Logger returns a module-specific logger.
 func (k Keeper) Logger(ctx sdk.Context) log.Logger {
 	return ctx.Logger().With("module", fmt.Sprintf("x/%s", types.ModuleName))
+}
+
+func (k Keeper) GetTransferKeeper() types.TransferKeeper {
+	return k.transferKeeper
+}
+
+func (k *Keeper) SetTransferKeeper(tk types.TransferKeeper) {
+	k.transferKeeper = tk
 }
 
 // Set the validator hooks

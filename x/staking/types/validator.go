@@ -40,7 +40,6 @@ type Validator struct {
 	OperatorAddress            sdk.ValAddress `json:"operator_address" yaml:"operator_address"`       // address of the validator's operator; bech encoded in JSON
 	ConsPubKey                 crypto.PubKey  `json:"consensus_pubkey" yaml:"consensus_pubkey"`       // the consensus public key of the validator; bech encoded in JSON
 	Jailed                     bool           `json:"jailed" yaml:"jailed"`                           // has the validator been jailed from bonded status?
-	JailedIndex                uint64         `json:"jailed_index" yaml:"jailed_index"`               // jailedIndex in the queue.  > 0 means the jail operation is pending
 	Status                     sdk.BondStatus `json:"status" yaml:"status"`                           // validator status (bonded/unbonding/unbonded)
 	Tokens                     sdk.Int        `json:"tokens" yaml:"tokens"`                           // delegated tokens (incl. self-delegation)
 	DelegatorShares            sdk.Dec        `json:"delegator_shares" yaml:"delegator_shares"`       // total shares issued to a validator's delegators
@@ -49,7 +48,6 @@ type Validator struct {
 	UnbondingCompletionTime    time.Time      `json:"unbonding_time" yaml:"unbonding_time"`           // if unbonding, min time for the validator to complete unbonding
 	Commission                 Commission     `json:"commission" yaml:"commission"`                   // commission parameters
 	MinSelfDelegation          sdk.Int        `json:"min_self_delegation" yaml:"min_self_delegation"` // validator's self declared minimum self delegation
-	IsKeyNode                  bool           `json:"is_key_node" yaml:"is_key_node"`
 	LastKeyNodeHeartbeatHeight uint64         `json:"last_key_node_heartbeat_height" yaml:"last_key_node_heartbeat_height"`
 }
 
@@ -67,7 +65,6 @@ func (v Validator) MarshalYAML() (interface{}, error) {
 		UnbondingCompletionTime    time.Time
 		Commission                 Commission
 		MinSelfDelegation          sdk.Int
-		IsKeyNode                  bool
 		LastKeyNodeHeartbeatHeight uint64
 	}{
 		OperatorAddress:            v.OperatorAddress,
@@ -81,7 +78,6 @@ func (v Validator) MarshalYAML() (interface{}, error) {
 		UnbondingCompletionTime:    v.UnbondingCompletionTime,
 		Commission:                 v.Commission,
 		MinSelfDelegation:          v.MinSelfDelegation,
-		IsKeyNode:                  v.IsKeyNode,
 		LastKeyNodeHeartbeatHeight: v.LastKeyNodeHeartbeatHeight,
 	})
 	if err != nil {
@@ -132,7 +128,7 @@ func (v Validators) Swap(i, j int) {
 }
 
 // NewValidator - initialize a new validator
-func NewValidator(operator sdk.ValAddress, pubKey crypto.PubKey, description Description, isKeyNode bool) Validator {
+func NewValidator(operator sdk.ValAddress, pubKey crypto.PubKey, description Description) Validator {
 	return Validator{
 		OperatorAddress:         operator,
 		ConsPubKey:              pubKey,
@@ -145,7 +141,6 @@ func NewValidator(operator sdk.ValAddress, pubKey crypto.PubKey, description Des
 		UnbondingCompletionTime: time.Unix(0, 0).UTC(),
 		Commission:              NewCommission(sdk.ZeroDec(), sdk.ZeroDec(), sdk.ZeroDec()),
 		MinSelfDelegation:       sdk.OneInt(),
-		IsKeyNode:               isKeyNode,
 	}
 }
 
@@ -179,8 +174,6 @@ func (v Validator) String() string {
   Operator Address:           %s
   Validator Consensus Pubkey: %s
   Jailed:                     %v
-  JailedIndex:                %v
-  IsKeyNode:                  %v
   LastKeyNodeHeartbeatHeight: %d
   Status:                     %s
   Tokens:                     %s
@@ -190,7 +183,7 @@ func (v Validator) String() string {
   Unbonding Completion Time:  %v
   Minimum Self Delegation:    %v
   Commission:                 %s`, v.OperatorAddress, bechConsPubKey,
-		v.Jailed, v.JailedIndex, v.IsKeyNode, v.LastKeyNodeHeartbeatHeight, v.Status, v.Tokens,
+		v.Jailed, v.LastKeyNodeHeartbeatHeight, v.Status, v.Tokens,
 		v.DelegatorShares, v.Description,
 		v.UnbondingHeight, v.UnbondingCompletionTime, v.MinSelfDelegation, v.Commission)
 }
@@ -200,7 +193,6 @@ type bechValidator struct {
 	OperatorAddress            sdk.ValAddress `json:"operator_address" yaml:"operator_address"`       // the bech32 address of the validator's operator
 	ConsPubKey                 string         `json:"consensus_pubkey" yaml:"consensus_pubkey"`       // the bech32 consensus public key of the validator
 	Jailed                     bool           `json:"jailed" yaml:"jailed"`                           // has the validator been jailed from bonded status?
-	JailedIndex                uint64         `json:"jailed_index" yaml:"jailed_index"`               // has the validator been jailed from bonded status?
 	Status                     sdk.BondStatus `json:"status" yaml:"status"`                           // validator status (bonded/unbonding/unbonded)
 	Tokens                     sdk.Int        `json:"tokens" yaml:"tokens"`                           // delegated tokens (incl. self-delegation)
 	DelegatorShares            sdk.Dec        `json:"delegator_shares" yaml:"delegator_shares"`       // total shares issued to a validator's delegators
@@ -209,7 +201,6 @@ type bechValidator struct {
 	UnbondingCompletionTime    time.Time      `json:"unbonding_time" yaml:"unbonding_time"`           // if unbonding, min time for the validator to complete unbonding
 	Commission                 Commission     `json:"commission" yaml:"commission"`                   // commission parameters
 	MinSelfDelegation          sdk.Int        `json:"min_self_delegation" yaml:"min_self_delegation"` // minimum self delegation
-	IsKeyNode                  bool           `json:"is_key_node" yaml:"is_key_node"`
 	LastKeyNodeHeartbeatHeight uint64         `json:"last_key_node_heartbeat_height" yaml:"last_key_node_heartbeat_height"`
 }
 
@@ -224,7 +215,6 @@ func (v Validator) MarshalJSON() ([]byte, error) {
 		OperatorAddress:            v.OperatorAddress,
 		ConsPubKey:                 bechConsPubKey,
 		Jailed:                     v.Jailed,
-		JailedIndex:                v.JailedIndex,
 		Status:                     v.Status,
 		Tokens:                     v.Tokens,
 		DelegatorShares:            v.DelegatorShares,
@@ -233,7 +223,6 @@ func (v Validator) MarshalJSON() ([]byte, error) {
 		UnbondingCompletionTime:    v.UnbondingCompletionTime,
 		MinSelfDelegation:          v.MinSelfDelegation,
 		Commission:                 v.Commission,
-		IsKeyNode:                  v.IsKeyNode,
 		LastKeyNodeHeartbeatHeight: v.LastKeyNodeHeartbeatHeight,
 	})
 }
@@ -252,7 +241,6 @@ func (v *Validator) UnmarshalJSON(data []byte) error {
 		OperatorAddress:            bv.OperatorAddress,
 		ConsPubKey:                 consPubKey,
 		Jailed:                     bv.Jailed,
-		JailedIndex:                bv.JailedIndex,
 		Tokens:                     bv.Tokens,
 		Status:                     bv.Status,
 		DelegatorShares:            bv.DelegatorShares,
@@ -261,7 +249,6 @@ func (v *Validator) UnmarshalJSON(data []byte) error {
 		UnbondingCompletionTime:    bv.UnbondingCompletionTime,
 		Commission:                 bv.Commission,
 		MinSelfDelegation:          bv.MinSelfDelegation,
-		IsKeyNode:                  bv.IsKeyNode,
 		LastKeyNodeHeartbeatHeight: bv.LastKeyNodeHeartbeatHeight,
 	}
 	return nil
@@ -276,7 +263,6 @@ func (v Validator) TestEquivalent(v2 Validator) bool {
 		v.DelegatorShares.Equal(v2.DelegatorShares) &&
 		v.Description == v2.Description &&
 		v.Commission.Equal(v2.Commission) &&
-		v.IsKeyNode == v2.IsKeyNode &&
 		v.LastKeyNodeHeartbeatHeight == v2.LastKeyNodeHeartbeatHeight
 }
 
@@ -301,7 +287,7 @@ func (v Validator) IsUnbonding() bool {
 }
 
 func (v Validator) CanBeKeyNode(minDelegation sdk.Int) bool {
-	return v.IsKeyNode && v.Tokens.GTE(minDelegation)
+	return !v.Jailed && v.Tokens.GTE(minDelegation)
 }
 
 // constant used in flags to indicate that description field should not be updated

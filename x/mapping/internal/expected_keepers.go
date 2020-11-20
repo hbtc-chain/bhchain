@@ -8,23 +8,7 @@ import (
 // AccountKeeper defines the account contract that must be fulfilled when
 // creating a x/bank keeper.
 type TokenKeeper interface {
-	IsUtxoBased(ctx sdk.Context, symbol sdk.Symbol) bool
-
-	IsSubToken(ctx sdk.Context, symbol sdk.Symbol) bool
-
-	GetOpenFee(ctx sdk.Context, symbol sdk.Symbol) sdk.Int
-
-	GetSysOpenFee(ctx sdk.Context, symbol sdk.Symbol) sdk.Int
-
-	IsTokenSupported(ctx sdk.Context, symbol sdk.Symbol) bool
-
-	GetMaxOpCUNumber(ctx sdk.Context, symbol sdk.Symbol) uint64
-
-	GetChain(ctx sdk.Context, symbol sdk.Symbol) sdk.Symbol
-
-	GetTokenInfo(ctx sdk.Context, symbol sdk.Symbol) *sdk.TokenInfo
-
-	GetAllTokenInfo(ctx sdk.Context) []sdk.TokenInfo
+	GetToken(ctx sdk.Context, symbol sdk.Symbol) sdk.Token
 }
 
 type CUKeeper interface {
@@ -38,10 +22,11 @@ type CUKeeper interface {
 
 	GetOpCUs(ctx sdk.Context, symbol string) []exported.CustodianUnit
 
-	SetExtAddresseWithCU(ctx sdk.Context, symbol, extAddress string, cuAddress sdk.CUAddress)
+	SetExtAddressWithCU(ctx sdk.Context, symbol, extAddress string, cuAddress sdk.CUAddress)
 
 	GetCUFromExtAddress(ctx sdk.Context, symbol, extAddress string) (sdk.CUAddress, error)
 }
+
 type ReceiptKeeper interface {
 	// NewReceipt creates a new receipt with a list of flows
 	NewReceipt(category sdk.CategoryType, flows []sdk.Flow) *sdk.Receipt
@@ -57,4 +42,16 @@ type ReceiptKeeper interface {
 	SaveReceiptToResult(receipt *sdk.Receipt, result *sdk.Result) *sdk.Result
 
 	GetReceiptFromResult(result *sdk.Result) (*sdk.Receipt, error)
+}
+
+type TransferKeeper interface {
+	GetBalance(ctx sdk.Context, addr sdk.CUAddress, symbol string) sdk.Int
+	SendCoin(ctx sdk.Context, from, to sdk.CUAddress, amt sdk.Coin) (sdk.Result, []sdk.Flow, sdk.Error)
+	AddCoins(ctx sdk.Context, addr sdk.CUAddress, amt sdk.Coins) (sdk.Coins, []sdk.Flow, sdk.Error)
+	AddCoin(ctx sdk.Context, addr sdk.CUAddress, amt sdk.Coin) (sdk.Coin, sdk.Flow, sdk.Error)
+	SubCoins(ctx sdk.Context, addr sdk.CUAddress, amt sdk.Coins) (sdk.Coins, []sdk.Flow, sdk.Error)
+	SubCoin(ctx sdk.Context, addr sdk.CUAddress, amt sdk.Coin) (sdk.Coin, sdk.Flow, sdk.Error)
+	SubCoinHold(ctx sdk.Context, addr sdk.CUAddress, amt sdk.Coin) (sdk.Coin, sdk.Flow, sdk.Error)
+	LockCoin(ctx sdk.Context, addr sdk.CUAddress, amt sdk.Coin) ([]sdk.Flow, sdk.Error)
+	UnlockCoin(ctx sdk.Context, addr sdk.CUAddress, amt sdk.Coin) ([]sdk.Flow, sdk.Error)
 }

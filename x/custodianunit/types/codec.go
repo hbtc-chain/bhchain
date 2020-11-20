@@ -12,7 +12,6 @@ func RegisterCodec(cdc *codec.Codec) {
 	cdc.RegisterConcrete(&BaseCUs{}, "hbtcchain/CustodianUnits", nil)
 	cdc.RegisterInterface((*exported.VestingCU)(nil), nil)
 	cdc.RegisterConcrete(StdTx{}, "hbtcchain/StdTx", nil)
-	cdc.RegisterConcrete(CUCoin{}, "hbtcchain/CUCoin", nil)
 }
 
 // module wide codec

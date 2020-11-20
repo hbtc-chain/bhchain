@@ -23,7 +23,7 @@ func TestKeeper_NewOrders(t *testing.T) {
 
 	// NewOrderKeyGen
 	orderID := uuid.NewV4().String()
-	order := ok.NewOrderKeyGen(input.ctx, fromAddr, orderID, "eth", keynodes, 3, toAddr, sdk.NewCoins(sdk.Coin{sdk.NativeToken, sdk.NewInt(10000)}))
+	order := ok.NewOrderKeyGen(input.ctx, fromAddr, orderID, "eth", keynodes, 3, toAddr,sdk.Coin{sdk.NativeToken, sdk.NewInt(10000)})
 	ok.SetOrder(input.ctx, order)
 	orderGot := ok.GetOrder(ctx, orderID)
 	assert.NotNil(t, order)

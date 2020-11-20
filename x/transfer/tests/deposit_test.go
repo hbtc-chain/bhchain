@@ -4,12 +4,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hbtc-chain/bhchain/chainnode"
-	sdk "github.com/hbtc-chain/bhchain/types"
-	"github.com/hbtc-chain/bhchain/x/token"
 	uuid "github.com/satori/go.uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/tendermint/tendermint/crypto/ed25519"
+
+	"github.com/hbtc-chain/bhchain/chainnode"
+	sdk "github.com/hbtc-chain/bhchain/types"
+	"github.com/hbtc-chain/bhchain/x/custodianunit"
 )
 
 func TestDespoistEthToUserCUSuccessWithStandardAddress(t *testing.T) {
@@ -20,20 +21,24 @@ func TestDespoistEthToUserCUSuccessWithStandardAddress(t *testing.T) {
 	tk := input.tk
 	ok := input.ok
 	rk := input.rk
+	ik := input.ik
+	newTestCU := func(cu custodianunit.CU) *testCU {
+		return newTestCU(ctx, input.trk, input.ik, cu)
+	}
 	validators := input.validators
 	mockCN = chainnode.MockChainnode{}
-	symbol := token.EthToken
+	symbol := "eth"
 	chain := symbol
 
 	pubkey := ed25519.GenPrivKey().PubKey()
 
 	require.Equal(t, 1, len(ck.GetOpCUs(ctx, symbol)))
 
-	tokenInfo := tk.GetTokenInfo(ctx, sdk.Symbol(symbol))
-	require.Equal(t, true, tokenInfo.IsDepositEnabled)
-	require.Equal(t, true, tokenInfo.IsSendEnabled)
-	require.Equal(t, true, tokenInfo.IsWithdrawalEnabled)
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tokenInfo := tk.GetIBCToken(ctx, sdk.Symbol(symbol))
+	require.Equal(t, true, tokenInfo.DepositEnabled)
+	require.Equal(t, true, tokenInfo.SendEnabled)
+	require.Equal(t, true, tokenInfo.WithdrawalEnabled)
+	tk.SetToken(ctx, tokenInfo)
 
 	toCUAddr, err := sdk.CUAddressFromBase58("HBCLmQcskpdQivEkRrh1gNPm7c9aVB8hh1fy")
 	require.Nil(t, err)
@@ -47,13 +52,13 @@ func TestDespoistEthToUserCUSuccessWithStandardAddress(t *testing.T) {
 
 	mockCN.On("ValidAddress", chain, symbol, toAddr).Return(true, toAddr)
 	//mockCN.On("ValidAddress", chain, symbol, fromAddr).Return(true, true, fromAddr)
-	toCU := ck.GetCU(ctx, toCUAddr)
+	toCU := newTestCU(ck.GetCU(ctx, toCUAddr))
 	require.Equal(t, "", toCU.GetAssetAddress(symbol, 1))
 	toCU.SetAssetPubkey(pubkey.Bytes(), 1)
 	err = toCU.AddAsset(symbol, toAddr, 1)
 	require.Nil(t, err)
 	ck.SetCU(ctx, toCU)
-	require.Equal(t, toAddr, ck.GetCU(ctx, toCUAddr).GetAssetAddress(symbol, 1))
+	require.Equal(t, toAddr, newTestCU(ck.GetCU(ctx, toCUAddr)).GetAssetAddress(symbol, 1))
 
 	result := keeper.Deposit(ctx, fromCUAddr, toCUAddr, sdk.Symbol(symbol), toAddr, hash, 0, amt, orderID, memo)
 	require.Equal(t, sdk.CodeOK, result.Code)
@@ -69,7 +74,7 @@ func TestDespoistEthToUserCUSuccessWithStandardAddress(t *testing.T) {
 	require.Equal(t, sdk.DepositUnconfirm, int(order.(*sdk.OrderCollect).DepositStatus))
 
 	//no deposit item now
-	dls1 := ck.GetDepositList(ctx, symbol, toCUAddr)
+	dls1 := ik.GetDepositList(ctx, symbol, toCUAddr)
 	require.Equal(t, 0, len(dls1))
 
 	//check receipt
@@ -99,7 +104,7 @@ func TestDespoistEthToUserCUSuccessWithStandardAddress(t *testing.T) {
 	require.Equal(t, sdk.DepositTypeCU, df.DepositType)
 
 	//check CU's coins and assetcoins
-	toCU = ck.GetCU(ctx, toCUAddr)
+	toCU = newTestCU(ck.GetCU(ctx, toCUAddr))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetAssetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetAssetCoinsHold().AmountOf(symbol))
@@ -165,7 +170,7 @@ func TestDespoistEthToUserCUSuccessWithStandardAddress(t *testing.T) {
 	_, err = rk.GetReceiptFromResult(&result)
 	require.NotNil(t, err)
 
-	dls1 = ck.GetDepositList(ctx, symbol, toCUAddr)
+	dls1 = ik.GetDepositList(ctx, symbol, toCUAddr)
 	require.Equal(t, 1, len(dls1))
 	require.Equal(t, hash, dls1[0].Hash)
 	require.Equal(t, amt, dls1[0].Amount)
@@ -174,16 +179,16 @@ func TestDespoistEthToUserCUSuccessWithStandardAddress(t *testing.T) {
 	require.Equal(t, uint64(0), dls1[0].Index)
 
 	require.NotPanics(t, func() {
-		depositItem := ck.GetDeposit(ctx, symbol, toCUAddr, hash, 0)
+		depositItem := ik.GetDeposit(ctx, symbol, toCUAddr, hash, 0)
 		require.Equal(t, dls1[0], depositItem)
 
 	})
 
-	dls2 := ck.GetDepositListByHash(ctx, symbol, toCUAddr, hash)
+	dls2 := ik.GetDepositListByHash(ctx, symbol, toCUAddr, hash)
 	require.Equal(t, dls1, dls2)
 
 	//check userCU's coin
-	toCU = ck.GetCU(ctx, toCUAddr)
+	toCU = newTestCU(ck.GetCU(ctx, toCUAddr))
 	//require.Equal(t, amt, toCU.GetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetCoinsHold().AmountOf(symbol))
 	require.Equal(t, amt, toCU.GetAssetCoins().AmountOf(symbol))
@@ -198,20 +203,25 @@ func TestDespoistEthToUserCUSuccessWithLowerToAddress(t *testing.T) {
 	tk := input.tk
 	ok := input.ok
 	rk := input.rk
+	ik := input.ik
+	newTestCU := func(cu custodianunit.CU) *testCU {
+		return newTestCU(ctx, input.trk, input.ik, cu)
+	}
+
 	validators := input.validators
 	mockCN = chainnode.MockChainnode{}
-	symbol := token.EthToken
+	symbol := "eth"
 	chain := symbol
 
 	pubkey := ed25519.GenPrivKey().PubKey()
 
 	require.Equal(t, 1, len(ck.GetOpCUs(ctx, symbol)))
 
-	tokenInfo := tk.GetTokenInfo(ctx, sdk.Symbol(symbol))
-	require.Equal(t, true, tokenInfo.IsDepositEnabled)
-	require.Equal(t, true, tokenInfo.IsSendEnabled)
-	require.Equal(t, true, tokenInfo.IsWithdrawalEnabled)
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tokenInfo := tk.GetIBCToken(ctx, sdk.Symbol(symbol))
+	require.Equal(t, true, tokenInfo.DepositEnabled)
+	require.Equal(t, true, tokenInfo.SendEnabled)
+	require.Equal(t, true, tokenInfo.WithdrawalEnabled)
+	tk.SetToken(ctx, tokenInfo)
 
 	toCUAddr, err := sdk.CUAddressFromBase58("HBCLmQcskpdQivEkRrh1gNPm7c9aVB8hh1fy")
 	require.Nil(t, err)
@@ -225,13 +235,13 @@ func TestDespoistEthToUserCUSuccessWithLowerToAddress(t *testing.T) {
 
 	mockCN.On("ValidAddress", chain, symbol, strings.ToLower(toAddr)).Return(true, toAddr) //to address is lower
 	//mockCN.On("ValidAddress", chain, symbol, fromAddr).Return(true, true, fromAddr)
-	toCU := ck.GetCU(ctx, toCUAddr)
+	toCU := newTestCU(ck.GetCU(ctx, toCUAddr))
 	require.Equal(t, "", toCU.GetAssetAddress(symbol, 1))
 	toCU.SetAssetPubkey(pubkey.Bytes(), 1)
 	err = toCU.AddAsset(symbol, toAddr, 1)
 	require.Nil(t, err)
 	ck.SetCU(ctx, toCU)
-	require.Equal(t, toAddr, ck.GetCU(ctx, toCUAddr).GetAssetAddress(symbol, 1))
+	require.Equal(t, toAddr, newTestCU(ck.GetCU(ctx, toCUAddr)).GetAssetAddress(symbol, 1))
 
 	result := keeper.Deposit(ctx, fromCUAddr, toCUAddr, sdk.Symbol(symbol), strings.ToLower(toAddr), hash, 0, amt, orderID, memo)
 	require.Equal(t, sdk.CodeOK, result.Code)
@@ -247,7 +257,7 @@ func TestDespoistEthToUserCUSuccessWithLowerToAddress(t *testing.T) {
 	require.Equal(t, sdk.DepositUnconfirm, int(order.(*sdk.OrderCollect).DepositStatus))
 
 	//no deposit item now
-	dls1 := ck.GetDepositList(ctx, symbol, toCUAddr)
+	dls1 := ik.GetDepositList(ctx, symbol, toCUAddr)
 	require.Equal(t, 0, len(dls1))
 
 	//check receipt
@@ -277,7 +287,7 @@ func TestDespoistEthToUserCUSuccessWithLowerToAddress(t *testing.T) {
 	require.Equal(t, sdk.DepositTypeCU, df.DepositType)
 
 	//check CU's coins and assetcoins
-	toCU = ck.GetCU(ctx, toCUAddr)
+	toCU = newTestCU(ck.GetCU(ctx, toCUAddr))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetAssetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetAssetCoinsHold().AmountOf(symbol))
@@ -345,7 +355,7 @@ func TestDespoistEthToUserCUSuccessWithLowerToAddress(t *testing.T) {
 	receipt, err = rk.GetReceiptFromResult(&result)
 	require.NotNil(t, err)
 
-	dls1 = ck.GetDepositList(ctx, symbol, toCUAddr)
+	dls1 = ik.GetDepositList(ctx, symbol, toCUAddr)
 	require.Equal(t, 1, len(dls1))
 	require.Equal(t, hash, dls1[0].Hash)
 	require.Equal(t, amt, dls1[0].Amount)
@@ -354,15 +364,15 @@ func TestDespoistEthToUserCUSuccessWithLowerToAddress(t *testing.T) {
 	require.Equal(t, uint64(0), dls1[0].Index)
 
 	require.NotPanics(t, func() {
-		depositItem := ck.GetDeposit(ctx, symbol, toCUAddr, hash, 0)
+		depositItem := ik.GetDeposit(ctx, symbol, toCUAddr, hash, 0)
 		require.Equal(t, dls1[0], depositItem)
 	})
 
-	dls2 := ck.GetDepositListByHash(ctx, symbol, toCUAddr, hash)
+	dls2 := ik.GetDepositListByHash(ctx, symbol, toCUAddr, hash)
 	require.Equal(t, dls1, dls2)
 
 	//check userCU's coin
-	toCU = ck.GetCU(ctx, toCUAddr)
+	toCU = newTestCU(ck.GetCU(ctx, toCUAddr))
 	//	require.Equal(t, amt, toCU.GetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetCoinsHold().AmountOf(symbol))
 	require.Equal(t, amt, toCU.GetAssetCoins().AmountOf(symbol))
@@ -377,19 +387,24 @@ func TestDespoistEthToUserCUSuccessWithUpperToAddress(t *testing.T) {
 	tk := input.tk
 	ok := input.ok
 	rk := input.rk
+	ik := input.ik
+	newTestCU := func(cu custodianunit.CU) *testCU {
+		return newTestCU(ctx, input.trk, input.ik, cu)
+	}
+
 	validators := input.validators
 	mockCN = chainnode.MockChainnode{}
-	symbol := token.EthToken
+	symbol := "eth"
 	chain := symbol
 	pubkey := ed25519.GenPrivKey().PubKey()
 
 	require.Equal(t, 1, len(ck.GetOpCUs(ctx, symbol)))
 
-	tokenInfo := tk.GetTokenInfo(ctx, sdk.Symbol(symbol))
-	require.Equal(t, true, tokenInfo.IsDepositEnabled)
-	require.Equal(t, true, tokenInfo.IsSendEnabled)
-	require.Equal(t, true, tokenInfo.IsWithdrawalEnabled)
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tokenInfo := tk.GetIBCToken(ctx, sdk.Symbol(symbol))
+	require.Equal(t, true, tokenInfo.DepositEnabled)
+	require.Equal(t, true, tokenInfo.SendEnabled)
+	require.Equal(t, true, tokenInfo.WithdrawalEnabled)
+	tk.SetToken(ctx, tokenInfo)
 
 	toCUAddr, err := sdk.CUAddressFromBase58("HBCLmQcskpdQivEkRrh1gNPm7c9aVB8hh1fy")
 	require.Nil(t, err)
@@ -403,13 +418,13 @@ func TestDespoistEthToUserCUSuccessWithUpperToAddress(t *testing.T) {
 
 	mockCN.On("ValidAddress", chain, symbol, strings.ToUpper(toAddr)).Return(true, toAddr) //to address is lower
 	//mockCN.On("ValidAddress", chain, symbol, fromAddr).Return(true, true, fromAddr)
-	toCU := ck.GetCU(ctx, toCUAddr)
+	toCU := newTestCU(ck.GetCU(ctx, toCUAddr))
 	require.Equal(t, "", toCU.GetAssetAddress(symbol, 1))
 	toCU.SetAssetPubkey(pubkey.Bytes(), 1)
 	err = toCU.AddAsset(symbol, toAddr, 1)
 	require.Nil(t, err)
 	ck.SetCU(ctx, toCU)
-	require.Equal(t, toAddr, ck.GetCU(ctx, toCUAddr).GetAssetAddress(symbol, 1))
+	require.Equal(t, toAddr, newTestCU(ck.GetCU(ctx, toCUAddr)).GetAssetAddress(symbol, 1))
 
 	result := keeper.Deposit(ctx, fromCUAddr, toCUAddr, sdk.Symbol(symbol), strings.ToUpper(toAddr), hash, 0, amt, orderID, memo)
 	require.Equal(t, sdk.CodeOK, result.Code)
@@ -425,7 +440,7 @@ func TestDespoistEthToUserCUSuccessWithUpperToAddress(t *testing.T) {
 	require.Equal(t, sdk.DepositUnconfirm, int(order.(*sdk.OrderCollect).DepositStatus))
 
 	//no deposit item now
-	dls1 := ck.GetDepositList(ctx, symbol, toCUAddr)
+	dls1 := ik.GetDepositList(ctx, symbol, toCUAddr)
 	require.Equal(t, 0, len(dls1))
 
 	//check receipt
@@ -455,7 +470,7 @@ func TestDespoistEthToUserCUSuccessWithUpperToAddress(t *testing.T) {
 	require.Equal(t, sdk.DepositTypeCU, df.DepositType)
 
 	//check CU's coins and assetcoins
-	toCU = ck.GetCU(ctx, toCUAddr)
+	toCU = newTestCU(ck.GetCU(ctx, toCUAddr))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetAssetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetAssetCoinsHold().AmountOf(symbol))
@@ -523,7 +538,7 @@ func TestDespoistEthToUserCUSuccessWithUpperToAddress(t *testing.T) {
 	receipt, err = rk.GetReceiptFromResult(&result)
 	require.NotNil(t, err)
 
-	dls1 = ck.GetDepositList(ctx, symbol, toCUAddr)
+	dls1 = ik.GetDepositList(ctx, symbol, toCUAddr)
 	require.Equal(t, 1, len(dls1))
 	require.Equal(t, hash, dls1[0].Hash)
 	require.Equal(t, amt, dls1[0].Amount)
@@ -532,15 +547,15 @@ func TestDespoistEthToUserCUSuccessWithUpperToAddress(t *testing.T) {
 	require.Equal(t, uint64(0), dls1[0].Index)
 
 	require.NotPanics(t, func() {
-		depositItem := ck.GetDeposit(ctx, symbol, toCUAddr, hash, 0)
+		depositItem := ik.GetDeposit(ctx, symbol, toCUAddr, hash, 0)
 		require.Equal(t, dls1[0], depositItem)
 	})
 
-	dls2 := ck.GetDepositListByHash(ctx, symbol, toCUAddr, hash)
+	dls2 := ik.GetDepositListByHash(ctx, symbol, toCUAddr, hash)
 	require.Equal(t, dls1, dls2)
 
 	//check userCU's coin
-	toCU = ck.GetCU(ctx, toCUAddr)
+	toCU = newTestCU(ck.GetCU(ctx, toCUAddr))
 	//	require.Equal(t, amt, toCU.GetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetCoinsHold().AmountOf(symbol))
 	require.Equal(t, amt, toCU.GetAssetCoins().AmountOf(symbol))
@@ -555,18 +570,23 @@ func TestDespoistEthToOPCUSuccess(t *testing.T) {
 	tk := input.tk
 	ok := input.ok
 	rk := input.rk
+	ik := input.ik
+	newTestCU := func(cu custodianunit.CU) *testCU {
+		return newTestCU(ctx, input.trk, input.ik, cu)
+	}
+
 	validators := input.validators
 	mockCN = chainnode.MockChainnode{}
-	symbol := token.EthToken
+	symbol := "eth"
 	chain := symbol
 	pubkey := ed25519.GenPrivKey().PubKey()
 
 	require.Equal(t, 1, len(ck.GetOpCUs(ctx, symbol)))
-	tokenInfo := tk.GetTokenInfo(ctx, sdk.Symbol(symbol))
-	require.Equal(t, true, tokenInfo.IsDepositEnabled)
-	require.Equal(t, true, tokenInfo.IsSendEnabled)
-	require.Equal(t, true, tokenInfo.IsWithdrawalEnabled)
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tokenInfo := tk.GetIBCToken(ctx, sdk.Symbol(symbol))
+	require.Equal(t, true, tokenInfo.DepositEnabled)
+	require.Equal(t, true, tokenInfo.SendEnabled)
+	require.Equal(t, true, tokenInfo.WithdrawalEnabled)
+	tk.SetToken(ctx, tokenInfo)
 
 	//
 	toCUAddr, err := sdk.CUAddressFromBase58("HBCLXBebMwEWaEZYsqJij7xcpBayzJqdrKJP")
@@ -583,13 +603,14 @@ func TestDespoistEthToOPCUSuccess(t *testing.T) {
 	orderID := uuid.NewV1().String()
 	mockCN.On("ValidAddress", chain, symbol, toAddr).Return(true, toAddr)
 	//mockCN.On("ValidAddress", chain, symbol, fromAddr).Return(true, true, fromAddr)
-	toCU := ck.NewCUWithAddress(ctx, sdk.CUTypeOp, toCUAddr)
+	toCU := newTestCU(ck.NewCUWithAddress(ctx, sdk.CUTypeOp, toCUAddr))
 	require.Equal(t, "", toCU.GetAssetAddress(symbol, 1))
 	toCU.SetAssetPubkey(pubkey.Bytes(), 1)
+	toCU.SetSymbol("eth")
 	err = toCU.SetAssetAddress(symbol, toAddr, 1)
 	require.Nil(t, err)
 	ck.SetCU(ctx, toCU)
-	require.Equal(t, toAddr, ck.GetCU(ctx, toCUAddr).GetAssetAddress(symbol, 1))
+	require.Equal(t, toAddr, newTestCU(ck.GetCU(ctx, toCUAddr)).GetAssetAddress(symbol, 1))
 
 	result := keeper.Deposit(ctx, fromCUAddr, toCUAddr, sdk.Symbol(symbol), toAddr, hash, 0, amt, orderID, memo)
 	require.Equal(t, sdk.CodeOK, result.Code)
@@ -605,7 +626,7 @@ func TestDespoistEthToOPCUSuccess(t *testing.T) {
 	require.Equal(t, sdk.DepositUnconfirm, int(order.(*sdk.OrderCollect).DepositStatus))
 
 	//no deposit item now
-	dls1 := ck.GetDepositList(ctx, symbol, toCUAddr)
+	dls1 := ik.GetDepositList(ctx, symbol, toCUAddr)
 	require.Equal(t, 0, len(dls1))
 
 	//check receipt
@@ -635,7 +656,7 @@ func TestDespoistEthToOPCUSuccess(t *testing.T) {
 	require.Equal(t, sdk.DepositTypeOPCU, df.DepositType)
 
 	//check CU's coins and assetcoins
-	toCU = ck.GetCU(ctx, toCUAddr)
+	toCU = newTestCU(ck.GetCU(ctx, toCUAddr))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetAssetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetAssetCoinsHold().AmountOf(symbol))
@@ -695,7 +716,7 @@ func TestDespoistEthToOPCUSuccess(t *testing.T) {
 	require.NotNil(t, err)
 
 	//check userCU's coin
-	toCU = ck.GetCU(ctx, toCUAddr)
+	toCU = newTestCU(ck.GetCU(ctx, toCUAddr))
 	//	require.Equal(t, amt, toCU.GetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetCoinsHold().AmountOf(symbol))
 	require.Equal(t, amt, toCU.GetAssetCoins().AmountOf(symbol))
@@ -711,19 +732,24 @@ func TestDespoistBtcToUserCUSuccess(t *testing.T) {
 	tk := input.tk
 	ok := input.ok
 	rk := input.rk
+	ik := input.ik
+	newTestCU := func(cu custodianunit.CU) *testCU {
+		return newTestCU(ctx, input.trk, input.ik, cu)
+	}
+
 	validators := input.validators
 	mockCN = chainnode.MockChainnode{}
-	symbol := token.BtcToken
+	symbol := "btc"
 	chain := symbol
 	pubkey := ed25519.GenPrivKey().PubKey()
 
 	require.Equal(t, 1, len(ck.GetOpCUs(ctx, symbol)))
 
-	tokenInfo := tk.GetTokenInfo(ctx, sdk.Symbol(symbol))
-	require.Equal(t, true, tokenInfo.IsDepositEnabled)
-	require.Equal(t, true, tokenInfo.IsSendEnabled)
-	require.Equal(t, true, tokenInfo.IsWithdrawalEnabled)
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tokenInfo := tk.GetIBCToken(ctx, sdk.Symbol(symbol))
+	require.Equal(t, true, tokenInfo.DepositEnabled)
+	require.Equal(t, true, tokenInfo.SendEnabled)
+	require.Equal(t, true, tokenInfo.WithdrawalEnabled)
+	tk.SetToken(ctx, tokenInfo)
 
 	toCUAddr, err := sdk.CUAddressFromBase58("HBCLmQcskpdQivEkRrh1gNPm7c9aVB8hh1fy")
 	require.Nil(t, err)
@@ -737,13 +763,13 @@ func TestDespoistBtcToUserCUSuccess(t *testing.T) {
 	orderID := uuid.NewV1().String()
 	mockCN.On("ValidAddress", chain, symbol, toAddr).Return(true, toAddr)
 
-	toCU := ck.GetCU(ctx, toCUAddr)
+	toCU := newTestCU(ck.GetCU(ctx, toCUAddr))
 	require.Equal(t, "", toCU.GetAssetAddress(symbol, 1))
 	toCU.SetAssetPubkey(pubkey.Bytes(), 1)
 	err = toCU.AddAsset(symbol, toAddr, 1)
 	require.Nil(t, err)
 	ck.SetCU(ctx, toCU)
-	require.Equal(t, toAddr, ck.GetCU(ctx, toCUAddr).GetAssetAddress(symbol, 1))
+	require.Equal(t, toAddr, newTestCU(ck.GetCU(ctx, toCUAddr)).GetAssetAddress(symbol, 1))
 
 	result := keeper.Deposit(ctx, fromCUAddr, toCUAddr, sdk.Symbol(symbol), toAddr, hash, index, amt, orderID, memo)
 	require.Equal(t, sdk.CodeOK, result.Code)
@@ -759,7 +785,7 @@ func TestDespoistBtcToUserCUSuccess(t *testing.T) {
 	require.Equal(t, sdk.DepositUnconfirm, int(order.(*sdk.OrderCollect).DepositStatus))
 
 	//no deposit item now
-	dls1 := ck.GetDepositList(ctx, symbol, toCUAddr)
+	dls1 := ik.GetDepositList(ctx, symbol, toCUAddr)
 	require.Equal(t, 0, len(dls1))
 
 	//check receipt
@@ -789,7 +815,7 @@ func TestDespoistBtcToUserCUSuccess(t *testing.T) {
 	require.Equal(t, sdk.DepositTypeCU, df.DepositType)
 
 	//check CU's coins and assetcoins
-	toCU = ck.GetCU(ctx, toCUAddr)
+	toCU = newTestCU(ck.GetCU(ctx, toCUAddr))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetAssetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetAssetCoinsHold().AmountOf(symbol))
@@ -857,7 +883,7 @@ func TestDespoistBtcToUserCUSuccess(t *testing.T) {
 	receipt, err = rk.GetReceiptFromResult(&result)
 	require.NotNil(t, err)
 
-	dls1 = ck.GetDepositList(ctx, symbol, toCUAddr)
+	dls1 = ik.GetDepositList(ctx, symbol, toCUAddr)
 	require.Equal(t, 1, len(dls1))
 	require.Equal(t, hash, dls1[0].Hash)
 	require.Equal(t, amt, dls1[0].Amount)
@@ -866,15 +892,15 @@ func TestDespoistBtcToUserCUSuccess(t *testing.T) {
 	require.Equal(t, uint64(1), dls1[0].Index)
 
 	require.NotPanics(t, func() {
-		depositItem := ck.GetDeposit(ctx, symbol, toCUAddr, hash, index)
+		depositItem := ik.GetDeposit(ctx, symbol, toCUAddr, hash, index)
 		require.Equal(t, dls1[0], depositItem)
 	})
 
-	dls2 := ck.GetDepositListByHash(ctx, symbol, toCUAddr, hash)
+	dls2 := ik.GetDepositListByHash(ctx, symbol, toCUAddr, hash)
 	require.Equal(t, dls1, dls2)
 
 	//check userCU's coin
-	toCU = ck.GetCU(ctx, toCUAddr)
+	toCU = newTestCU(ck.GetCU(ctx, toCUAddr))
 	//	require.Equal(t, amt, toCU.GetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetCoinsHold().AmountOf(symbol))
 	require.Equal(t, amt, toCU.GetAssetCoins().AmountOf(symbol))
@@ -889,17 +915,22 @@ func TestDespoistBtcToOPCUSuccess(t *testing.T) {
 	tk := input.tk
 	ok := input.ok
 	rk := input.rk
+	ik := input.ik
+	newTestCU := func(cu custodianunit.CU) *testCU {
+		return newTestCU(ctx, input.trk, input.ik, cu)
+	}
+
 	validators := input.validators
-	symbol := token.BtcToken
+	symbol := "btc"
 	chain := symbol
 	require.Equal(t, 1, len(ck.GetOpCUs(ctx, symbol)))
 	pubkey := ed25519.GenPrivKey().PubKey()
 
-	tokenInfo := tk.GetTokenInfo(ctx, sdk.Symbol(symbol))
-	require.Equal(t, true, tokenInfo.IsDepositEnabled)
-	require.Equal(t, true, tokenInfo.IsSendEnabled)
-	require.Equal(t, true, tokenInfo.IsWithdrawalEnabled)
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tokenInfo := tk.GetIBCToken(ctx, sdk.Symbol(symbol))
+	require.Equal(t, true, tokenInfo.DepositEnabled)
+	require.Equal(t, true, tokenInfo.SendEnabled)
+	require.Equal(t, true, tokenInfo.WithdrawalEnabled)
+	tk.SetToken(ctx, tokenInfo)
 
 	toCUAddr, err := sdk.CUAddressFromBase58("HBCPoshPen4yTWCwCvCVuwbfSmrb3EzNbXTo")
 	require.Nil(t, err)
@@ -918,13 +949,13 @@ func TestDespoistBtcToOPCUSuccess(t *testing.T) {
 	mockCN.On("ValidAddress", chain, symbol, toAddr).Return(true, canonicalToAddr)
 	//mockCN.On("ValidAddress", chain, symbol, fromAddr).Return(true, true, canonicalFromAddr)
 
-	toCU := ck.GetCU(ctx, toCUAddr)
+	toCU := newTestCU(ck.GetCU(ctx, toCUAddr))
 	require.Equal(t, "", toCU.GetAssetAddress(symbol, 1))
 	toCU.SetAssetPubkey(pubkey.Bytes(), 1)
 	err = toCU.SetAssetAddress(symbol, canonicalToAddr, 1)
 	require.Nil(t, err)
 	ck.SetCU(ctx, toCU)
-	require.Equal(t, canonicalToAddr, ck.GetCU(ctx, toCUAddr).GetAssetAddress(symbol, 1))
+	require.Equal(t, canonicalToAddr, newTestCU(ck.GetCU(ctx, toCUAddr)).GetAssetAddress(symbol, 1))
 
 	result := keeper.Deposit(ctx, fromCUAddr, toCUAddr, sdk.Symbol(symbol), toAddr, hash, index, amt, orderID, memo)
 	require.Equal(t, sdk.CodeOK, result.Code)
@@ -940,7 +971,7 @@ func TestDespoistBtcToOPCUSuccess(t *testing.T) {
 	require.Equal(t, sdk.DepositUnconfirm, int(order.(*sdk.OrderCollect).DepositStatus))
 
 	//no deposit item now
-	dls1 := ck.GetDepositList(ctx, symbol, toCUAddr)
+	dls1 := ik.GetDepositList(ctx, symbol, toCUAddr)
 	require.Equal(t, 0, len(dls1))
 
 	//check receipt
@@ -970,7 +1001,7 @@ func TestDespoistBtcToOPCUSuccess(t *testing.T) {
 	require.Equal(t, sdk.DepositTypeOPCU, df.DepositType)
 
 	//check CU's coins and assetcoins
-	toCU = ck.GetCU(ctx, toCUAddr)
+	toCU = newTestCU(ck.GetCU(ctx, toCUAddr))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetAssetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetAssetCoinsHold().AmountOf(symbol))
@@ -1029,7 +1060,7 @@ func TestDespoistBtcToOPCUSuccess(t *testing.T) {
 	receipt, err = rk.GetReceiptFromResult(&result)
 	require.NotNil(t, err)
 
-	dls1 = ck.GetDepositList(ctx, symbol, toCUAddr)
+	dls1 = ik.GetDepositList(ctx, symbol, toCUAddr)
 	require.Equal(t, 1, len(dls1))
 	require.Equal(t, hash, dls1[0].Hash)
 	require.Equal(t, amt, dls1[0].Amount)
@@ -1038,15 +1069,15 @@ func TestDespoistBtcToOPCUSuccess(t *testing.T) {
 	require.Equal(t, uint64(1), dls1[0].Index)
 
 	require.NotPanics(t, func() {
-		depositItem := ck.GetDeposit(ctx, symbol, toCUAddr, hash, index)
+		depositItem := ik.GetDeposit(ctx, symbol, toCUAddr, hash, index)
 		require.Equal(t, dls1[0], depositItem)
 	})
 
-	dls2 := ck.GetDepositListByHash(ctx, symbol, toCUAddr, hash)
+	dls2 := ik.GetDepositListByHash(ctx, symbol, toCUAddr, hash)
 	require.Equal(t, dls1, dls2)
 
 	//check userCU's coin
-	toCU = ck.GetCU(ctx, toCUAddr)
+	toCU = newTestCU(ck.GetCU(ctx, toCUAddr))
 	//	require.Equal(t, amt, toCU.GetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetCoinsHold().AmountOf(symbol))
 	require.Equal(t, amt, toCU.GetAssetCoins().AmountOf(symbol))
@@ -1066,9 +1097,14 @@ func TestDespoistEthToUserCUError(t *testing.T) {
 	tk := input.tk
 	ok := input.ok
 	rk := input.rk
+	ik := input.ik
+	newTestCU := func(cu custodianunit.CU) *testCU {
+		return newTestCU(ctx, input.trk, input.ik, cu)
+	}
+
 	//cn := input.cn
 	mockCN = chainnode.MockChainnode{}
-	chain := token.EthToken
+	chain := "eth"
 	symbol := chain
 	validators := input.validators
 	pubkey := ed25519.GenPrivKey().PubKey()
@@ -1079,8 +1115,8 @@ func TestDespoistEthToUserCUError(t *testing.T) {
 	require.Nil(t, err)
 	fromCUAddr := toCUAddr
 
-	tokenInfo := tk.GetTokenInfo(ctx, sdk.Symbol(symbol))
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tokenInfo := tk.GetIBCToken(ctx, sdk.Symbol(symbol))
+	tk.SetToken(ctx, tokenInfo)
 
 	hash := "0x84ed75bfad4b6d1c405a123990a1750974aa1f053394d442dfbc76090eeed44a"
 	index := uint64(0)
@@ -1107,41 +1143,43 @@ func TestDespoistEthToUserCUError(t *testing.T) {
 	require.Nil(t, err)
 	toCUAddr, err = sdk.CUAddressFromBase58("HBCjQs4nKHHfu5LrznRm3vBbbaeW1ghVw463")
 	require.Nil(t, err)
-	result = keeper.Deposit(ctx, fromCUAddr, toCUAddr, sdk.Symbol(symbol), toAddr, hash, 0, amt, orderID, memo)
-	require.Equal(t, sdk.CodeInvalidAccount, result.Code)
-	require.Contains(t, result.Log, "HBCjQs4nKHHfu5LrznRm3vBbbaeW1ghVw463")
+
+	//mockCN.On("ValidAddress", chain, symbol, toAddr).Return(true, toAddr)
+	//result = keeper.Deposit(ctx, fromCUAddr, toCUAddr, sdk.Symbol(symbol), toAddr, hash, 0, amt, orderID, memo)
+	//require.Equal(t, sdk.CodeInvalidAccount, result.Code)
+	//require.Contains(t, result.Log, "HBCjQs4nKHHfu5LrznRm3vBbbaeW1ghVw463")
 
 	//token doesnot support
 	bheos := "bheos"
-	toCU := ck.NewCUWithAddress(ctx, sdk.CUTypeUser, toCUAddr)
+	toCU := newTestCU(ck.NewCUWithAddress(ctx, sdk.CUTypeUser, toCUAddr))
 	require.Equal(t, "", toCU.GetAssetAddress(bheos, 1))
 	err = toCU.AddAsset(bheos, toAddr, 1)
 	toCU.SetAssetPubkey(pubkey.Bytes(), 1)
 	require.Nil(t, err)
 	ck.SetCU(ctx, toCU)
-	require.Equal(t, toAddr, ck.GetCU(ctx, toCUAddr).GetAssetAddress(bheos, 1))
+	require.Equal(t, toAddr, newTestCU(ck.GetCU(ctx, toCUAddr)).GetAssetAddress(bheos, 1))
 	result = keeper.Deposit(ctx, fromCUAddr, toCUAddr, sdk.Symbol(bheos), toAddr, hash, 0, sdk.NewInt(100), orderID, memo)
 	require.Equal(t, sdk.CodeUnsupportToken, result.Code)
 
-	//token's IsSendEnabled = false
-	tokenInfo = tk.GetTokenInfo(ctx, sdk.Symbol(symbol))
-	tokenInfo.IsSendEnabled = false
-	tk.SetTokenInfo(ctx, tokenInfo)
+	//token's SendEnabled = false
+	tokenInfo = tk.GetIBCToken(ctx, sdk.Symbol(symbol))
+	tokenInfo.SendEnabled = false
+	tk.SetToken(ctx, tokenInfo)
 	result = keeper.Deposit(ctx, fromCUAddr, toCUAddr, sdk.Symbol(symbol), toAddr, hash, 0, amt, orderID, memo)
 	require.Equal(t, sdk.CodeTransactionIsNotEnabled, result.Code)
 
 	//token's IsDepositEnable = false
-	tokenInfo = tk.GetTokenInfo(ctx, sdk.Symbol(symbol))
-	tokenInfo.IsSendEnabled = true
-	tokenInfo.IsDepositEnabled = false
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tokenInfo = tk.GetIBCToken(ctx, sdk.Symbol(symbol))
+	tokenInfo.SendEnabled = true
+	tokenInfo.DepositEnabled = false
+	tk.SetToken(ctx, tokenInfo)
 	result = keeper.Deposit(ctx, fromCUAddr, toCUAddr, sdk.Symbol(symbol), toAddr, hash, 0, amt, orderID, memo)
 	require.Equal(t, sdk.CodeTransactionIsNotEnabled, result.Code)
 
 	//transfer's SendEnable = false
-	tokenInfo = tk.GetTokenInfo(ctx, sdk.Symbol(symbol))
-	tokenInfo.IsDepositEnabled = true
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tokenInfo = tk.GetIBCToken(ctx, sdk.Symbol(symbol))
+	tokenInfo.DepositEnabled = true
+	tk.SetToken(ctx, tokenInfo)
 	keeper.SetSendEnabled(ctx, false)
 	result = keeper.Deposit(ctx, fromCUAddr, toCUAddr, sdk.Symbol(symbol), toAddr, hash, 0, amt, orderID, memo)
 	require.Equal(t, sdk.CodeTransactionIsNotEnabled, result.Code)
@@ -1177,7 +1215,7 @@ func TestDespoistEthToUserCUError(t *testing.T) {
 	//	require.Contains(t, result.Log, "already exists")
 
 	//Deposit already exist
-	deposit := ck.GetDeposit(ctx, symbol, toCUAddr, hash, index)
+	deposit := ik.GetDeposit(ctx, symbol, toCUAddr, hash, index)
 	require.NoError(t, err)
 	require.Equal(t, sdk.DepositNil, deposit)
 	d := sdk.DepositItem{
@@ -1185,14 +1223,14 @@ func TestDespoistEthToUserCUError(t *testing.T) {
 		Index:  index,
 		Amount: amt,
 	}
-	ck.SaveDeposit(ctx, symbol, toCUAddr, d)
-	deposit = ck.GetDeposit(ctx, symbol, toCUAddr, d.Hash, d.Index)
+	ik.SaveDeposit(ctx, symbol, toCUAddr, d)
+	deposit = ik.GetDeposit(ctx, symbol, toCUAddr, d.Hash, d.Index)
 	require.NoError(t, err)
 	require.Equal(t, d, deposit)
 	result = keeper.Deposit(ctx, fromCUAddr, toCUAddr, sdk.Symbol(symbol), toAddr, hash, index, amt, orderID, memo)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	//	require.Contains(t, result.Log, "item already exist")
-	ck.DelDeposit(ctx, symbol, toCUAddr, d.Hash, d.Index)
+	ik.DelDeposit(ctx, symbol, toCUAddr, d.Hash, d.Index)
 
 	toCU.SetAssetPubkey(pubkey.Bytes(), 1)
 	toCU.AddAsset(symbol, toAddr, 1)
@@ -1232,7 +1270,7 @@ func TestDespoistEthToUserCUError(t *testing.T) {
 	require.Equal(t, sdk.CodeOK, result.Code)
 
 	//check deposit item
-	dls1 := ck.GetDepositList(ctx, symbol, toCUAddr)
+	dls1 := ik.GetDepositList(ctx, symbol, toCUAddr)
 	require.Equal(t, 1, len(dls1))
 	require.Equal(t, hash, dls1[0].Hash)
 	require.Equal(t, amt, dls1[0].Amount)
@@ -1240,7 +1278,7 @@ func TestDespoistEthToUserCUError(t *testing.T) {
 	require.Equal(t, memo, dls1[0].Memo)
 	require.Equal(t, uint64(0), dls1[0].Index)
 
-	dls2 := ck.GetDepositListByHash(ctx, symbol, toCUAddr, hash)
+	dls2 := ik.GetDepositListByHash(ctx, symbol, toCUAddr, hash)
 	require.Equal(t, dls1, dls2)
 
 	//check receipt
@@ -1278,7 +1316,7 @@ func TestDespoistEthToUserCUError(t *testing.T) {
 	require.Equal(t, sdk.DepositConfirmed, int(order.(*sdk.OrderCollect).DepositStatus))
 
 	//check CU coins
-	toCU = ck.GetCU(ctx, toCUAddr)
+	toCU = newTestCU(ck.GetCU(ctx, toCUAddr))
 	//	require.Equal(t, amt, toCU.GetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetCoinsHold().AmountOf(symbol))
 }

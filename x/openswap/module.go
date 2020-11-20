@@ -128,7 +128,8 @@ func (am AppModule) BeginBlock(ctx sdk.Context, _ abci.RequestBeginBlock) {
 // EndBlock does nothing
 func (am AppModule) EndBlock(ctx sdk.Context, _ abci.RequestEndBlock) []abci.ValidatorUpdate {
 	am.keeper.Mining(ctx)
-	am.keeper.ClearExpiredOrders(ctx)
+	am.keeper.UpdateOrdersInMatching(ctx)
 	am.keeper.MatchingOrders(ctx)
+	am.keeper.RepurchaseAndBurn(ctx)
 	return []abci.ValidatorUpdate{}
 }

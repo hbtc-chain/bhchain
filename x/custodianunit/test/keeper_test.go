@@ -5,8 +5,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
 	sdk "github.com/hbtc-chain/bhchain/types"
 	. "github.com/hbtc-chain/bhchain/x/custodianunit"
 	"github.com/hbtc-chain/bhchain/x/custodianunit/exported"
@@ -41,12 +39,8 @@ func TestCUKeeper_NewCU(t *testing.T) {
 	assert.EqualValues(t, sdk.CUTypeUser, cu.GetCUType())
 	assert.EqualValues(t, 0, cu.GetSequence())
 	assert.EqualValues(t, addr, cu.GetAddress())
-	assert.EqualValues(t, 0, len(cu.GetAssets()))
+
 	assert.EqualValues(t, nil, cu.GetPubKey())
-	assert.EqualValues(t, sdk.Coins(nil), cu.GetCoins())
-	assert.EqualValues(t, sdk.Coins(nil), cu.GetGasUsed())
-	assert.EqualValues(t, sdk.Coins(nil), cu.GetGasReceived())
-	assert.EqualValues(t, sdk.Coins(nil), cu.GetAssetCoins())
 
 	// test NewCUWithPubkey
 	// should create CU with given CUType
@@ -63,11 +57,6 @@ func TestCUKeeper_NewCU(t *testing.T) {
 	assert.EqualValues(t, addr2, cu.GetAddress())
 	assert.EqualValues(t, addr2, cu.GetAddress())
 	assert.EqualValues(t, pubKey, cu.GetPubKey())
-	assert.EqualValues(t, sdk.Coins(nil), cu.GetCoins())
-	assert.EqualValues(t, 0, len(cu.GetAssets()))
-	assert.EqualValues(t, sdk.Coins(nil), cu.GetGasUsed())
-	assert.EqualValues(t, sdk.Coins(nil), cu.GetGasReceived())
-	assert.EqualValues(t, sdk.Coins(nil), cu.GetAssetCoins())
 
 	// test SetCU & GetCU
 	cuKeeper.SetCU(ctx, cu)
@@ -93,7 +82,6 @@ func TestCUKeeper_NewCU(t *testing.T) {
 	assert.EqualValues(t, addrNew, cu.GetAddress())
 	assert.EqualValues(t, addrNew, cu.GetAddress())
 	assert.EqualValues(t, nil, cu.GetPubKey())
-	assert.EqualValues(t, sdk.Coins(nil), cu.GetCoins())
 	// if cutype != CUTypeUser never create new one
 	cu = cuKeeper.GetOrNewCU(ctx, sdk.CUTypeOp, sdk.NewCUAddress())
 	assert.Nil(t, cu)
@@ -126,12 +114,7 @@ func TestGetSetCU(t *testing.T) {
 	assert.Equal(t, addr, cu.GetAddress())
 	assert.EqualValues(t, nil, cu.GetPubKey())
 	assert.EqualValues(t, 0, cu.GetSequence())
-	assert.EqualValues(t, 0, len(cu.GetAssets()))
 	assert.EqualValues(t, nil, cu.GetPubKey())
-	assert.EqualValues(t, sdk.Coins(nil), cu.GetCoins())
-	assert.EqualValues(t, sdk.Coins(nil), cu.GetGasUsed())
-	assert.EqualValues(t, sdk.Coins(nil), cu.GetGasReceived())
-	assert.EqualValues(t, sdk.Coins(nil), cu.GetAssetCoins())
 
 	// NewCU doesn't call Set, so it's still nil
 	assert.Nil(t, cuKeeper.GetCU(ctx, addr))
@@ -165,20 +148,20 @@ func TestGetSetCU(t *testing.T) {
 
 	// should ok, set opcu with 1 assets
 	opcu = BaseCU{Type: sdk.CUTypeOp, Address: opcuaddr}
-	opcu.SetSymbol(btcToken, 0)
+	opcu.SetSymbol(btcToken)
 	cuKeeper.SetCU(ctx, &opcu)
 	opcuGot := cuKeeper.GetOpCUs(ctx, btcToken)
 	assert.EqualValues(t, opcu, *(opcuGot[0]).(*BaseCU))
 	assert.EqualValues(t, btcToken, opcuGot[0].GetSymbol())
 
+	// test case move to ibcasset module
 	// should ok set opcu with 2 assets in same chain, subtoken first, mainnet token second
-	opcu = BaseCU{Type: sdk.CUTypeOp, Address: opcuaddr}
-	opcu.AddAsset(usdtToken, "", 0)
-	opcu.AddAsset(ethToken, "", 0)
-	cuKeeper.SetCU(ctx, &opcu)
-	opcuGot = cuKeeper.GetOpCUs(ctx, btcToken)
-	assert.EqualValues(t, opcu, *(opcuGot[0]).(*BaseCU))
-	assert.EqualValues(t, usdtToken, opcuGot[0].GetSymbol())
+	//opcu = BaseCU{Type: sdk.CUTypeOp, Address: opcuaddr}
+	//opcu.SetSymbol(ethToken)
+	//cuKeeper.SetCU(ctx, &opcu)
+	//opcuGot = cuKeeper.GetOpCUs(ctx, btcToken)
+	//assert.EqualValues(t, opcu, *(opcuGot[0]).(*BaseCU))
+	//assert.EqualValues(t, usdtToken, opcuGot[0].GetSymbol())
 
 	// GetOpCUs
 	cuKeeper.SetCU(ctx, cuKeeper.NewOpCUWithAddress(ctx, btcToken, sdk.NewCUAddress()))
@@ -195,7 +178,6 @@ func TestCUKeeper_NewOpCUWithAddress(t *testing.T) {
 	opcu := cuKeeper.NewOpCUWithAddress(ctx, ethToken, addr1)
 	assert.NotNil(t, sdk.CUTypeOp, opcu.GetCUType())
 	assert.Equal(t, ethToken, opcu.GetSymbol())
-	assert.Equal(t, "", opcu.GetAssetAddress(ethToken, 0))
 	assert.True(t, opcu.GetAddress().IsValidAddr())
 	cuKeeper.SetCU(ctx, opcu)
 	// address has been used
@@ -215,121 +197,6 @@ func TestCUKeeper_NewOpCUWithAddress(t *testing.T) {
 	opcu2 = cuKeeper.NewOpCUWithAddress(ctx, "notsupport", addr1)
 	assert.EqualValues(t, nil, opcu2)
 
-}
-
-func TestCUKeeper_DepositList_OpCU(t *testing.T) {
-	input := setupTestInputForCUKeeper()
-	ctx := input.Ctx
-	cuKeeper := input.Ck
-
-	cu := cuKeeper.NewOpCUWithAddress(ctx, btcToken, sdk.NewCUAddress())
-	// depositList not exist
-	dlsGot := cuKeeper.GetDepositList(ctx, btcToken, cu.GetAddress())
-	assert.Nil(t, dlsGot)
-
-	// SetDepositList
-	d1, _ := sdk.NewDepositItem("hash1", 1, sdk.NewInt(10), "", "memo1", 0)
-	d2, _ := sdk.NewDepositItem("hash2", 2, sdk.NewInt(20), "", "memo2", 0)
-	dls, _ := sdk.NewDepositList(d1, d2)
-	cuKeeper.SetCU(ctx, cu)
-	cuKeeper.SetDepositList(ctx, btcToken, cu.GetAddress(), dls)
-	dlsGot = cuKeeper.GetDepositList(ctx, btcToken, cu.GetAddress())
-	assert.EqualValues(t, dls, dlsGot)
-
-	// AddDeposit
-	d3, _ := sdk.NewDepositItem("hash3", 3, sdk.NewInt(30), "", "memo3", 0)
-	err := cuKeeper.SaveDeposit(ctx, btcToken, cu.GetAddress(), d3)
-	assert.Nil(t, err)
-	dlsGot = cuKeeper.GetDepositList(ctx, btcToken, cu.GetAddress())
-	assert.Equal(t, 3, dlsGot.Len())
-	// add duplicate deposit
-	err = cuKeeper.SaveDeposit(ctx, btcToken, cu.GetAddress(), d3)
-	assert.Nil(t, err)
-	dlsGot = cuKeeper.GetDepositList(ctx, btcToken, cu.GetAddress())
-	assert.Equal(t, 3, dlsGot.Len())
-
-	// GetDepositListByHash
-	d4, _ := sdk.NewDepositItem("hash2", 4, sdk.NewInt(40), "", "memo4", 0)
-	err = cuKeeper.SaveDeposit(ctx, btcToken, cu.GetAddress(), d4)
-	assert.Nil(t, err)
-	dlsGot = cuKeeper.GetDepositListByHash(ctx, btcToken, cu.GetAddress(), "hash2")
-	assert.Equal(t, 2, dlsGot.Len())
-	// GetDepositByHashIndex
-	dGot := cuKeeper.GetDeposit(ctx, btcToken, cu.GetAddress(), "hash2", 2)
-	require.NoError(t, err)
-	assert.EqualValues(t, d2, dGot)
-
-	// should ok
-	cuKeeper.DelDeposit(ctx, btcToken, cu.GetAddress(), "hash2", 4)
-
-	// IsDepositExist d4
-	b := cuKeeper.IsDepositExist(ctx, btcToken, cu.GetAddress(), "hash2", 4)
-	assert.False(t, b)
-	b = cuKeeper.IsDepositExist(ctx, btcToken, cu.GetAddress(), "hash2", 2)
-	assert.True(t, b)
-	// wrong symbol
-	b = cuKeeper.IsDepositExist(ctx, "eth", cu.GetAddress(), "hash2", 2)
-	assert.False(t, b)
-}
-
-func TestCUKeeper_DepositList(t *testing.T) {
-	input := setupTestInputForCUKeeper()
-	ctx := input.Ctx
-	cuKeeper := input.Ck
-
-	cu := cuKeeper.NewCUWithAddress(ctx, sdk.CUTypeUser, sdk.NewCUAddress())
-	// depositList not exist
-	dlsGot := cuKeeper.GetDepositList(ctx, btcToken, cu.GetAddress())
-	assert.Nil(t, dlsGot)
-
-	// SetDepositList
-	d1, _ := sdk.NewDepositItem("hash1", 1, sdk.NewInt(10), "", "memo1", 0)
-	d2, _ := sdk.NewDepositItem("hash2", 2, sdk.NewInt(20), "", "memo2", 0)
-	dls, _ := sdk.NewDepositList(d1, d2)
-	cuKeeper.SetCU(ctx, cu)
-	cuKeeper.SetDepositList(ctx, btcToken, cu.GetAddress(), dls)
-	dlsGot = cuKeeper.GetDepositList(ctx, btcToken, cu.GetAddress())
-	assert.EqualValues(t, dls, dlsGot)
-	// second depositList in cu,no use
-	cuKeeper.SetDepositList(ctx, "eth", cu.GetAddress(), dls)
-
-	// AddDeposit
-	d3, _ := sdk.NewDepositItem("hash3", 3, sdk.NewInt(30), "", "memo3", 0)
-	err := cuKeeper.SaveDeposit(ctx, btcToken, cu.GetAddress(), d3)
-	assert.Nil(t, err)
-	dlsGot = cuKeeper.GetDepositList(ctx, btcToken, cu.GetAddress())
-	assert.Equal(t, 3, dlsGot.Len())
-	dlsGot = cuKeeper.GetDepositList(ctx, btcToken, cu.GetAddress())
-	assert.Equal(t, 3, dlsGot.Len())
-
-	// GetDepositListByHash
-	d4, _ := sdk.NewDepositItem("hash2", 4, sdk.NewInt(40), "", "memo4", 0)
-	err = cuKeeper.SaveDeposit(ctx, btcToken, cu.GetAddress(), d4)
-	assert.Nil(t, err)
-	dlsGot = cuKeeper.GetDepositListByHash(ctx, btcToken, cu.GetAddress(), "hash2")
-	assert.Equal(t, 2, dlsGot.Len())
-	// GetDepositByHashIndex
-	dGot := cuKeeper.GetDeposit(ctx, btcToken, cu.GetAddress(), "hash2", 2)
-	require.NoError(t, err)
-	assert.EqualValues(t, d2, dGot)
-
-	// should ok
-	cuKeeper.DelDeposit(ctx, btcToken, cu.GetAddress(), "hash2", 4)
-
-	// IsDepositExist d4
-	b := cuKeeper.IsDepositExist(ctx, btcToken, cu.GetAddress(), "hash2", 4)
-	assert.False(t, b)
-	b = cuKeeper.IsDepositExist(ctx, btcToken, cu.GetAddress(), "hash2", 2)
-	assert.True(t, b)
-	// wrong symbol
-	b = cuKeeper.IsDepositExist(ctx, "btt", cu.GetAddress(), "hash2", 2)
-	assert.False(t, b)
-
-	// del all item in list
-	dls = cuKeeper.GetDepositList(ctx, btcToken, cu.GetAddress())
-	for _, d := range dls {
-		cuKeeper.DelDeposit(ctx, btcToken, cu.GetAddress(), d.Hash, d.Index)
-	}
 }
 
 func TestRemoveCU(t *testing.T) {
@@ -388,113 +255,6 @@ func TestGetParams(t *testing.T) {
 	assert.Equal(t, params, newParams)
 }
 
-func TestCUKeeper_GetOpCUsInfo(t *testing.T) {
-	input := setupTestInputForCUKeeper()
-	ctx := input.Ctx
-	cuKeeper := input.Ck
-	opcu := cuKeeper.NewCUWithAddress(ctx, sdk.CUTypeOp, sdk.NewCUAddress())
-	opcu.AddAsset("btc", "btcaddress1", 0)
-
-	d1, _ := sdk.NewDepositItem("hash1", 1, sdk.NewInt(10), "", "memo1", 0)
-	d2, _ := sdk.NewDepositItem("hash2", 2, sdk.NewInt(20), "", "memo2", 0)
-	dls, _ := sdk.NewDepositList(d1, d2)
-	cuKeeper.SetCU(ctx, opcu)
-	cuKeeper.SetDepositList(ctx, "btc", opcu.GetAddress(), dls)
-
-	curecordGot := cuKeeper.GetOpCUsInfo(ctx, "btc")
-	assert.Equal(t, 1, len(curecordGot))
-	assert.Equal(t, 2, len(curecordGot[0].DepositList))
-
-}
-
-func TestCUKeeper_BalanceFlows(t *testing.T) {
-	input := setupTestInput()
-	cuKeeper := input.ak
-	ctx := input.ctx
-	addr := sdk.NewCUAddress()
-	cu := cuKeeper.NewCUWithAddress(input.ctx, sdk.CUTypeUser, addr)
-
-	someCoins := sdk.Coins{sdk.NewInt64Coin("coin1", 123), sdk.NewInt64Coin("coin2", 246), sdk.NewInt64Coin("coin0", 0)}
-
-	cu.AddCoins(someCoins)
-	assert.EqualValues(t, 2, len(cu.GetBalanceFlows()))
-
-	cuKeeper.SetCU(ctx, cu)
-
-	cuGot := cuKeeper.GetCU(ctx, addr)
-	assert.NotNil(t, cuGot)
-	// GetCU must return cu without balanceFlows
-	assert.EqualValues(t, 0, len(cuGot.GetBalanceFlows()))
-
-}
-
-func TestCUKeeper_BalanceFlows1(t *testing.T) {
-	input := setupTestInput()
-	cuKeeper := input.ak
-	ctx := input.ctx
-	addr := sdk.NewCUAddress()
-	cu := cuKeeper.NewCUWithAddress(input.ctx, sdk.CUTypeUser, addr)
-
-	initCoins := sdk.Coins{sdk.NewInt64Coin("btc", 10000)}
-
-	cu.AddCoins(initCoins)
-	assert.EqualValues(t, 1, len(cu.GetBalanceFlows()))
-	assert.Equal(t, 1, len(cu.GetBalanceFlows()))
-	balanceFlow := cu.GetBalanceFlows()[0]
-	assert.Equal(t, sdk.ZeroInt(), balanceFlow.PreviousBalance)
-	assert.Equal(t, sdk.ZeroInt(), balanceFlow.PreviousBalanceOnHold)
-	assert.Equal(t, sdk.NewInt(10000), balanceFlow.BalanceChange)
-	assert.Equal(t, sdk.ZeroInt(), balanceFlow.BalanceOnHoldChange)
-
-	cuKeeper.SetCU(ctx, cu)
-	assert.Equal(t, sdk.NewInt(10000), cu.GetCoins().AmountOf("btc"))
-
-	//withdrawal
-	cu = cuKeeper.GetCU(ctx, addr)
-	withdrawalCoins := sdk.Coins{sdk.NewInt64Coin("btc", 3000)}
-	cu.SubCoins(withdrawalCoins)
-	cu.AddCoinsHold(withdrawalCoins)
-	assert.Equal(t, 1, len(cu.GetBalanceFlows()))
-	balanceFlow = cu.GetBalanceFlows()[0]
-	assert.Equal(t, sdk.NewInt(10000), balanceFlow.PreviousBalance)
-	assert.Equal(t, sdk.ZeroInt(), balanceFlow.PreviousBalanceOnHold)
-	assert.Equal(t, sdk.NewInt(-3000), balanceFlow.BalanceChange)
-	assert.Equal(t, sdk.NewInt(3000), balanceFlow.BalanceOnHoldChange)
-	cuKeeper.SetCU(ctx, cu)
-
-	//withdrawal finish
-	cu = cuKeeper.GetCU(ctx, addr)
-	cu.SubCoinsHold(withdrawalCoins)
-	assert.Equal(t, 1, len(cu.GetBalanceFlows()))
-	balanceFlow = cu.GetBalanceFlows()[0]
-	assert.Equal(t, sdk.NewInt(7000), balanceFlow.PreviousBalance)
-	assert.Equal(t, sdk.NewInt(3000), balanceFlow.PreviousBalanceOnHold)
-	assert.Equal(t, sdk.ZeroInt(), balanceFlow.BalanceChange)
-	assert.Equal(t, sdk.NewInt(-3000), balanceFlow.BalanceOnHoldChange)
-
-}
-
-func TestCUKeeper_BalanceFlowsWhenSetCoins(t *testing.T) {
-	input := setupTestInput()
-	cuKeeper := input.ak
-	ctx := input.ctx
-	addr := sdk.NewCUAddress()
-	cu := cuKeeper.NewCUWithAddress(input.ctx, sdk.CUTypeUser, addr)
-
-	someCoins := sdk.NewCoins(sdk.NewInt64Coin("coin2", 246), sdk.NewInt64Coin("coin0", 0), sdk.NewInt64Coin("coin1", 123))
-
-	cu.SetCoins(someCoins)
-	assert.EqualValues(t, 2, len(cu.GetBalanceFlows()))
-
-	cuKeeper.SetCU(ctx, cu)
-
-	cuGot := cuKeeper.GetCU(ctx, addr)
-	assert.NotNil(t, cuGot)
-	// GetCU must return cu without balanceFlows
-	assert.EqualValues(t, 0, len(cuGot.GetBalanceFlows()))
-
-}
-
 func TestSetGetExtAddresseWithCU(t *testing.T) {
 	input := setupTestInputForCUKeeper()
 	ctx := input.Ctx
@@ -517,7 +277,7 @@ func TestSetGetExtAddresseWithCU(t *testing.T) {
 	assert.Nil(t, cuGot)
 
 	// SetExtAddresseWithCU
-	cuKeeper.SetExtAddresseWithCU(ctx, ethToken, "0x3443aDbe92F0AA15FDf9e63F301F1440b341f053", cu.GetAddress())
+	cuKeeper.SetExtAddressWithCU(ctx, ethToken, "0x3443aDbe92F0AA15FDf9e63F301F1440b341f053", cu.GetAddress())
 	cuGot, err = cuKeeper.GetCUFromExtAddress(ctx, ethToken, "0x3443aDbe92F0AA15FDf9e63F301F1440b341f053")
 	assert.Nil(t, err)
 	assert.NotNil(t, cuGot)
@@ -530,6 +290,10 @@ var _ exported.CustodianUnit = (*cuTypeForTest)(nil)
 
 type cuTypeForTest struct {
 	CUNumber uint64
+}
+
+func (ct *cuTypeForTest) SetSymbol(symbol string) error {
+	panic("implement me")
 }
 
 func (ct *cuTypeForTest) GetBalanceFlows() []sdk.BalanceFlow {

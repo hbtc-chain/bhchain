@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	sdk "github.com/hbtc-chain/bhchain/types"
-	"github.com/hbtc-chain/bhchain/x/custodianunit/exported"
 	"github.com/hbtc-chain/bhchain/x/evidence"
 	"github.com/hbtc-chain/bhchain/x/transfer/types"
 )
@@ -64,7 +63,7 @@ func (keeper BaseKeeper) verifyUtxoBasedSignedTx(ctx sdk.Context, vins []*sdk.Ut
 			return sdk.ErrInvalidTx(err.Error()).Result(), ""
 		}
 		for _, vin := range vins {
-			item := keeper.ck.GetDeposit(ctx, symbol, opCUAddr, vin.Hash, vin.Index)
+			item := keeper.ik.GetDeposit(ctx, symbol, opCUAddr, vin.Hash, vin.Index)
 
 			if item == sdk.DepositNil {
 				return sdk.ErrInvalidTx(fmt.Sprintf("vin %v %v does not exist", vin.Hash, vin.Index)).Result(), ""
@@ -122,29 +121,12 @@ func (keeper BaseKeeper) verifyUtxoBasedSignedTx(ctx sdk.Context, vins []*sdk.Ut
 	return sdk.Result{}, tx.Hash
 }
 
-func (keeper BaseKeeper) isMigrationFinishedBySymbol(ctx sdk.Context, symbol string, curEpoch sdk.Epoch) bool {
-	if curEpoch.MigrationFinished {
-		return true
-	}
-
-	opCUs := keeper.ck.GetOpCUs(ctx, symbol)
+func (keeper BaseKeeper) checkOpcusMigrationStatus(ctx sdk.Context) {
+	opCUs := keeper.ck.GetOpCUs(ctx, "")
 	for _, opCU := range opCUs {
-		if opCU.GetMigrationStatus() != sdk.MigrationFinish {
-			return false
-		}
-	}
-
-	return true
-}
-
-func (keeper BaseKeeper) checkOpcusMigrationStatus(ctx sdk.Context, curEpoch sdk.Epoch) {
-	symbols := keeper.tk.GetSymbols(ctx)
-	for _, symbol := range symbols {
-		ti := keeper.tk.GetTokenInfo(ctx, sdk.Symbol(symbol))
-		if ti != nil && ti.Chain != sdk.NativeToken {
-			if !keeper.isMigrationFinishedBySymbol(ctx, symbol, curEpoch) {
-				return
-			}
+		opcuAst := keeper.ik.GetCUIBCAsset(ctx, opCU.GetAddress())
+		if opcuAst != nil && opcuAst.GetMigrationStatus() != sdk.MigrationFinish {
+			return
 		}
 	}
 
@@ -159,7 +141,7 @@ func (keeper BaseKeeper) hasProcessingSysTransfer(ctx sdk.Context, opcu sdk.CUAd
 		}
 		sysTransferOrder := order.(*sdk.OrderSysTransfer)
 		if sysTransferOrder.ToCU == opcu.String() && sysTransferOrder.ToAddress == toAddr {
-			tokenInfo := keeper.tk.GetTokenInfo(ctx, sdk.Symbol(order.GetSymbol()))
+			tokenInfo := keeper.tk.GetIBCToken(ctx, sdk.Symbol(order.GetSymbol()))
 			if tokenInfo.Chain.String() == chain {
 				return true
 			}
@@ -185,20 +167,7 @@ func (keeper BaseKeeper) getWaitCollectOrderIDs(ctx sdk.Context, cuAddr string, 
 	return waitCollectOrderIDs
 }
 
-func (keeper BaseKeeper) checkNeedSysTransfer(ctx sdk.Context, chain, toAddr string, gasFee sdk.Int, cu exported.CustodianUnit) bool {
-	//if cu.GetCUType() == sdk.CUTypeOp {
-	//	ownedCoins := cu.GetAssetCoins()
-	//	feeCoins := sdk.NewCoins(sdk.NewCoin(chain, gasFee.Mul(sdk.NewInt(types.MaxSystransferNum))))
-	//	if ownedCoins.IsAllGTE(feeCoins) {
-	//		return false
-	//	}
-	//} else {
-	//	gasRemained := cu.GetGasRemained(chain, toAddr)
-	//	if gasRemained.GTE(gasFee) {
-	//		return false
-	//	}
-	//}
-
+func (keeper BaseKeeper) checkNeedSysTransfer(ctx sdk.Context, chain, toAddr string, gasFee sdk.Int, cuType sdk.CUType, cuAddr sdk.CUAddress) bool {
 	for _, orderID := range keeper.ok.GetProcessOrderListByType(ctx, sdk.OrderTypeCollect, sdk.OrderTypeWithdrawal, sdk.OrderTypeOpcuAssetTransfer) {
 		order := keeper.ok.GetOrder(ctx, orderID)
 		if order == nil || order.GetSymbol() == chain || order.GetOrderStatus() != sdk.OrderStatusBegin {
@@ -210,11 +179,11 @@ func (keeper BaseKeeper) checkNeedSysTransfer(ctx sdk.Context, chain, toAddr str
 				return true
 			}
 		case *sdk.OrderWithdrawal:
-			if cu.GetCUType() == sdk.CUTypeOp {
+			if cuType == sdk.CUTypeOp {
 				return true
 			}
 		case *sdk.OrderOpcuAssetTransfer:
-			if orderDetail.GetCUAddress().Equals(cu.GetAddress()) {
+			if orderDetail.GetCUAddress().Equals(cuAddr) {
 				return true
 			}
 		}
@@ -282,7 +251,7 @@ func (keeper BaseKeeper) handleOrderRetryEvidences(ctx sdk.Context, txID string,
 	}
 }
 
-func (keeper BaseKeeper) utxoOpcuAstTransferThreshold(vinNum int, tokenInfo *sdk.TokenInfo) sdk.Int {
+func (keeper BaseKeeper) utxoOpcuAstTransferThreshold(vinNum int, tokenInfo *sdk.IBCToken) sdk.Int {
 	txSize := sdk.EstimateSignedUtxoTxSize(vinNum, 1)
 	return txSize.Mul(tokenInfo.GasPrice).Quo(sdk.NewInt(sdk.KiloBytes))
 }
@@ -311,6 +280,23 @@ func (keeper BaseKeeper) markEvidenceHandled(ctx sdk.Context, txID string, retry
 func (keeper BaseKeeper) hasEvidenceHandled(ctx sdk.Context, txID string, retryTimes uint32) bool {
 	store := ctx.KVStore(keeper.storeKey)
 	return store.Has(types.GetOrderRetryEvidenceHandledKey(txID, retryTimes))
+}
+
+func (k BaseKeeper) getExcludedKeyNode(ctx sdk.Context, keyNodes []sdk.CUAddress) sdk.CUAddress {
+	var excluded sdk.CUAddress
+	var longest int64
+	blkHeight := ctx.BlockHeight()
+	for _, keyNode := range keyNodes {
+		val, _ := k.sk.GetValidator(ctx, sdk.ValAddress(keyNode))
+		if longest < blkHeight-int64(val.LastKeyNodeHeartbeatHeight) {
+			longest = blkHeight - int64(val.LastKeyNodeHeartbeatHeight)
+			excluded = keyNode
+		}
+	}
+	if longest >= types.MaxKeyNodeHeartbeat {
+		return excluded
+	}
+	return nil
 }
 
 func getOrderRawData(order sdk.Order) []byte {

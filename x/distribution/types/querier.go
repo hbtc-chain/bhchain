@@ -18,6 +18,7 @@ const (
 	ParamBaseProposerReward  = "base_proposer_reward"
 	ParamBonusProposerReward = "bonus_proposer_reward"
 	ParamWithdrawAddrEnabled = "withdraw_addr_enabled"
+	ParamKeyNodeReward       = "key_node_reward"
 )
 
 // params for query 'custom/distr/validator_outstanding_rewards'

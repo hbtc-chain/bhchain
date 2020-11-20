@@ -13,11 +13,12 @@ import (
 
 // Keeper of the distribution store
 type Keeper struct {
-	storeKey      sdk.StoreKey
-	cdc           *codec.Codec
-	paramSpace    params.Subspace
-	stakingKeeper types.StakingKeeper
-	supplyKeeper  types.SupplyKeeper
+	storeKey       sdk.StoreKey
+	cdc            *codec.Codec
+	paramSpace     params.Subspace
+	stakingKeeper  types.StakingKeeper
+	supplyKeeper   types.SupplyKeeper
+	transferKeeper types.TransferKeeper
 
 	codespace sdk.CodespaceType
 
@@ -28,7 +29,7 @@ type Keeper struct {
 
 // NewKeeper creates a new distribution Keeper instance
 func NewKeeper(cdc *codec.Codec, key sdk.StoreKey, paramSpace params.Subspace,
-	sk types.StakingKeeper, supplyKeeper types.SupplyKeeper, codespace sdk.CodespaceType,
+	sk types.StakingKeeper, supplyKeeper types.SupplyKeeper, transferKeeper types.TransferKeeper, codespace sdk.CodespaceType,
 	feeCollectorName string, blacklistedAddrs map[string]bool) Keeper {
 
 	// ensure distribution module CU is set
@@ -41,6 +42,7 @@ func NewKeeper(cdc *codec.Codec, key sdk.StoreKey, paramSpace params.Subspace,
 		cdc:              cdc,
 		paramSpace:       paramSpace.WithKeyTable(ParamKeyTable()),
 		stakingKeeper:    sk,
+		transferKeeper:   transferKeeper,
 		supplyKeeper:     supplyKeeper,
 		codespace:        codespace,
 		feeCollectorName: feeCollectorName,
@@ -53,12 +55,15 @@ func (k Keeper) Logger(ctx sdk.Context) log.Logger {
 	return ctx.Logger().With("module", fmt.Sprintf("x/%s", types.ModuleName))
 }
 
+func (k Keeper) GetTransferKeeper() types.TransferKeeper {
+	return k.transferKeeper
+}
+
 // SetWithdrawAddr sets a new address that will receive the rewards upon withdrawal
 func (k Keeper) SetWithdrawAddr(ctx sdk.Context, delegatorAddr sdk.CUAddress, withdrawAddr sdk.CUAddress) sdk.Error {
 	if k.blacklistedAddrs[withdrawAddr.String()] {
 		return sdk.ErrUnauthorized(fmt.Sprintf("%s is blacklisted from receiving external funds", withdrawAddr))
 	}
-
 	if !k.GetWithdrawAddrEnabled(ctx) {
 		return types.ErrSetWithdrawAddrDisabled(k.codespace)
 	}

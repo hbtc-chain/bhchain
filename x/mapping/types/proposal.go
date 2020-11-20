@@ -23,15 +23,15 @@ func init() {
 }
 
 type AddMappingProposal struct {
-	From         string     `json:"from"`
-	Title        string     `json:"title"`
-	Description  string     `json:"description"`
-	IssueSymbol  sdk.Symbol `json:"issue_symbol"`
-	TargetSymbol sdk.Symbol `json:"target_symbol"`
-	TotalSupply  sdk.Int    `json:"total_supply"`
+	From         sdk.CUAddress `json:"from"`
+	Title        string        `json:"title"`
+	Description  string        `json:"description"`
+	IssueSymbol  sdk.Symbol    `json:"issue_symbol"`
+	TargetSymbol sdk.Symbol    `json:"target_symbol"`
+	TotalSupply  sdk.Int       `json:"total_supply"`
 }
 
-func NewAddMappingProposal(from, title, desc string, issueSymbol, targetSymbol sdk.Symbol, totalSupply sdk.Int) AddMappingProposal {
+func NewAddMappingProposal(from sdk.CUAddress, title, desc string, issueSymbol, targetSymbol sdk.Symbol, totalSupply sdk.Int) AddMappingProposal {
 	return AddMappingProposal{
 		From:         from,
 		Title:        title,
@@ -56,13 +56,13 @@ func (amp AddMappingProposal) ValidateBasic() sdk.Error {
 	if err != nil {
 		return err
 	}
-	if amp.From == "" || !sdk.IsValidAddr(amp.From) {
-		return sdk.ErrInvalidAddress(fmt.Sprintf("from address can not be empty or invalid:%v", amp.From))
+	if !amp.From.IsValidAddr() {
+		return sdk.ErrInvalidAddress(fmt.Sprintf("from address can not be empty or invalid: %s", amp.From.String()))
 	}
-	if !amp.IssueSymbol.IsValidTokenName() {
+	if !amp.IssueSymbol.IsValid() {
 		return sdk.ErrInvalidSymbol("invalid issue symbol")
 	}
-	if !amp.TargetSymbol.IsValidTokenName() {
+	if !amp.TargetSymbol.IsValid() {
 		return sdk.ErrInvalidSymbol("invalid target symbol")
 	}
 	if !amp.TotalSupply.IsPositive() {
@@ -115,7 +115,7 @@ func (smp SwitchMappingProposal) ValidateBasic() sdk.Error {
 	if err != nil {
 		return err
 	}
-	if !smp.IssueSymbol.IsValidTokenName() {
+	if !smp.IssueSymbol.IsValid() {
 		return sdk.ErrInvalidSymbol("invalid issue symbol")
 	}
 	return nil

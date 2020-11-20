@@ -12,6 +12,7 @@ func RegisterCodec(cdc *codec.Codec) {
 	cdc.RegisterConcrete(MsgDelegate{}, "hbtcchain/MsgDelegate", nil)
 	cdc.RegisterConcrete(MsgUndelegate{}, "hbtcchain/MsgUndelegate", nil)
 	cdc.RegisterConcrete(MsgBeginRedelegate{}, "hbtcchain/MsgBeginRedelegate", nil)
+	cdc.RegisterConcrete(&UpdateKeyNodesProposal{}, "hbtcchain/UpdateKeyNodesProposal", nil)
 }
 
 // generic sealed codec to be used throughout this module

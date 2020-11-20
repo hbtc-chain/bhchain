@@ -23,7 +23,6 @@ func SimulateMsgCreateValidator(m custodianunit.CUKeeper, k staking.Keeper) simu
 		description := staking.Description{
 			Moniker: simulation.RandStringOfLength(r, 10),
 		}
-
 		maxCommission := sdk.NewDecWithPrec(r.Int63n(1000), 3)
 		commission := staking.NewCommissionRates(
 			simulation.RandomDecAmount(r, maxCommission),
@@ -44,7 +43,7 @@ func SimulateMsgCreateValidator(m custodianunit.CUKeeper, k staking.Keeper) simu
 
 		selfDelegation := sdk.NewCoin(denom, amount)
 		msg := staking.NewMsgCreateValidator(address, acc.PubKey,
-			selfDelegation, description, commission, sdk.OneInt(), true)
+			selfDelegation, description, commission, sdk.OneInt())
 
 		if msg.ValidateBasic() != nil {
 			return simulation.NoOpMsg(staking.ModuleName), nil, fmt.Errorf("expected msg to pass ValidateBasic: %s", msg.GetSignBytes())
@@ -81,7 +80,7 @@ func SimulateMsgEditValidator(k staking.Keeper) simulation.Operation {
 		address := val.GetOperator()
 		newCommissionRate := simulation.RandomDecAmount(r, val.Commission.MaxRate)
 
-		msg := staking.NewMsgEditValidator(address, description, &newCommissionRate, nil, nil)
+		msg := staking.NewMsgEditValidator(address, description, &newCommissionRate, nil)
 
 		if msg.ValidateBasic() != nil {
 			return simulation.NoOpMsg(staking.ModuleName), nil, fmt.Errorf("expected msg to pass ValidateBasic: %s", msg.GetSignBytes())

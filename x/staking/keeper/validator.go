@@ -111,8 +111,8 @@ func (k Keeper) SetValidatorByConsAddr(ctx sdk.Context, validator types.Validato
 
 // validator index
 func (k Keeper) SetValidatorByPowerIndex(ctx sdk.Context, validator types.Validator) {
-	// jailed validators are not kept in the power index. jailedIndex > 0 means the jail operation is pending
-	if validator.Jailed && validator.JailedIndex == 0 {
+	// jailed validators are not kept in the power index
+	if validator.Jailed {
 		return
 	}
 	store := ctx.KVStore(k.storeKey)

@@ -91,16 +91,7 @@ func BhclearValidateGenesisState(genesisState GenesisState) error {
 		return err
 	}
 
-	_, err := token.ValidateGenesis(genesisState.TokenData)
-	if err != nil {
-		return err
-	}
-
-	if len(genesisState.GenTxs) > 0 {
-		return nil
-	}
-
-	return nil
+	return token.ValidateGenesis(genesisState.TokenData)
 }
 
 // Marshal BhclearAppGenState reuslt

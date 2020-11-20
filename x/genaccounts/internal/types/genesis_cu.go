@@ -2,9 +2,10 @@ package types
 
 import (
 	"errors"
+	"strings"
+
 	"github.com/hbtc-chain/bhchain/x/supply"
 	"github.com/tendermint/tendermint/crypto"
-	"strings"
 
 	sdk "github.com/hbtc-chain/bhchain/types"
 	"github.com/hbtc-chain/bhchain/x/custodianunit"
@@ -72,7 +73,6 @@ func NewGenesisCURaw(cutype sdk.CUType, pubkey crypto.PubKey, assetpubkey []byte
 func NewGenesisCU(cu *custodianunit.BaseCU) GenesisCU {
 	return GenesisCU{
 		Address:  cu.Address,
-		Coins:    cu.Coins,
 		Sequence: cu.Sequence,
 	}
 }
@@ -81,7 +81,6 @@ func NewGenesisCU(cu *custodianunit.BaseCU) GenesisCU {
 func NewGenesisCUI(cu cuexported.CustodianUnit) (GenesisCU, error) {
 	gcu := GenesisCU{
 		Address:  cu.GetAddress(),
-		Coins:    cu.GetCoins(),
 		Sequence: cu.GetSequence(),
 	}
 
@@ -101,8 +100,7 @@ func NewGenesisCUI(cu cuexported.CustodianUnit) (GenesisCU, error) {
 
 // ToCU converts a GenesisCU to an CustodianUnit interface
 func (ga *GenesisCU) ToCU() custodianunit.CU {
-	bcu := custodianunit.NewBaseCU(sdk.CUTypeUser, ga.Address, ga.Coins.Sort(), ga.AssetCoins.Sort(), ga.AssetCoinsHold.Sort(), ga.GasUsed.Sort(),
-		ga.GasReceived.Sort(), ga.CoinsHold.Sort(), ga.PubKey, ga.Sequence, ga.Assets, ga.AssetPubkey)
+	bcu := custodianunit.NewBaseCU(sdk.CUTypeUser, ga.Address, ga.PubKey, ga.Sequence)
 
 	// module accounts
 	if ga.ModuleName != "" {

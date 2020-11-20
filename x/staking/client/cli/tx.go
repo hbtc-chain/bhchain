@@ -19,6 +19,8 @@ import (
 	"github.com/hbtc-chain/bhchain/version"
 	"github.com/hbtc-chain/bhchain/x/custodianunit"
 	"github.com/hbtc-chain/bhchain/x/custodianunit/client/utils"
+	"github.com/hbtc-chain/bhchain/x/gov/client/cli"
+	gov "github.com/hbtc-chain/bhchain/x/gov/types"
 	"github.com/hbtc-chain/bhchain/x/staking/types"
 )
 
@@ -119,17 +121,7 @@ func GetCmdEditValidator(cdc *codec.Codec) *cobra.Command {
 				newMinSelfDelegation = &msb
 			}
 
-			var isKeyNode *bool
-			isKeyNodeString := viper.GetString(FlagIsKeyNode)
-			if isKeyNodeString != "" {
-				var isKeyNodeBool bool
-				if isKeyNodeString == "true" {
-					isKeyNodeBool = true
-				}
-				isKeyNode = &isKeyNodeBool
-			}
-
-			msg := types.NewMsgEditValidator(sdk.ValAddress(valAddr), description, newRate, newMinSelfDelegation, isKeyNode)
+			msg := types.NewMsgEditValidator(sdk.ValAddress(valAddr), description, newRate, newMinSelfDelegation)
 
 			// build and sign the transaction, then broadcast to Tendermint
 			return utils.GenerateOrBroadcastMsgs(cliCtx, txBldr, []sdk.Msg{msg})
@@ -138,7 +130,6 @@ func GetCmdEditValidator(cdc *codec.Codec) *cobra.Command {
 
 	cmd.Flags().AddFlagSet(fsDescriptionEdit)
 	cmd.Flags().AddFlagSet(fsCommissionUpdate)
-	cmd.Flags().AddFlagSet(IsKeyNode)
 
 	return cmd
 }
@@ -254,6 +245,70 @@ $ %s tx staking unbond bhvaloper1lh86pkhl6nrvmyezmncwdvhmnr0hj6nlk0caaj 100stake
 			return utils.GenerateOrBroadcastMsgs(cliCtx, txBldr, []sdk.Msg{msg})
 		},
 	}
+}
+
+func NewCmdUpdateKeyNodesProposal(cdc *codec.Codec) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "update-keynodes [--remove HBCMuQSZgn5Uz4R6rLCusjrJyr15qK5mXKJV,HBCRkCHbjH9Hm9xCypTpQRv4zSZogFh2vhfn] [--add HBCebYoND2ZiPAnZFpKP1DjTCGy7oUDkCjkm,HBCRstXBbcn1JHEyGgfZMUMcXVxNbPuaEFHu]",
+		Short: "Create a update-keynodes proposal",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cliCtx := client.NewCLIContext().WithCodec(cdc)
+			txBldr := custodianunit.NewTxBuilderFromCLI().WithTxEncoder(utils.GetTxEncoder(cdc))
+			from := cliCtx.GetFromAddress()
+
+			addKeyNodes, err := ParseCUAddress(viper.GetString(FlagAddKeyNodes))
+			if err != nil {
+				return err
+			}
+			removeKeyNodes, err := ParseCUAddress(viper.GetString(FlagRemoveKeyNodes))
+			if err != nil {
+				return err
+			}
+			title, err := cmd.Flags().GetString(cli.FlagTitle)
+			if err != nil {
+				return err
+			}
+			description, err := cmd.Flags().GetString(cli.FlagDescription)
+			if err != nil {
+				return err
+			}
+
+			content := types.NewUpdateKeyNodesProposal(title, description, addKeyNodes, removeKeyNodes)
+			err = content.ValidateBasic()
+			if err != nil {
+				return err
+			}
+
+			depositStr, err := cmd.Flags().GetString(cli.FlagDeposit)
+			if err != nil {
+				return err
+			}
+			deposit, err := sdk.ParseCoins(depositStr)
+			if err != nil {
+				return err
+			}
+
+			voteTime, err := cmd.Flags().GetUint32(cli.FlagVoteTime)
+			if err != nil {
+				return err
+			}
+
+			msg := gov.NewMsgSubmitProposal(content, deposit, from, voteTime)
+			if err = msg.ValidateBasic(); err != nil {
+				return err
+			}
+
+			return utils.GenerateOrBroadcastMsgs(cliCtx, txBldr, []sdk.Msg{msg})
+		},
+	}
+	cmd.Flags().String(cli.FlagTitle, "", "title of proposal")
+	cmd.Flags().String(cli.FlagDescription, "", "description of proposal")
+	cmd.Flags().String(cli.FlagDeposit, "", "deposit of proposal")
+	cmd.Flags().Uint32(cli.FlagVoteTime, 0, "votetime of proposal")
+	cmd.Flags().String(FlagRemoveKeyNodes, "", "key nodes to remove")
+	cmd.Flags().String(FlagAddKeyNodes, "", "key nodes to add")
+
+	return cmd
 }
 
 //__________________________________________________________
@@ -379,9 +434,7 @@ func BuildCreateValidatorMsg(cliCtx context.CLIContext, txBldr custodianunit.TxB
 		return txBldr, nil, fmt.Errorf(types.ErrMinSelfDelegationInvalid(types.DefaultCodespace).Error())
 	}
 
-	msg := types.NewMsgCreateValidator(
-		sdk.ValAddress(valAddr), pk, amount, description, commissionRates, minSelfDelegation, false,
-	)
+	msg := types.NewMsgCreateValidator(sdk.ValAddress(valAddr), pk, amount, description, commissionRates, minSelfDelegation)
 
 	if viper.GetBool(client.FlagGenerateOnly) {
 		ip := viper.GetString(FlagIP)
@@ -392,4 +445,19 @@ func BuildCreateValidatorMsg(cliCtx context.CLIContext, txBldr custodianunit.TxB
 	}
 
 	return txBldr, msg, nil
+}
+
+func ParseCUAddress(addrs string) ([]sdk.CUAddress, error) {
+	if addrs == "" {
+		return nil, nil
+	}
+	var cus []sdk.CUAddress
+	for _, addr := range strings.Split(addrs, ",") {
+		cuAddr, err := sdk.CUAddressFromBase58(addr)
+		if err != nil {
+			return nil, err
+		}
+		cus = append(cus, cuAddr)
+	}
+	return cus, nil
 }

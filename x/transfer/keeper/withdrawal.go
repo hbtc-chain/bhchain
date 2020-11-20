@@ -7,7 +7,7 @@ import (
 
 	"github.com/hbtc-chain/bhchain/chainnode"
 	sdk "github.com/hbtc-chain/bhchain/types"
-	"github.com/hbtc-chain/bhchain/x/custodianunit/exported"
+	"github.com/hbtc-chain/bhchain/x/ibcasset/exported"
 	"github.com/hbtc-chain/bhchain/x/transfer/types"
 )
 
@@ -24,15 +24,10 @@ func (keeper BaseKeeper) Withdrawal(ctx sdk.Context, fromCUAddr sdk.CUAddress, t
 		return sdk.ErrInvalidTx(fmt.Sprintf("withdrawal from a non user CU :%v", fromCUAddr)).Result()
 	}
 
-	if !sdk.Symbol(symbol).IsValidTokenName() {
-		return sdk.ErrInvalidSymbol(symbol).Result()
-	}
-
-	if !keeper.tk.IsTokenSupported(ctx, sdk.Symbol(symbol)) {
+	tokenInfo := keeper.tk.GetIBCToken(ctx, sdk.Symbol(symbol))
+	if tokenInfo == nil {
 		return sdk.ErrUnSupportToken(symbol).Result()
 	}
-
-	tokenInfo := keeper.tk.GetTokenInfo(ctx, sdk.Symbol(symbol))
 	chain := tokenInfo.Chain.String()
 
 	valid, canonicalToAddr := keeper.cn.ValidAddress(chain, symbol, toAddr)
@@ -45,7 +40,7 @@ func (keeper BaseKeeper) Withdrawal(ctx sdk.Context, fromCUAddr sdk.CUAddress, t
 		return sdk.ErrInvalidTx(fmt.Sprintf("withdrawal to a chain CU :%v not support, use send cmd directly instead", toCUAddr)).Result()
 	}
 
-	if !tokenInfo.IsWithdrawalEnabled || !tokenInfo.IsSendEnabled || !keeper.GetSendEnabled(ctx) {
+	if !tokenInfo.WithdrawalEnabled || !tokenInfo.SendEnabled || !keeper.IsSendEnabled(ctx) {
 		return sdk.ErrTransactionIsNotEnabled(fmt.Sprintf("%v's withdraw is not enabled temporary", symbol)).Result()
 	}
 
@@ -53,8 +48,8 @@ func (keeper BaseKeeper) Withdrawal(ctx sdk.Context, fromCUAddr sdk.CUAddress, t
 		return sdk.ErrInvalidTx(fmt.Sprintf("order %v already exists", orderID)).Result()
 	}
 
-	if gasFee.LT(tokenInfo.WithDrawalFee().Amount) {
-		return sdk.ErrInsufficientFee(fmt.Sprintf("need:%v, actual have:%v", tokenInfo.WithDrawalFee(), gasFee)).Result()
+	if gasFee.LT(tokenInfo.WithdrawalFee().Amount) {
+		return sdk.ErrInsufficientFee(fmt.Sprintf("need:%v, actual have:%v", tokenInfo.WithdrawalFee(), gasFee)).Result()
 	}
 
 	if !amt.IsPositive() {
@@ -64,16 +59,10 @@ func (keeper BaseKeeper) Withdrawal(ctx sdk.Context, fromCUAddr sdk.CUAddress, t
 	feeCoins := sdk.NewCoins(sdk.NewCoin(chain, gasFee))
 	coins := sdk.NewCoins(sdk.NewCoin(symbol, amt))
 	need := coins.Add(feeCoins)
-	have := fromCU.GetCoins()
 
-	if chain == symbol {
-		if have.AmountOf(chain).LT(need.AmountOf(chain)) {
-			return sdk.ErrInsufficientCoins(fmt.Sprintf("need:%v, actual have:%v", need, have)).Result()
-		}
-	} else {
-		if have.AmountOf(chain).LT(gasFee) || have.AmountOf(symbol).LT(amt) {
-			return sdk.ErrInsufficientCoins(fmt.Sprintf("need:%v, actual have:%v", need, have)).Result()
-		}
+	balanceFlows, err := keeper.LockCoins(ctx, fromCUAddr, need)
+	if err != nil {
+		return err.Result()
 	}
 
 	withdrawalOrder := keeper.ok.NewOrderWithdrawal(ctx, fromCUAddr, orderID, symbol, amt, gasFee, sdk.ZeroInt(), canonicalToAddr, "", "")
@@ -87,21 +76,11 @@ func (keeper BaseKeeper) Withdrawal(ctx sdk.Context, fromCUAddr sdk.CUAddress, t
 	}
 	keeper.ok.SetOrder(ctx, withdrawalOrder)
 
-	//onhold needed coins
-	fromCU.ResetBalanceFlows()
-	fromCU.SubCoins(need)
-	fromCU.AddCoinsHold(need)
-	keeper.ck.SetCU(ctx, fromCU)
-
 	var flows []sdk.Flow
 	flows = append(flows, keeper.rk.NewOrderFlow(sdk.Symbol(symbol), withdrawalOrder.GetCUAddress(), withdrawalOrder.GetID(), sdk.OrderTypeWithdrawal, sdk.OrderStatusBegin))
 	flows = append(flows, keeper.rk.NewWithdrawalFlow(orderID, fromCUAddr.String(), canonicalToAddr, symbol, amt, gasFee, withdrawalOrder.WithdrawStatus))
+	flows = append(flows, balanceFlows...)
 
-	for _, balanceFlow := range fromCU.GetBalanceFlows() {
-		flows = append(flows, balanceFlow)
-	}
-
-	fromCU.ResetBalanceFlows()
 	result := sdk.Result{}
 	receipt := keeper.rk.NewReceipt(sdk.CategoryTypeWithdrawal, flows)
 	keeper.rk.SaveReceiptToResult(receipt, &result)
@@ -127,7 +106,7 @@ func (keeper BaseKeeper) WithdrawalConfirm(ctx sdk.Context, fromCUAddr sdk.CUAdd
 	if withdrawOrder.GetOrderStatus() != sdk.OrderStatusBegin {
 		return sdk.ErrInvalidTx(fmt.Sprintf("invalid order status")).Result()
 	}
-	tokenInfo := keeper.tk.GetTokenInfo(ctx, sdk.Symbol(withdrawOrder.Symbol))
+	tokenInfo := keeper.tk.GetIBCToken(ctx, sdk.Symbol(withdrawOrder.Symbol))
 	if tokenInfo == nil {
 		return sdk.ErrInternal(fmt.Sprintf("token %s not exists", withdrawOrder.Symbol)).Result()
 	}
@@ -147,22 +126,16 @@ func (keeper BaseKeeper) WithdrawalConfirm(ctx sdk.Context, fromCUAddr sdk.CUAdd
 			withdrawOrder.WithdrawStatus = sdk.WithdrawStatusInvalid
 			withdrawOrder.SetOrderStatus(sdk.OrderStatusCancel)
 
-			// unfreeze user fund
-			withdrawFromCU := keeper.ck.GetCU(ctx, withdrawOrder.CUAddress)
-			withdrawFromCU.ResetBalanceFlows()
-
 			feeCoins := sdk.NewCoins(sdk.NewCoin(tokenInfo.Chain.String(), withdrawOrder.GasFee))
 			withdrawCoins := sdk.NewCoins(sdk.NewCoin(withdrawOrder.Symbol, withdrawOrder.Amount))
 			totalCoins := withdrawCoins.Add(feeCoins)
 
-			withdrawFromCU.SubCoinsHold(totalCoins)
-			withdrawFromCU.AddCoins(totalCoins)
-
-			keeper.ck.SetCU(ctx, withdrawFromCU)
-			for _, balanceFlow := range withdrawFromCU.GetBalanceFlows() {
-				balanceFlows = append(balanceFlows, balanceFlow)
+			var err sdk.Error
+			balanceFlows, err = keeper.UnlockCoins(ctx, withdrawOrder.CUAddress, totalCoins)
+			if err != nil {
+				return err.Result()
 			}
-			withdrawFromCU.ResetBalanceFlows()
+
 		}
 		keeper.ok.SetOrder(ctx, withdrawOrder)
 
@@ -175,7 +148,7 @@ func (keeper BaseKeeper) WithdrawalConfirm(ctx sdk.Context, fromCUAddr sdk.CUAdd
 	return result
 }
 
-func (keeper BaseKeeper) WithdrawalWaitSign(ctx sdk.Context, opCUAddr sdk.CUAddress, orderIDs, signHashes []string, rawData []byte) sdk.Result {
+func (keeper BaseKeeper) WithdrawalWaitSign(ctx sdk.Context, opCUAddr sdk.CUAddress, orderIDs []string, signHashes [][]byte, rawData []byte) sdk.Result {
 	tokenInfo, withdrawalOrders, err := keeper.checkWithdrawalOrders(ctx, orderIDs, sdk.OrderStatusBegin)
 	if err != nil {
 		return err.Result()
@@ -186,15 +159,15 @@ func (keeper BaseKeeper) WithdrawalWaitSign(ctx sdk.Context, opCUAddr sdk.CUAddr
 
 	curEpoch := keeper.sk.GetCurrentEpoch(ctx)
 
-	opCU := keeper.ck.GetCU(ctx, opCUAddr)
-	if opCU == nil {
+	opCUAst := keeper.ik.GetCUIBCAsset(ctx, opCUAddr)
+	if opCUAst == nil {
 		return sdk.ErrInvalidAccount(fmt.Sprintf("CU %v does not exist", opCUAddr)).Result()
 	}
-	if opCU.GetMigrationStatus() != sdk.MigrationFinish {
-		return sdk.ErrInvalidTx(fmt.Sprintf("OPCU %v is in migration", opCU)).Result()
+	if opCUAst.GetMigrationStatus() != sdk.MigrationFinish {
+		return sdk.ErrInvalidTx(fmt.Sprintf("OPCU %v is in migration", opCUAst)).Result()
 	}
-	fromAddr := opCU.GetAssetAddress(symbol, curEpoch.Index)
-	err = keeper.checkWithdrawalOpCU(opCU, chain, symbol, true, fromAddr)
+	fromAddr := opCUAst.GetAssetAddress(symbol, curEpoch.Index)
+	err = keeper.checkWithdrawalOpCU(opCUAst, chain, symbol, true, fromAddr)
 	if err != nil {
 		return err.Result()
 	}
@@ -202,7 +175,7 @@ func (keeper BaseKeeper) WithdrawalWaitSign(ctx sdk.Context, opCUAddr sdk.CUAddr
 	//Retrieve gas Price
 	gasPrice := tokenInfo.GasPrice
 	if chain != symbol {
-		ti := keeper.tk.GetTokenInfo(ctx, sdk.Symbol(chain))
+		ti := keeper.tk.GetIBCToken(ctx, sdk.Symbol(chain))
 		if ti == nil {
 			return sdk.ErrInvalidSymbol(fmt.Sprintf("%s does not exist", chain)).Result()
 		}
@@ -227,7 +200,7 @@ func (keeper BaseKeeper) WithdrawalWaitSign(ctx sdk.Context, opCUAddr sdk.CUAddr
 		}
 
 		for _, vin := range vins {
-			item := keeper.ck.GetDeposit(ctx, symbol, opCUAddr, vin.Hash, vin.Index)
+			item := keeper.ik.GetDeposit(ctx, symbol, opCUAddr, vin.Hash, vin.Index)
 			if item == sdk.DepositNil {
 				return sdk.ErrInvalidTx(fmt.Sprintf("vin %v %v does not exist", vin.Hash, vin.Index)).Result()
 			}
@@ -269,7 +242,7 @@ func (keeper BaseKeeper) WithdrawalWaitSign(ctx sdk.Context, opCUAddr sdk.CUAddr
 		}
 
 		for i := 0; i < len(hashes); i++ {
-			if string(hashes[i]) != signHashes[i] {
+			if !bytes.Equal(hashes[i], signHashes[i]) {
 				return sdk.ErrInvalidTx(fmt.Sprintf("mismatch hashes, expected:%v, have:%v", hashes[i], signHashes[i])).Result()
 			}
 		}
@@ -277,7 +250,7 @@ func (keeper BaseKeeper) WithdrawalWaitSign(ctx sdk.Context, opCUAddr sdk.CUAddr
 		coins = sdk.NewCoins(sdk.NewCoin(symbol, amt)) //in BTC, locked the sum(Vin)
 
 		for _, vin := range vins {
-			_ = keeper.ck.SetDepositStatus(ctx, symbol, opCUAddr, vin.Hash, vin.Index, sdk.DepositItemStatusInProcess)
+			_ = keeper.ik.SetDepositStatus(ctx, symbol, opCUAddr, vin.Hash, vin.Index, sdk.DepositItemStatusInProcess)
 		}
 
 	case sdk.AccountBased:
@@ -311,7 +284,7 @@ func (keeper BaseKeeper) WithdrawalWaitSign(ctx sdk.Context, opCUAddr sdk.CUAddr
 			return sdk.ErrInvalidTx(fmt.Sprintf("Unexpected withdrawal contract address:%v, expected:%v", tx.ContractAddress, tokenInfo.Issuer)).Result()
 		}
 
-		if string(hash) != signHashes[0] {
+		if !bytes.Equal(hash, signHashes[0]) {
 			return sdk.ErrInvalidTx(fmt.Sprintf("hash mismatch, expected:%v, have:%v", hash, signHashes[0])).Result()
 		}
 
@@ -332,7 +305,7 @@ func (keeper BaseKeeper) WithdrawalWaitSign(ctx sdk.Context, opCUAddr sdk.CUAddr
 			return sdk.ErrGasOverflow(fmt.Sprintf("actual gas:%v > gas uplimit:%v", costFee, withdrawalOrder.GasFee)).Result()
 		}
 
-		nonce := opCU.GetNonce(tokenInfo.Chain.String(), fromAddr)
+		nonce := opCUAst.GetNonce(tokenInfo.Chain.String(), fromAddr)
 		if nonce != tx.Nonce {
 			return sdk.ErrInvalidTx(fmt.Sprintf("tx nonce not equal, opcu :%v, rawdata:%v", nonce, tx.Nonce)).Result()
 		}
@@ -342,7 +315,7 @@ func (keeper BaseKeeper) WithdrawalWaitSign(ctx sdk.Context, opCUAddr sdk.CUAddr
 		coins = coins.Add(feeCoins)
 
 		//No need to check gr-gu for opCU, check AssetCoins directly
-		have := opCU.GetAssetCoins()
+		have := opCUAst.GetAssetCoins()
 		if chain == symbol {
 			if have.AmountOf(chain).LT(coins.AmountOf(chain)) {
 				return sdk.ErrInsufficientCoins(fmt.Sprintf("need:%v, actual have:%v", coins, have)).Result()
@@ -353,16 +326,18 @@ func (keeper BaseKeeper) WithdrawalWaitSign(ctx sdk.Context, opCUAddr sdk.CUAddr
 			}
 		}
 
-		opCU.SetEnableSendTx(false, chain, fromAddr)
+		if tokenInfo.IsNonceBased {
+			opCUAst.SetEnableSendTx(false, chain, fromAddr)
+		}
 
 	case sdk.AccountSharedBased:
 		return sdk.ErrInvalidTx("Not support AccountSharedBased temporary").Result()
 	}
 
 	//update opCU's assetCoins and assetCoinsHold, Lock the opCU
-	opCU.SubAssetCoins(coins)
-	opCU.AddAssetCoinsHold(coins)
-	keeper.ck.SetCU(ctx, opCU)
+	opCUAst.SubAssetCoins(coins)
+	opCUAst.AddAssetCoinsHold(coins)
+	keeper.ik.SetCUIBCAsset(ctx, opCUAst)
 
 	//update order's status
 	for _, orderID := range orderIDs {
@@ -389,7 +364,7 @@ func (keeper BaseKeeper) WithdrawalWaitSign(ctx sdk.Context, opCUAddr sdk.CUAddr
 	return result
 }
 
-func (keeper BaseKeeper) WithdrawalSignFinish(ctx sdk.Context, orderIDs []string, signedTx []byte, tansHash string) sdk.Result {
+func (keeper BaseKeeper) WithdrawalSignFinish(ctx sdk.Context, orderIDs []string, signedTx []byte) sdk.Result {
 	tokenInfo, withdrawalOrders, err := keeper.checkWithdrawalOrders(ctx, orderIDs, sdk.OrderStatusWaitSign)
 	if err != nil {
 		return err.Result()
@@ -400,14 +375,14 @@ func (keeper BaseKeeper) WithdrawalSignFinish(ctx sdk.Context, orderIDs []string
 	chain := tokenInfo.Chain.String()
 
 	opCUAddr, _ := sdk.CUAddressFromBase58(withdrawalOrders[0].OpCUaddress)
-	sendable := tokenInfo.TokenType == sdk.UtxoBased
+	sendable := !tokenInfo.IsNonceBased
 
-	opCU := keeper.ck.GetCU(ctx, opCUAddr)
-	if opCU == nil {
+	opCUAst := keeper.ik.GetCUIBCAsset(ctx, opCUAddr)
+	if opCUAst == nil {
 		return sdk.ErrInvalidAccount(fmt.Sprintf("CU %v does not exist", opCUAddr)).Result()
 	}
 
-	err = keeper.checkWithdrawalOpCU(opCU, chain, symbol, sendable, order.FromAddress)
+	err = keeper.checkWithdrawalOpCU(opCUAst, chain, symbol, sendable, order.FromAddress)
 	if err != nil {
 		return err.Result()
 	}
@@ -447,7 +422,7 @@ func (keeper BaseKeeper) WithdrawalSignFinish(ctx sdk.Context, orderIDs []string
 
 	var flows []sdk.Flow
 	flows = append(flows, keeper.rk.NewOrderFlow(sdk.Symbol(symbol), order.GetCUAddress(), order.GetID(), sdk.OrderTypeWithdrawal, sdk.OrderStatusSignFinish))
-	flows = append(flows, keeper.rk.NewWithdrawalSignFinishFlow(orderIDs, signedTx, tansHash))
+	flows = append(flows, keeper.rk.NewWithdrawalSignFinishFlow(orderIDs, signedTx))
 
 	result := sdk.Result{}
 	receipt := keeper.rk.NewReceipt(sdk.CategoryTypeWithdrawal, flows)
@@ -490,13 +465,13 @@ func (keeper BaseKeeper) WithdrawalFinish(ctx sdk.Context, fromCUAddr sdk.CUAddr
 	chain := tokenInfo.Chain.String()
 	opCUAddr, _ := sdk.CUAddressFromBase58(order.OpCUaddress)
 
-	opCU := keeper.ck.GetCU(ctx, opCUAddr)
-	if opCU == nil {
+	opCUAst := keeper.ik.GetCUIBCAsset(ctx, opCUAddr)
+	if opCUAst == nil {
 		return sdk.ErrInvalidAccount(fmt.Sprintf("CU %v does not exist", opCUAddr)).Result()
 	}
 
-	sendable := tokenInfo.TokenType == sdk.UtxoBased
-	err = keeper.checkWithdrawalOpCU(opCU, chain, symbol, sendable, order.FromAddress)
+	sendable := !tokenInfo.IsNonceBased
+	err = keeper.checkWithdrawalOpCU(opCUAst, chain, symbol, sendable, order.FromAddress)
 	if err != nil {
 		return err.Result()
 	}
@@ -511,7 +486,7 @@ func (keeper BaseKeeper) WithdrawalFinish(ctx sdk.Context, fromCUAddr sdk.CUAddr
 		}
 
 		for _, vin := range vins {
-			item := keeper.ck.GetDeposit(ctx, symbol, opCUAddr, vin.Hash, vin.Index)
+			item := keeper.ik.GetDeposit(ctx, symbol, opCUAddr, vin.Hash, vin.Index)
 			if item == sdk.DepositNil {
 				return sdk.ErrInvalidTx(fmt.Sprintf("vin %v %v does not exist", vin.Hash, vin.Index)).Result()
 			}
@@ -540,31 +515,35 @@ func (keeper BaseKeeper) WithdrawalFinish(ctx sdk.Context, fromCUAddr sdk.CUAddr
 				if err != nil {
 					return sdk.ErrInvalidOrder(fmt.Sprintf("fail to create deposit item, %v %v %v", vin.Hash, vin.Index, vin.Amount)).Result()
 				}
-				_ = keeper.ck.SaveDeposit(ctx, symbol, opCU.GetAddress(), depositItem)
+				_ = keeper.ik.SaveDeposit(ctx, symbol, opCUAst.GetAddress(), depositItem)
 			}
 		}
 
 		//delete used Vins from opCU
 		inAmt := sdk.ZeroInt()
 		for _, vin := range tx.Vins {
-			item := keeper.ck.GetDeposit(ctx, symbol, opCU.GetAddress(), vin.Hash, vin.Index)
+			item := keeper.ik.GetDeposit(ctx, symbol, opCUAst.GetAddress(), vin.Hash, vin.Index)
 			if item == sdk.DepositNil {
 				return sdk.ErrInvalidOrder(fmt.Sprintf("deposit item%v %v does not exist", vin.Hash, vin.Index)).Result()
 			}
-			keeper.ck.DelDeposit(ctx, symbol, opCUAddr, vin.Hash, vin.Index)
+			keeper.ik.DelDeposit(ctx, symbol, opCUAddr, vin.Hash, vin.Index)
 			inAmt = inAmt.Add(vin.Amount)
 		}
 
-		opCU.SubAssetCoinsHold(sdk.NewCoins(sdk.NewCoin(symbol, inAmt)))
-		opCU.AddAssetCoins(sdk.NewCoins(sdk.NewCoin(symbol, backAmount)))
+		opCUAst.SubAssetCoinsHold(sdk.NewCoins(sdk.NewCoin(symbol, inAmt)))
+		opCUAst.AddAssetCoins(sdk.NewCoins(sdk.NewCoin(symbol, backAmount)))
 
 		//calculate Op's gr/gu
-		grAmt := sdk.ZeroInt()
-		for _, wOrder := range withdrawalOrders {
-			grAmt = grAmt.Add(wOrder.GasFee) //accumulated each order's gasFee
+		if chain == symbol {
+			opCUAst.AddGasReceived(sdk.NewCoins(sdk.NewCoin(chain, costFee)))
+		} else {
+			grAmt := sdk.ZeroInt()
+			for _, wOrder := range withdrawalOrders {
+				grAmt = grAmt.Add(wOrder.GasFee) //accumulated each order's gasFee
+			}
+			opCUAst.AddGasReceived(sdk.NewCoins(sdk.NewCoin(chain, grAmt)))
 		}
-		opCU.AddGasReceived(sdk.NewCoins(sdk.NewCoin(chain, grAmt)))
-		opCU.AddGasUsed(sdk.NewCoins(sdk.NewCoin(chain, costFee)))
+		opCUAst.AddGasUsed(sdk.NewCoins(sdk.NewCoin(chain, costFee)))
 
 	case sdk.AccountBased:
 		tx, err := keeper.cn.QueryAccountTransactionFromSignedData(chain, symbol, order.SignedTx)
@@ -579,23 +558,27 @@ func (keeper BaseKeeper) WithdrawalFinish(ctx sdk.Context, fromCUAddr sdk.CUAddr
 		feeCoins := sdk.NewCoins(sdk.NewCoin(chain, order.CostFee))
 		coins := sdk.NewCoins(sdk.NewCoin(symbol, tx.Amount))
 		coins = coins.Add(feeCoins)
-		opCU.SubAssetCoinsHold(coins)
+		opCUAst.SubAssetCoinsHold(coins)
 		if !order.CostFee.Equal(costFee) {
-			opCU.AddAssetCoins(sdk.NewCoins(sdk.NewCoin(chain, order.CostFee.Sub(costFee))))
+			opCUAst.AddAssetCoins(sdk.NewCoins(sdk.NewCoin(chain, order.CostFee.Sub(costFee))))
 		}
 
 		//update order.CostFee, gasused, add user gived GasFee into gasReceived
 		order.CostFee = costFee
 		keeper.ok.SetOrder(ctx, order)
 
-		opCU.AddGasReceived(sdk.NewCoins(sdk.NewCoin(chain, order.GasFee)))
-		opCU.AddGasUsed(sdk.NewCoins(sdk.NewCoin(chain, costFee)))
+		if chain == symbol {
+			opCUAst.AddGasReceived(sdk.NewCoins(sdk.NewCoin(chain, costFee)))
+		} else {
+			opCUAst.AddGasReceived(sdk.NewCoins(sdk.NewCoin(chain, order.GasFee)))
+		}
+		opCUAst.AddGasUsed(sdk.NewCoins(sdk.NewCoin(chain, costFee)))
 		if tokenInfo.IsNonceBased {
 			//don't update local nonce
-			nonce := opCU.GetNonce(chain, order.FromAddress) + 1
-			opCU.SetNonce(chain, nonce, order.FromAddress)
+			nonce := opCUAst.GetNonce(chain, order.FromAddress) + 1
+			opCUAst.SetNonce(chain, nonce, order.FromAddress)
+			opCUAst.SetEnableSendTx(true, chain, order.FromAddress)
 		}
-		opCU.SetEnableSendTx(true, chain, order.FromAddress)
 
 	case sdk.AccountSharedBased:
 		return sdk.ErrInvalidTx("Not support AccountSharedBased temporary").Result()
@@ -606,17 +589,21 @@ func (keeper BaseKeeper) WithdrawalFinish(ctx sdk.Context, fromCUAddr sdk.CUAddr
 	for _, orderID := range orderIDs {
 		withdrawalOrder := keeper.ok.GetOrder(ctx, orderID).(*sdk.OrderWithdrawal)
 		fromCUAddr := withdrawalOrder.GetCUAddress()
-		fromCU := keeper.ck.GetCU(ctx, fromCUAddr)
-		fromCU.ResetBalanceFlows()
 		feeCoins := sdk.NewCoins(sdk.NewCoin(chain, withdrawalOrder.GasFee))
 		withdrawCoins := sdk.NewCoins(sdk.NewCoin(symbol, withdrawalOrder.Amount))
 		totalCoins := withdrawCoins.Add(feeCoins)
 
-		fromCU.SubCoinsHold(totalCoins)
+		var err sdk.Error
+		_, fls, err := keeper.SubCoinsHold(ctx, fromCUAddr, totalCoins)
+		if err != nil {
+			return err.Result()
+		}
+		balanceFlows = append(balanceFlows, fls...)
 
+		var refundCoins sdk.Coins
 		//back gasfee if it is the mainnet asset
 		if withdrawalOrder.GasFee.GT(costFee) && withdrawalOrder.Symbol == chain {
-			fromCU.AddCoins(sdk.NewCoins(sdk.NewCoin(chain, withdrawalOrder.GasFee.Sub(costFee))))
+			refundCoins = refundCoins.Add(sdk.NewCoins(sdk.NewCoin(chain, withdrawalOrder.GasFee.Sub(costFee))))
 			withdrawalOrder.GasFee = costFee
 		}
 
@@ -624,18 +611,19 @@ func (keeper BaseKeeper) WithdrawalFinish(ctx sdk.Context, fromCUAddr sdk.CUAddr
 			withdrawalOrder.Status = sdk.OrderStatusFinish
 		} else {
 			withdrawalOrder.Status = sdk.OrderStatusFailed
-			fromCU.AddCoins(withdrawCoins) // tx failed, add back user's coin
+			refundCoins = refundCoins.Add(withdrawCoins)
 		}
 		keeper.ok.SetOrder(ctx, withdrawalOrder)
-
-		keeper.ck.SetCU(ctx, fromCU)
-		for _, balanceFlow := range fromCU.GetBalanceFlows() {
-			balanceFlows = append(balanceFlows, balanceFlow)
+		if len(refundCoins) > 0 {
+			_, fls, err := keeper.AddCoins(ctx, fromCUAddr, refundCoins)
+			if err != nil {
+				return err.Result()
+			}
+			balanceFlows = append(balanceFlows, fls...)
 		}
-		fromCU.ResetBalanceFlows()
 	}
 
-	keeper.ck.SetCU(ctx, opCU)
+	keeper.ik.SetCUIBCAsset(ctx, opCUAst)
 
 	var flows []sdk.Flow
 	withdrawalOrder = withdrawalOrders[0]
@@ -649,7 +637,7 @@ func (keeper BaseKeeper) WithdrawalFinish(ctx sdk.Context, fromCUAddr sdk.CUAddr
 	return result
 }
 
-func (keeper BaseKeeper) checkWithdrawalOrders(ctx sdk.Context, orderIDs []string, orderStatus sdk.OrderStatus) (tokenInfo *sdk.TokenInfo, withdrawalOrders []*sdk.OrderWithdrawal, err sdk.Error) {
+func (keeper BaseKeeper) checkWithdrawalOrders(ctx sdk.Context, orderIDs []string, orderStatus sdk.OrderStatus) (tokenInfo *sdk.IBCToken, withdrawalOrders []*sdk.OrderWithdrawal, err sdk.Error) {
 	order := keeper.ok.GetOrder(ctx, orderIDs[0])
 	if order == nil {
 		err = sdk.ErrNotFoundOrder(fmt.Sprintf("orderid:%v does not exist", orderIDs[0]))
@@ -664,19 +652,14 @@ func (keeper BaseKeeper) checkWithdrawalOrders(ctx sdk.Context, orderIDs []strin
 	}
 
 	symbol := order.GetSymbol()
-	if !sdk.Symbol(symbol).IsValidTokenName() {
-		err = sdk.ErrInvalidSymbol(symbol)
-		return
-	}
 
-	if !keeper.tk.IsTokenSupported(ctx, sdk.Symbol(symbol)) {
+	tokenInfo = keeper.tk.GetIBCToken(ctx, sdk.Symbol(symbol))
+	if tokenInfo == nil {
 		err = sdk.ErrUnSupportToken(symbol)
 		return
 	}
-
-	tokenInfo = keeper.tk.GetTokenInfo(ctx, sdk.Symbol(symbol))
 	chain := tokenInfo.Chain.String()
-	if !tokenInfo.IsWithdrawalEnabled || !tokenInfo.IsSendEnabled || !keeper.GetSendEnabled(ctx) {
+	if !tokenInfo.WithdrawalEnabled || !tokenInfo.SendEnabled || !keeper.IsSendEnabled(ctx) {
 		err = sdk.ErrTransactionIsNotEnabled(fmt.Sprintf("%v's withdrawal is not enabled temporary", symbol))
 		return
 	}
@@ -772,15 +755,18 @@ func (keeper BaseKeeper) checkWithdrawalOrders(ctx sdk.Context, orderIDs []strin
 		feeCoins := sdk.NewCoins(sdk.NewCoin(chain, withdrawalOrder.GasFee))
 		amtCoins := sdk.NewCoins(sdk.NewCoin(symbol, withdrawalOrder.Amount))
 		need := amtCoins.Add(feeCoins)
-		have := userCU.GetCoinsHold()
 		if chain == symbol {
-			if have.AmountOf(chain).LT(need.AmountOf(chain)) {
-				err = sdk.ErrInsufficientCoins(fmt.Sprintf("need %v, %v have %v", need, userCU.GetAddress(), have))
+			have := keeper.GetHoldBalance(ctx, withdrawalOrder.CUAddress, chain)
+			if have.LT(need.AmountOf(chain)) {
+				err = sdk.ErrInsufficientCoins(fmt.Sprintf("need %v, %v have %v", need, userCU.GetAddress().String(), have))
 				return
 			}
 		} else {
-			if have.AmountOf(chain).LT(withdrawalOrder.GasFee) || have.AmountOf(symbol).LT(withdrawalOrder.Amount) {
-				err = sdk.ErrInsufficientCoins(fmt.Sprintf("need %v, %v have %v", need, userCU.GetAddress(), have))
+			chanBalance := keeper.GetHoldBalance(ctx, withdrawalOrder.CUAddress, chain)
+			symbolBalance := keeper.GetHoldBalance(ctx, withdrawalOrder.CUAddress, symbol)
+			have := sdk.NewCoins(sdk.NewCoin(chain, chanBalance), sdk.NewCoin(symbol, symbolBalance))
+			if chanBalance.LT(withdrawalOrder.GasFee) || symbolBalance.LT(withdrawalOrder.Amount) {
+				err = sdk.ErrInsufficientCoins(fmt.Sprintf("need %v, %v have %v", need, userCU.GetAddress().String(), have))
 				return
 			}
 		}
@@ -795,14 +781,14 @@ func (keeper BaseKeeper) checkDecodedUtxoTransaction(ctx sdk.Context, symbol str
 	inAmt := sdk.ZeroInt()
 	outAmt := sdk.ZeroInt()
 
-	opCU := keeper.ck.GetCU(ctx, opCUAddr)
+	opCUAst := keeper.ik.GetCUIBCAsset(ctx, opCUAddr)
 
 	for _, vin := range tx.Vins {
 		if fromAddr != vin.Address {
 			return sdk.ZeroInt(), sdk.ErrInvalidTx(fmt.Sprintf("Unexpected Vin address:%v, expected:%v", vin.Address, fromAddr))
 		}
 
-		item := keeper.ck.GetDeposit(ctx, symbol, opCUAddr, vin.Hash, vin.Index)
+		item := keeper.ik.GetDeposit(ctx, symbol, opCUAddr, vin.Hash, vin.Index)
 		if item == sdk.DepositNil {
 			return sdk.ZeroInt(), sdk.ErrUnknownUtxo(vin.String())
 		}
@@ -811,7 +797,7 @@ func (keeper BaseKeeper) checkDecodedUtxoTransaction(ctx sdk.Context, symbol str
 	}
 
 	need := sdk.NewCoins(sdk.NewCoin(symbol, inAmt))
-	owned := opCU.GetAssetCoins()
+	owned := opCUAst.GetAssetCoins()
 	if owned.AmountOf(symbol).LT(inAmt) {
 		return sdk.ZeroInt(), sdk.ErrInsufficientCoins(fmt.Sprintf("opCU has insufficient coins, expected: %v, actual have:%v", need, owned))
 	}
@@ -850,19 +836,15 @@ func (keeper BaseKeeper) checkDecodedUtxoTransaction(ctx sdk.Context, symbol str
 	return inAmt, nil
 }
 
-func (keeper BaseKeeper) checkWithdrawalOpCU(opCU exported.CustodianUnit, chain, symbol string, sendable bool, fromAddr string) (err sdk.Error) {
-	if opCU == nil {
+func (keeper BaseKeeper) checkWithdrawalOpCU(opCUAst exported.CUIBCAsset, chain, symbol string, sendable bool, fromAddr string) (err sdk.Error) {
+	if opCUAst == nil {
 		err = sdk.ErrInvalidAccount("CU is nil")
 		return
 	}
 
-	opCUAddr := opCU.GetAddress()
-	if opCU.GetCUType() != sdk.CUTypeOp {
+	opCUAddr := opCUAst.GetAddress()
+	if opCUAst.GetCUType() != sdk.CUTypeOp {
 		err = sdk.ErrInvalidAccount(fmt.Sprintf("CU %v is not a OPCU", opCUAddr))
-		return
-	}
-	if opCU.GetSymbol() != symbol {
-		err = sdk.ErrInvalidAccount(fmt.Sprintf("symbol mismatch, expected:%v, got:%v", symbol, opCU.GetSymbol()))
 		return
 	}
 
@@ -877,7 +859,7 @@ func (keeper BaseKeeper) checkWithdrawalOpCU(opCU exported.CustodianUnit, chain,
 		return
 	}
 
-	sendStatus := opCU.IsEnabledSendTx(chain, fromAddr)
+	sendStatus := opCUAst.IsEnabledSendTx(chain, fromAddr)
 	if sendStatus != sendable {
 		err = sdk.ErrInternal(fmt.Sprintf("lockStatus mismatch, expected %v, actual %v", sendable, sendStatus))
 		return
@@ -914,38 +896,24 @@ func (keeper BaseKeeper) CancelWithdrawal(ctx sdk.Context, fromCUAddr sdk.CUAddr
 		return sdk.ErrInvalidTx("cancel withdrawal not confirmed").Result()
 	}
 
-	tokenInfo := keeper.tk.GetTokenInfo(ctx, sdk.Symbol(withdrawalOrder.Symbol))
+	tokenInfo := keeper.tk.GetIBCToken(ctx, sdk.Symbol(withdrawalOrder.Symbol))
 	chain := tokenInfo.Chain.String()
 
 	feeCoins := sdk.NewCoins(sdk.NewCoin(chain, withdrawalOrder.GasFee))
 	coins := sdk.NewCoins(sdk.NewCoin(withdrawalOrder.Symbol, withdrawalOrder.Amount))
 	need := coins.Add(feeCoins)
 
-	have := fromCU.GetCoinsHold()
-	if chain == withdrawalOrder.Symbol {
-		if have.AmountOf(chain).LT(need.AmountOf(chain)) {
-			return sdk.ErrInsufficientCoins(fmt.Sprintf("need:%v, actual have:%v", need, have)).Result()
-		}
-	} else {
-		if have.AmountOf(chain).LT(withdrawalOrder.GasFee) || have.AmountOf(withdrawalOrder.Symbol).LT(withdrawalOrder.Amount) {
-			return sdk.ErrInsufficientCoins(fmt.Sprintf("need:%v, actual have:%v", need, have)).Result()
-		}
+	balanceFlows, err := keeper.UnlockCoins(ctx, fromCUAddr, need)
+	if err != nil {
+		return err.Result()
 	}
-
-	fromCU.ResetBalanceFlows()
-	fromCU.SubCoinsHold(need)
-	fromCU.AddCoins(need)
-	keeper.ck.SetCU(ctx, fromCU)
 
 	withdrawalOrder.SetOrderStatus(sdk.OrderStatusCancel)
 	keeper.ok.SetOrder(ctx, withdrawalOrder)
 
 	var flows []sdk.Flow
 	flows = append(flows, keeper.rk.NewOrderFlow(sdk.Symbol(withdrawalOrder.Symbol), withdrawalOrder.GetCUAddress(), withdrawalOrder.GetID(), sdk.OrderTypeWithdrawal, sdk.OrderStatusCancel))
-
-	for _, balanceFlow := range fromCU.GetBalanceFlows() {
-		flows = append(flows, balanceFlow)
-	}
+	flows = append(flows, balanceFlows...)
 
 	result := sdk.Result{}
 	receipt := keeper.rk.NewReceipt(sdk.CategoryTypeWithdrawal, flows)

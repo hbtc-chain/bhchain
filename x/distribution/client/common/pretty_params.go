@@ -11,15 +11,17 @@ type PrettyParams struct {
 	BaseProposerReward  json.RawMessage `json:"base_proposer_reward"`
 	BonusProposerReward json.RawMessage `json:"bonus_proposer_reward"`
 	WithdrawAddrEnabled json.RawMessage `json:"withdraw_addr_enabled"`
+	KeyNodeReward       json.RawMessage `json:"key_node_reward"`
 }
 
 // Construct a new PrettyParams
-func NewPrettyParams(communityTax json.RawMessage, baseProposerReward json.RawMessage, bonusProposerReward json.RawMessage, withdrawAddrEnabled json.RawMessage) PrettyParams {
+func NewPrettyParams(communityTax json.RawMessage, baseProposerReward json.RawMessage, bonusProposerReward json.RawMessage, withdrawAddrEnabled json.RawMessage, keyNodeReward json.RawMessage) PrettyParams {
 	return PrettyParams{
 		CommunityTax:        communityTax,
 		BaseProposerReward:  baseProposerReward,
 		BonusProposerReward: bonusProposerReward,
 		WithdrawAddrEnabled: withdrawAddrEnabled,
+		KeyNodeReward:       keyNodeReward,
 	}
 }
 
@@ -28,7 +30,8 @@ func (pp PrettyParams) String() string {
   Community Tax:          %s
   Base Proposer Reward:   %s
   Bonus Proposer Reward:  %s
-  Withdraw Addr Enabled:  %s`, pp.CommunityTax,
-		pp.BaseProposerReward, pp.BonusProposerReward, pp.WithdrawAddrEnabled)
+  Withdraw Addr Enabled:  %s
+  Key Node Reward:  %s`, pp.CommunityTax,
+		pp.BaseProposerReward, pp.BonusProposerReward, pp.WithdrawAddrEnabled, pp.KeyNodeReward)
 
 }

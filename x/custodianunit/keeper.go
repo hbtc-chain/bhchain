@@ -36,13 +36,9 @@ type CUKeeperI interface {
 
 	GetOpCUs(ctx sdk.Context, symbol string) []exported.CustodianUnit
 
-	GetOpCUsInfo(ctx sdk.Context, symbol string) []sdk.OpCUInfo
-
 	RemoveCU(ctx sdk.Context, cu exported.CustodianUnit)
 
 	IterateCUs(ctx sdk.Context, process func(exported.CustodianUnit) (stop bool))
-
-	GetNextCUNumber(ctx sdk.Context) uint64
 
 	// param funcsions
 	SetParams(ctx sdk.Context, params types.Params)
@@ -51,24 +47,7 @@ type CUKeeperI interface {
 
 	Logger(ctx sdk.Context) log.Logger
 
-	// deposit functions
-	GetDepositList(ctx sdk.Context, symbol string, address sdk.CUAddress) sdk.DepositList
-
-	GetDepositListByHash(ctx sdk.Context, symbol string, address sdk.CUAddress, hash string) sdk.DepositList
-
-	SetDepositList(ctx sdk.Context, symbol string, address sdk.CUAddress, list sdk.DepositList)
-
-	SaveDeposit(ctx sdk.Context, symbol string, address sdk.CUAddress, deposit sdk.DepositItem) error
-
-	DelDeposit(ctx sdk.Context, symbol string, address sdk.CUAddress, hash string, index uint64)
-
-	SetDepositStatus(ctx sdk.Context, symbol string, address sdk.CUAddress, hash string, index uint64, stautus sdk.DepositItemStatus) error
-
-	GetDeposit(ctx sdk.Context, symbol string, address sdk.CUAddress, hash string, index uint64) sdk.DepositItem
-
-	IsDepositExist(ctx sdk.Context, symbol string, address sdk.CUAddress, hash string, index uint64) bool
-
-	SetExtAddresseWithCU(ctx sdk.Context, symbol, extAddress string, cuAddress sdk.CUAddress)
+	SetExtAddressWithCU(ctx sdk.Context, symbol, extAddress string, cuAddress sdk.CUAddress)
 
 	GetCUFromExtAddress(ctx sdk.Context, symbol, extAddress string) (sdk.CUAddress, error)
 }
@@ -84,7 +63,6 @@ type CUKeeper struct {
 	// The prototypical CU constructor.
 	proto func() exported.CustodianUnit
 
-	tk internal.TokenKeeper
 	sk internal.StakingKeeper
 
 	// The codec codec for binary encoding/decoding of CUs.
@@ -101,13 +79,12 @@ func (ck *CUKeeper) SetStakingKeeper(sk internal.StakingKeeper) {
 // (binary) encode and decode concrete sdk.CustodianUnits.
 // nolint
 func NewCUKeeper(
-	cdc *codec.Codec, key sdk.StoreKey, tk internal.TokenKeeper, paramstore subspace.Subspace, proto func() exported.CustodianUnit,
+	cdc *codec.Codec, key sdk.StoreKey, paramstore subspace.Subspace, proto func() exported.CustodianUnit,
 ) CUKeeper {
 	return CUKeeper{
 		key:           key,
 		proto:         proto,
 		cdc:           cdc,
-		tk:            tk,
 		ParamSubspace: paramstore.WithKeyTable(types.ParamKeyTable()),
 	}
 }
@@ -136,7 +113,7 @@ func (ck CUKeeper) NewCU(ctx sdk.Context, cu exported.CustodianUnit) exported.Cu
 
 // NewOpCUWithAddress create OP CU
 func (ck CUKeeper) NewOpCUWithAddress(ctx sdk.Context, symbol string, addr sdk.CUAddress) exported.CustodianUnit {
-	if symbol == "" || addr == nil || !ck.tk.IsTokenSupported(ctx, sdk.Symbol(symbol)) {
+	if symbol == "" || addr == nil {
 		return nil
 	}
 	if c := ck.GetCU(ctx, addr); c != nil {
@@ -145,7 +122,7 @@ func (ck CUKeeper) NewOpCUWithAddress(ctx sdk.Context, symbol string, addr sdk.C
 	}
 	opcu := ck.newCUWithAddress(ctx, addr, sdk.CUTypeOp)
 
-	opcu.AddAsset(symbol, "", 0)
+	_ = opcu.SetSymbol(symbol)
 	return opcu
 }
 
@@ -213,47 +190,6 @@ func (ck CUKeeper) GetOpCUs(ctx sdk.Context, symbol string) []exported.Custodian
 	return CUs
 }
 
-// GetOpCUsInfo returns all operation custodian units and depositList of the symbol.
-// if symbol empty ,return all operation custodian units and depositList.
-func (ck CUKeeper) GetOpCUsInfo(ctx sdk.Context, symbol string) []sdk.OpCUInfo {
-	cus := ck.GetOpCUs(ctx, symbol)
-	cusInfo := make([]sdk.OpCUInfo, len(cus))
-
-	for i, cu := range cus {
-		cusymbol := cu.GetSymbol()
-		chain := ck.tk.GetChain(ctx, sdk.Symbol(cusymbol)).String()
-		cusInfo[i].Symbol = cusymbol
-		cusInfo[i].Amount = cu.GetAssetCoins().AmountOf(cusymbol)
-		cusInfo[i].CuAddress = cu.GetAddress().String()
-		cusInfo[i].MultisignAddress = cu.GetAssetAddress(cusymbol, cu.GetAssetPubkeyEpoch())
-		cusInfo[i].LastEpochMultisignAddress = cu.GetAssetAddress(cusymbol, cu.GetAssetPubkeyEpoch()-1)
-		sendEnable := cu.IsEnabledSendTx(chain, cusInfo[i].MultisignAddress)
-		cusInfo[i].Locked = !sendEnable
-		cusInfo[i].GasUsed = cu.GetGasUsed().AmountOf(chain)
-		cusInfo[i].GasReceived = cu.GetGasReceived().AmountOf(chain)
-		cusInfo[i].MainNetAmount = cu.GetAssetCoins().AmountOf(chain)
-		cusInfo[i].MigrationStatus = cu.GetMigrationStatus()
-
-		if ck.tk.IsUtxoBased(ctx, sdk.Symbol(cusymbol)) {
-			cusInfo[i].DepositList = ck.GetDepositList(ctx, cusymbol, cu.GetAddress())
-		}
-	}
-	return cusInfo
-}
-
-func (ck CUKeeper) startMigrationForAllOpcus(ctx sdk.Context, epoch sdk.Epoch) {
-	opCUs := ck.GetOpCUs(ctx, "")
-	if len(opCUs) == 0 {
-		epoch.MigrationFinished = true
-		ck.sk.SetEpoch(ctx, epoch)
-		return
-	}
-	for _, opCU := range opCUs {
-		opCU.SetMigrationStatus(sdk.MigrationBegin)
-		ck.SetCU(ctx, opCU)
-	}
-}
-
 // GetAllCUs returns all custodian units in the CUKeeper.
 func (ck CUKeeper) GetAllCUs(ctx sdk.Context) []exported.CustodianUnit {
 	CUs := []exported.CustodianUnit{}
@@ -291,114 +227,6 @@ func (ck CUKeeper) IterateCUs(ctx sdk.Context, process func(exported.CustodianUn
 	}
 }
 
-// GetNextCUNumber Returns and increments the global CU number counter
-func (ck CUKeeper) GetNextCUNumber(ctx sdk.Context) uint64 {
-	return 0
-}
-
-func (ck CUKeeper) GetPendingDepositList(ctx sdk.Context, address sdk.CUAddress) map[string]sdk.DepositList {
-	store := ctx.KVStore(ck.key)
-	iterator := sdk.KVStorePrefixIterator(store, types.DepositStorePrefixKeyWithAddr(address))
-	defer iterator.Close()
-
-	deposits := make(map[string]sdk.DepositList)
-	for ; iterator.Valid(); iterator.Next() {
-		bz := iterator.Value()
-		var dl sdk.DepositItem
-		ck.cdc.UnmarshalBinaryBare(bz, &dl)
-		if dl.Status == sdk.DepositItemStatusUnCollected {
-			token := types.DecodeSymbolFromDepositListKey(iterator.Key())
-			deposits[token] = append(deposits[token], dl)
-		}
-	}
-	return deposits
-
-}
-
-// ----------------------------------------------------------------------
-// DepositList funcs
-func (ck CUKeeper) GetDepositList(ctx sdk.Context, symbol string, address sdk.CUAddress) sdk.DepositList {
-	store := ctx.KVStore(ck.key)
-	iterator := sdk.KVStorePrefixIterator(store, types.DepositStorePrefixKey(symbol, address))
-	defer iterator.Close()
-
-	var dls sdk.DepositList
-	for ; iterator.Valid(); iterator.Next() {
-		bz := iterator.Value()
-		var dl sdk.DepositItem
-		ck.cdc.UnmarshalBinaryBare(bz, &dl)
-		dls.AddDepositItem(dl)
-	}
-	return dls
-}
-
-func (ck CUKeeper) GetDepositListByHash(ctx sdk.Context, symbol string, address sdk.CUAddress, hash string) sdk.DepositList {
-	dls := ck.GetDepositList(ctx, symbol, address)
-	dlsGot := dls.Filter(func(d sdk.DepositItem) bool {
-		return d.GetHash() == hash
-	})
-	return dlsGot
-}
-
-func (ck CUKeeper) SetDepositList(ctx sdk.Context, symbol string, address sdk.CUAddress, list sdk.DepositList) {
-	for _, item := range list {
-		ck.SaveDeposit(ctx, symbol, address, item)
-	}
-}
-
-// GetDeposit get deposit item from store
-func (ck CUKeeper) GetDeposit(ctx sdk.Context, symbol string, address sdk.CUAddress, hash string, index uint64) sdk.DepositItem {
-	store := ctx.KVStore(ck.key)
-	bz := store.Get(types.DepositStoreKey(symbol, address, hash, index))
-	if bz == nil {
-		return sdk.DepositNil
-	}
-	var item sdk.DepositItem
-	ck.cdc.MustUnmarshalBinaryBare(bz, &item)
-
-	return item
-}
-
-func (ck CUKeeper) IsDepositExist(ctx sdk.Context, symbol string, address sdk.CUAddress, hash string, index uint64) bool {
-	store := ctx.KVStore(ck.key)
-	return store.Has(types.DepositStoreKey(symbol, address, hash, index))
-}
-
-// SaveDeposit save deposit item to store
-func (ck CUKeeper) SaveDeposit(ctx sdk.Context, symbol string, address sdk.CUAddress, depositItem sdk.DepositItem) error {
-	store := ctx.KVStore(ck.key)
-
-	bz, err := ck.cdc.MarshalBinaryBare(depositItem)
-	if err != nil {
-		return err
-	}
-
-	store.Set(types.DepositStoreKey(symbol, address, depositItem.GetHash(), depositItem.GetIndex()), bz)
-
-	return nil
-}
-
-// DelDeposit delete deposit item from store
-func (ck CUKeeper) DelDeposit(ctx sdk.Context, symbol string, address sdk.CUAddress, hash string, index uint64) {
-	store := ctx.KVStore(ck.key)
-	store.Delete(types.DepositStoreKey(symbol, address, hash, index))
-}
-
-func (ck CUKeeper) SetDepositStatus(ctx sdk.Context, symbol string, address sdk.CUAddress, hash string, index uint64, stautus sdk.DepositItemStatus) error {
-	item := ck.GetDeposit(ctx, symbol, address, hash, index)
-	if item == sdk.DepositNil {
-		return fmt.Errorf("deposit not exist %v%v", hash, index)
-	}
-
-	item.Status = stautus
-	ck.SaveDeposit(ctx, symbol, address, item)
-	return nil
-}
-
-func (ck CUKeeper) GetTokenKeeper(ctx sdk.Context) internal.TokenKeeper {
-	return ck.tk
-}
-
 // -----------------------------------------------------------------------------
 // Params
 
@@ -422,7 +250,12 @@ func (ck CUKeeper) getOpAddresses(ctx sdk.Context, symbol string) []sdk.CUAddres
 	store := ctx.KVStore(ck.key)
 	var addresses []sdk.CUAddress
 
-	iter := sdk.KVStorePrefixIterator(store, append(types.OpCUPrefix, []byte(symbol)...))
+	var iter sdk.Iterator
+	if symbol == "" {
+		iter = sdk.KVStorePrefixIterator(store, types.OpCUPrefix)
+	} else {
+		iter = sdk.KVStorePrefixIterator(store, types.OpCUKeyPrefix(symbol))
+	}
 	defer iter.Close()
 	for ; iter.Valid(); iter.Next() {
 		addresses = append(addresses, types.AddressFromOpCUKey(iter.Key()))
@@ -481,7 +314,6 @@ func (ck CUKeeper) newCUWithAddress(ctx sdk.Context, address sdk.CUAddress, cuTy
 		panic(err)
 	}
 
-	cu.SetMigrationStatus(sdk.MigrationFinish)
 	return cu
 }
 
@@ -507,7 +339,7 @@ func (ck CUKeeper) GetCUFromExtAddress(ctx sdk.Context, chain, extAddress string
 }
 
 // SetExtAddresseWithCU
-func (ck CUKeeper) SetExtAddresseWithCU(ctx sdk.Context, chain, extAddress string, cuAddress sdk.CUAddress) {
+func (ck CUKeeper) SetExtAddressWithCU(ctx sdk.Context, chain, extAddress string, cuAddress sdk.CUAddress) {
 	store := ctx.KVStore(ck.key)
 	bz, err := ck.cdc.MarshalBinaryBare(cuAddress)
 	if err != nil {

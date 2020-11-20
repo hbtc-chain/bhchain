@@ -15,7 +15,7 @@ func InitGenesis(ctx sdk.Context, keeper Keeper, ak types.CUKeeper, data Genesis
 		var totalSupply sdk.Coins
 		ak.IterateCUs(ctx,
 			func(acc autypes.CU) (stop bool) {
-				totalSupply = totalSupply.Add(acc.GetCoins())
+				// totalSupply = totalSupply.Add(acc.GetCoins())
 				return false
 			},
 		)

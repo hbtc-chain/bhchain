@@ -13,24 +13,28 @@ type Keeper struct {
 	cdc      *codec.Codec
 	tk       internal.TokenKeeper
 	ck       internal.CUKeeper
+	ik       internal.IBCAssetKeeper
 	ok       internal.OrderKeeper
 	rk       internal.ReceiptKeeper
 	vk       internal.StakingKeeper
 	dk       internal.DistributionKeeper
+	trk      internal.TransferKeeper
 	cn       chainnode.Chainnode
 }
 
-func NewKeeper(store sdk.StoreKey, cdc *codec.Codec, tk internal.TokenKeeper, ck internal.CUKeeper, ok internal.OrderKeeper,
-	rk internal.ReceiptKeeper, vk internal.StakingKeeper, dk internal.DistributionKeeper, cn chainnode.Chainnode) Keeper {
+func NewKeeper(store sdk.StoreKey, cdc *codec.Codec, tk internal.TokenKeeper, ck internal.CUKeeper, ik internal.IBCAssetKeeper, ok internal.OrderKeeper,
+	rk internal.ReceiptKeeper, vk internal.StakingKeeper, dk internal.DistributionKeeper, trk internal.TransferKeeper, cn chainnode.Chainnode) Keeper {
 	return Keeper{
 		storeKey: store,
 		cdc:      cdc,
 		tk:       tk,
 		ck:       ck,
+		ik:       ik,
 		ok:       ok,
 		rk:       rk,
 		vk:       vk,
 		dk:       dk,
+		trk:      trk,
 		cn:       cn,
 	}
 }
@@ -61,7 +65,7 @@ func (k *Keeper) DelWaitAssignKeyGenOrderID(ctx sdk.Context, orderID string) err
 	return nil
 }
 
-func (k Keeper) delAllWaitAssignKeyGenOrderIDs(ctx sdk.Context) error {
+func (k *Keeper) delAllWaitAssignKeyGenOrderIDs(ctx sdk.Context) error {
 	orderIDs := k.GetWaitAssignKeyGenOrderIDs(ctx)
 	for _, id := range orderIDs {
 		order := k.ok.GetOrder(ctx, id)
@@ -108,6 +112,23 @@ func (k *Keeper) resetKeyGenOrders(ctx sdk.Context, epoch sdk.Epoch) {
 		keygenOrder.SetOrderStatus(sdk.OrderStatusBegin)
 		k.ok.SetOrder(ctx, keygenOrder)
 	}
+}
+
+func (k *Keeper) getExcludedKeyNode(ctx sdk.Context, keyNodes []sdk.CUAddress) sdk.CUAddress {
+	var excluded sdk.CUAddress
+	var longest int64
+	blkHeight := ctx.BlockHeight()
+	for _, keyNode := range keyNodes {
+		val, _ := k.vk.GetValidator(ctx, sdk.ValAddress(keyNode))
+		if longest < blkHeight-int64(val.LastKeyNodeHeartbeatHeight) {
+			longest = blkHeight - int64(val.LastKeyNodeHeartbeatHeight)
+			excluded = keyNode
+		}
+	}
+	if longest >= MaxKeyNodeHeartbeat {
+		return excluded
+	}
+	return nil
 }
 
 func waitAssignKey() []byte {

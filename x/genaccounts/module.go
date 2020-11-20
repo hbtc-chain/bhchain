@@ -75,15 +75,17 @@ func (AppModuleBasic) IterateGenesisCUs(cdc *codec.Codec, appGenesis map[string]
 // app module
 type AppModule struct {
 	AppModuleBasic
-	cuKeeper types.CUKeeper
+	cuKeeper       types.CUKeeper
+	transferKeeper types.TransferKeeper
 }
 
 // NewAppModule creates a new AppModule object
-func NewAppModule(cuKeeper types.CUKeeper) module.AppModule {
+func NewAppModule(cuKeeper types.CUKeeper, transferKeeper types.TransferKeeper) module.AppModule {
 
 	return module.NewGenesisOnlyAppModule(AppModule{
 		AppModuleBasic: AppModuleBasic{},
 		cuKeeper:       cuKeeper,
+		transferKeeper: transferKeeper,
 	})
 }
 
@@ -91,7 +93,7 @@ func NewAppModule(cuKeeper types.CUKeeper) module.AppModule {
 func (am AppModule) InitGenesis(ctx sdk.Context, data json.RawMessage) []abci.ValidatorUpdate {
 	var genesisState GenesisState
 	ModuleCdc.MustUnmarshalJSON(data, &genesisState)
-	InitGenesis(ctx, ModuleCdc, am.cuKeeper, genesisState)
+	InitGenesis(ctx, ModuleCdc, am.cuKeeper, am.transferKeeper, genesisState)
 	return []abci.ValidatorUpdate{}
 }
 

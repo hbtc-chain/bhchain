@@ -12,32 +12,28 @@ const (
 	// ProposalTypeAddToken defines the type for a AddToken
 	ProposalTypeAddToken          = "AddToken"
 	ProposalTypeTokenParamsChange = "TokenParamsChange"
-	ProposalTypeDisableToken      = "DisableToken"
 )
 
 // Assert CommunityPoolSpendProposal implements govtypes.Content at compile-time
 var _ govtypes.Content = AddTokenProposal{}
 var _ govtypes.Content = TokenParamsChangeProposal{}
-var _ govtypes.Content = DisableTokenProposal{}
 
 func init() {
 	govtypes.RegisterProposalType(ProposalTypeAddToken)
 	govtypes.RegisterProposalTypeCodec(AddTokenProposal{}, "hbtcchain/AddTokenProposal")
 	govtypes.RegisterProposalType(ProposalTypeTokenParamsChange)
 	govtypes.RegisterProposalTypeCodec(TokenParamsChangeProposal{}, "hbtcchain/TokenParamsChangeProposal")
-	govtypes.RegisterProposalType(ProposalTypeDisableToken)
-	govtypes.RegisterProposalTypeCodec(DisableTokenProposal{}, "hbtcchain/DisableTokenProposal")
 }
 
 // AddTokenProposal add a new token
 type AddTokenProposal struct {
 	Title       string        `json:"title" yaml:"title"`
 	Description string        `json:"description" yaml:"description"`
-	TokenInfo   sdk.TokenInfo `json:"token_info" yaml:"token_info"`
+	TokenInfo   *sdk.IBCToken `json:"token_info" yaml:"token_info"`
 }
 
 // NewAddTokenProposal creates a new add token proposal.
-func NewAddTokenProposal(title, description string, tokenInfo sdk.TokenInfo) AddTokenProposal {
+func NewAddTokenProposal(title, description string, tokenInfo *sdk.IBCToken) AddTokenProposal {
 	return AddTokenProposal{
 		Title:       title,
 		Description: description,
@@ -69,10 +65,6 @@ func (atp AddTokenProposal) ValidateBasic() sdk.Error {
 		return ErrInvalidProposalTokenInfo(DefaultCodespace)
 	}
 
-	// Suppose IsWithdrawalEnabled, IsSendEnabled,IsDepositEnabled are all disabled
-	if !(atp.TokenInfo.IsWithdrawalEnabled || atp.TokenInfo.IsSendEnabled || atp.TokenInfo.IsDepositEnabled) {
-		return ErrInvalidProposalTokenInfo(DefaultCodespace)
-	}
 	return nil
 }
 
@@ -135,7 +127,7 @@ func (ctpp TokenParamsChangeProposal) ValidateBasic() sdk.Error {
 		return err
 	}
 
-	if !sdk.Symbol(ctpp.Symbol).IsValidTokenName() {
+	if !sdk.Symbol(ctpp.Symbol).IsValid() {
 		return sdk.ErrInvalidSymbol(fmt.Sprintf("%s is invalid", ctpp.Symbol))
 	}
 
@@ -174,60 +166,5 @@ func (ctpp TokenParamsChangeProposal) String() string {
 	for _, pc := range ctpp.Changes {
 		b.WriteString(fmt.Sprintf("%s: %s\t", pc.Key, pc.Value))
 	}
-	return b.String()
-}
-
-// ModifyTokenProposal modify a token's variable parameter
-type DisableTokenProposal struct {
-	Title       string `json:"title" yaml:"title"`
-	Description string `json:"description" yaml:"description"`
-	Symbol      string `json:"symbol" yaml:"symbol"`
-}
-
-// NewAddTokenProposal creates a new add token proposal.
-func NewDisableTokenProposal(title, description, sybmol string) DisableTokenProposal {
-	return DisableTokenProposal{
-		Title:       title,
-		Description: description,
-		Symbol:      sybmol,
-	}
-}
-
-// GetTitle returns the title of a community pool spend proposal.
-func (dtp DisableTokenProposal) GetTitle() string { return dtp.Title }
-
-// GetDescription returns the description of a community pool spend proposal.
-func (dtp DisableTokenProposal) GetDescription() string { return dtp.Description }
-
-// GetDescription returns the routing key of a community pool spend proposal.
-func (dtp DisableTokenProposal) ProposalRoute() string { return RouterKey }
-
-func (dtp DisableTokenProposal) ProposalToken() string { return sdk.NativeToken }
-
-// ProposalType returns the type of a community pool spend proposal.
-func (dtp DisableTokenProposal) ProposalType() string { return ProposalTypeDisableToken }
-
-// ValidateBasic runs basic stateless validity checks
-func (dtp DisableTokenProposal) ValidateBasic() sdk.Error {
-	err := govtypes.ValidateAbstract(DefaultCodespace, dtp)
-	if err != nil {
-		return err
-	}
-
-	if !sdk.Symbol(dtp.Symbol).IsValidTokenName() {
-		return sdk.ErrInvalidSymbol(fmt.Sprintf("%s is invalid", dtp.Symbol))
-	}
-
-	return err
-}
-
-// String implements the Stringer interface.
-func (dtp DisableTokenProposal) String() string {
-	var b strings.Builder
-	b.WriteString(fmt.Sprintf(`Disable Token Proposal:
- Title:       %s
- Description: %s
- Symbol:      %s
-`, dtp.Title, dtp.Description, dtp.Symbol))
 	return b.String()
 }

@@ -47,7 +47,6 @@ func ValidateAccountInGenesis(appGenesisState map[string]json.RawMessage,
 	stakingDataBz := appGenesisState[stakingtypes.ModuleName]
 	var stakingData stakingtypes.GenesisState
 	cdc.MustUnmarshalJSON(stakingDataBz, &stakingData)
-	bondDenom := stakingData.Params.BondDenom
 
 	genUtilDataBz := appGenesisState[stakingtypes.ModuleName]
 	var genesisState GenesisState
@@ -57,19 +56,8 @@ func ValidateAccountInGenesis(appGenesisState map[string]json.RawMessage,
 	genAccIterator.IterateGenesisCUs(cdc, appGenesisState,
 		func(acc authexported.CustodianUnit) (stop bool) {
 			CUAddress := acc.GetAddress()
-			accCoins := acc.GetCoins()
-
 			// Ensure that CustodianUnit is in genesis
 			if CUAddress.Equals(key) {
-
-				// Ensure CustodianUnit contains enough funds of default bond denom
-				if coins.AmountOf(bondDenom).GT(accCoins.AmountOf(bondDenom)) {
-					err = fmt.Errorf(
-						"CustodianUnit %v is in genesis, but it only has %v%v available to stake, not %v%v",
-						key.String(), accCoins.AmountOf(bondDenom), bondDenom, coins.AmountOf(bondDenom), bondDenom,
-					)
-					return true
-				}
 				accountIsInGenesis = true
 				return true
 			}

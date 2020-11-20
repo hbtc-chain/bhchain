@@ -67,6 +67,13 @@ type QueryEpochParams struct {
 	Height uint64
 }
 
+func NewQueryEpochParams(index, height uint64) QueryEpochParams {
+	return QueryEpochParams{
+		Index:  index,
+		Height: height,
+	}
+}
+
 func NewQueryBondsParams(delegatorAddr sdk.CUAddress, validatorAddr sdk.ValAddress) QueryBondsParams {
 	return QueryBondsParams{
 		DelegatorAddr: delegatorAddr,

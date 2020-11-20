@@ -11,3 +11,8 @@ type CUKeeper interface {
 	SetCU(sdk.Context, authexported.CustodianUnit)
 	IterateCUs(ctx sdk.Context, process func(authexported.CustodianUnit) (stop bool))
 }
+
+type TransferKeeper interface {
+	AddCoins(sdk.Context, sdk.CUAddress, sdk.Coins) (sdk.Coins, []sdk.Flow, sdk.Error)
+	AddCoinsHold(sdk.Context, sdk.CUAddress, sdk.Coins) (sdk.Coins, []sdk.Flow, sdk.Error)
+}

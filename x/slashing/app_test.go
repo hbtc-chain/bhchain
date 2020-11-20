@@ -9,13 +9,13 @@ import (
 
 	sdk "github.com/hbtc-chain/bhchain/types"
 	"github.com/hbtc-chain/bhchain/x/custodianunit"
+	"github.com/hbtc-chain/bhchain/x/genaccounts"
 	"github.com/hbtc-chain/bhchain/x/mock"
 	"github.com/hbtc-chain/bhchain/x/receipt"
 	"github.com/hbtc-chain/bhchain/x/staking"
 	"github.com/hbtc-chain/bhchain/x/staking/types"
 	"github.com/hbtc-chain/bhchain/x/supply"
 	supplyexported "github.com/hbtc-chain/bhchain/x/supply/exported"
-	"github.com/hbtc-chain/bhchain/x/transfer"
 )
 
 var (
@@ -37,7 +37,6 @@ func getMockApp(t *testing.T) (*mock.App, staking.Keeper, Keeper) {
 	tkeyStaking := sdk.NewTransientStoreKey(staking.TStoreKey)
 	keySlashing := sdk.NewKVStoreKey(StoreKey)
 	keySupply := sdk.NewKVStoreKey(supply.StoreKey)
-	keryTransfer := sdk.NewKVStoreKey(transfer.StoreKey)
 
 	feeCollector := supply.NewEmptyModuleAccount(custodianunit.FeeCollectorName)
 	notBondedPool := supply.NewEmptyModuleAccount(types.NotBondedPoolName, supply.Burner, supply.Staking)
@@ -48,8 +47,7 @@ func getMockApp(t *testing.T) (*mock.App, staking.Keeper, Keeper) {
 	blacklistedAddrs[notBondedPool.String()] = true
 	blacklistedAddrs[bondPool.String()] = true
 
-	rk := mapp.ReceiptKeeper
-	bankKeeper := transfer.NewBaseKeeper(mapp.Cdc, keryTransfer, mapp.CUKeeper, nil, nil, rk, nil, nil, mapp.ParamsKeeper.Subspace(transfer.DefaultParamspace), transfer.DefaultCodespace, blacklistedAddrs)
+	bankKeeper := mapp.TransferKeeper
 	maccPerms := map[string][]string{
 		custodianunit.FeeCollectorName: nil,
 		staking.NotBondedPoolName:      []string{supply.Burner, supply.Staking},
@@ -57,6 +55,7 @@ func getMockApp(t *testing.T) (*mock.App, staking.Keeper, Keeper) {
 	}
 	supplyKeeper := supply.NewKeeper(mapp.Cdc, keySupply, mapp.CUKeeper, bankKeeper, maccPerms)
 	stakingKeeper := staking.NewKeeper(mapp.Cdc, keyStaking, tkeyStaking, supplyKeeper, mapp.ParamsKeeper.Subspace(staking.DefaultParamspace), staking.DefaultCodespace)
+	stakingKeeper.SetTransferKeeper(mapp.TransferKeeper)
 	keeper := NewKeeper(mapp.Cdc, keySlashing, stakingKeeper, mapp.ParamsKeeper.Subspace(DefaultParamspace), DefaultCodespace)
 	mapp.Router().AddRoute(staking.RouterKey, staking.NewHandler(stakingKeeper))
 	mapp.Router().AddRoute(RouterKey, NewHandler(keeper))
@@ -65,7 +64,7 @@ func getMockApp(t *testing.T) (*mock.App, staking.Keeper, Keeper) {
 	mapp.SetInitChainer(getInitChainer(mapp, stakingKeeper, mapp.CUKeeper, supplyKeeper,
 		[]supplyexported.ModuleAccountI{feeCollector, notBondedPool, bondPool}))
 
-	require.NoError(t, mapp.CompleteSetup(keyStaking, tkeyStaking, keySupply, keySlashing))
+	require.NoError(t, mapp.CompleteSetup(keyStaking, tkeyStaking, keySupply, keySlashing, mapp.KeyTransfer))
 
 	return mapp, stakingKeeper, keeper
 }
@@ -91,7 +90,6 @@ func getInitChainer(mapp *mock.App, keeper staking.Keeper, cuKeeper types.CUKeep
 
 		mapp.InitChainer(ctx, req)
 		stakingGenesis := staking.DefaultGenesisState()
-		stakingGenesis.Params.ElectionPeriod = 5
 		validators := staking.InitGenesis(ctx, keeper, cuKeeper, supplyKeeper, stakingGenesis)
 		return abci.ResponseInitChain{
 			Validators: validators,
@@ -123,18 +121,18 @@ func TestSlashingMsgs(t *testing.T) {
 	genCoin := sdk.NewCoin(sdk.DefaultBondDenom, genTokens)
 	bondCoin := sdk.NewCoin(sdk.DefaultBondDenom, bondTokens)
 
-	acc1 := &custodianunit.BaseCU{
+	acc1 := genaccounts.GenesisCU{
 		Address: addr1,
 		Coins:   sdk.Coins{genCoin},
 	}
-	accs := []custodianunit.CU{acc1}
+	accs := []genaccounts.GenesisCU{acc1}
 	mock.SetGenesis(mapp, accs)
 
 	description := staking.NewDescription("foo_moniker", "", "", "")
 	commission := staking.NewCommissionRates(sdk.ZeroDec(), sdk.ZeroDec(), sdk.ZeroDec())
 
 	createValidatorMsg := staking.NewMsgCreateValidator(
-		sdk.ValAddress(addr1), priv1.PubKey(), bondCoin, description, commission, sdk.OneInt(), false,
+		sdk.ValAddress(addr1), priv1.PubKey(), bondCoin, description, commission, sdk.OneInt(),
 	)
 
 	header := abci.Header{Height: mapp.LastBlockHeight() + 1}

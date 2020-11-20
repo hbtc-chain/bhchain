@@ -8,7 +8,7 @@ import (
 
 	sdk "github.com/hbtc-chain/bhchain/types"
 	"github.com/hbtc-chain/bhchain/x/custodianunit"
-	"github.com/hbtc-chain/bhchain/x/supply/exported"
+	"github.com/hbtc-chain/bhchain/x/supply"
 )
 
 const msgRoute = "testMsg"
@@ -44,7 +44,7 @@ func getMockApp(t *testing.T) *App {
 	mApp := NewApp()
 
 	mApp.Router().AddRoute(msgRoute, func(ctx sdk.Context, msg sdk.Msg) (res sdk.Result) { return })
-	require.NoError(t, mApp.CompleteSetup())
+	require.NoError(t, mApp.CompleteSetup(mApp.KeyTransfer))
 
 	return mApp
 }
@@ -52,7 +52,6 @@ func getMockApp(t *testing.T) *App {
 func TestCheckAndDeliverGenTx(t *testing.T) {
 	mApp := getMockApp(t)
 	mApp.Cdc.RegisterConcrete(testMsg{}, "mock/testMsg", nil)
-	mApp.Cdc.RegisterInterface((*exported.ModuleAccountI)(nil), nil)
 
 	SetGenesis(mApp, accs)
 	ctxCheck := mApp.BaseApp.NewContext(true, abci.Header{})
@@ -60,12 +59,13 @@ func TestCheckAndDeliverGenTx(t *testing.T) {
 	msg := testMsg{signers: []sdk.CUAddress{addrs[0]}, positiveNum: 1}
 
 	acct := mApp.CUKeeper.GetCU(ctxCheck, addrs[0])
-	require.Equal(t, accs[0], acct.(*custodianunit.BaseCU))
+	require.Equal(t, custodianunit.NewBaseCU(accs[0].Type, accs[0].Address, accs[0].PubKey, accs[0].Sequence), acct.(*custodianunit.BaseCU))
 
 	header := abci.Header{Height: mApp.LastBlockHeight() + 1}
+
 	SignCheckDeliver(
 		t, mApp.Cdc, mApp.BaseApp, header, []sdk.Msg{msg},
-		[]uint64{accs[0].GetSequence()},
+		[]uint64{0},
 		true, true, privKeys[0],
 	)
 
@@ -73,7 +73,7 @@ func TestCheckAndDeliverGenTx(t *testing.T) {
 	header = abci.Header{Height: mApp.LastBlockHeight() + 1}
 	res, _, _ := SignCheckDeliver(
 		t, mApp.Cdc, mApp.BaseApp, header, []sdk.Msg{msg},
-		[]uint64{accs[1].GetSequence() + 1},
+		[]uint64{1},
 		true, false, privKeys[1],
 	)
 
@@ -82,9 +82,10 @@ func TestCheckAndDeliverGenTx(t *testing.T) {
 
 	// Resigning the tx with the correct privKey should result in an OK result
 	header = abci.Header{Height: mApp.LastBlockHeight() + 1}
+
 	SignCheckDeliver(
 		t, mApp.Cdc, mApp.BaseApp, header, []sdk.Msg{msg},
-		[]uint64{accs[0].GetSequence() + 1},
+		[]uint64{1},
 		true, true, privKeys[0],
 	)
 }
@@ -92,21 +93,21 @@ func TestCheckAndDeliverGenTx(t *testing.T) {
 func TestCheckGenTx(t *testing.T) {
 	mApp := getMockApp(t)
 	mApp.Cdc.RegisterConcrete(testMsg{}, "mock/testMsg", nil)
-	mApp.Cdc.RegisterInterface((*exported.ModuleAccountI)(nil), nil)
+	supply.RegisterCodec(mApp.Cdc)
 
 	SetGenesis(mApp, accs)
 
 	msg1 := testMsg{signers: []sdk.CUAddress{addrs[0]}, positiveNum: 1}
 	CheckGenTx(
 		t, mApp.BaseApp, []sdk.Msg{msg1},
-		[]uint64{accs[0].GetSequence()},
+		[]uint64{0},
 		true, privKeys[0],
 	)
 
 	msg2 := testMsg{signers: []sdk.CUAddress{addrs[0]}, positiveNum: -1}
 	CheckGenTx(
 		t, mApp.BaseApp, []sdk.Msg{msg2},
-		[]uint64{accs[0].GetSequence()},
+		[]uint64{0},
 		false, privKeys[0],
 	)
 }

@@ -18,7 +18,10 @@ const (
 )
 
 // Assert ParameterChangeProposal implements govtypes.Content at compile-time
-var _ govtypes.Content = ParameterChangeProposal{}
+var (
+	_                         govtypes.Content = ParameterChangeProposal{}
+	parameterChangeValidators                  = []ParameterChangeValidator{}
+)
 
 func init() {
 	govtypes.RegisterProposalType(ProposalTypeChange)
@@ -33,8 +36,16 @@ type ParameterChangeProposal struct {
 	Changes     []ParamChange `json:"changes" yaml:"changes"`
 }
 
+type ParameterChangeValidator interface {
+	Validate(change ParamChange) error
+}
+
 func NewParameterChangeProposal(title, description string, changes []ParamChange) ParameterChangeProposal {
 	return ParameterChangeProposal{title, description, changes}
+}
+
+func RegisterParameterChangeValidator(validator ParameterChangeValidator) {
+	parameterChangeValidators = append(parameterChangeValidators, validator)
 }
 
 // GetTitle returns the title of a parameter change proposal.
@@ -47,11 +58,11 @@ func (pcp ParameterChangeProposal) GetDescription() string { return pcp.Descript
 func (pcp ParameterChangeProposal) ProposalRoute() string { return RouterKey }
 
 func (pcp ParameterChangeProposal) ProposalToken() string {
-	for _, p := range pcp.Changes {
-		if p.Subspace == openswapSubspace {
-			return sdk.NativeDefiToken
-		}
-	}
+	/*  for _, p := range pcp.Changes { */
+	// if p.Subspace == openswapSubspace {
+	// return sdk.NativeDefiToken
+	// }
+	/* } */
 	return sdk.NativeToken
 }
 
@@ -123,7 +134,7 @@ func ValidateChanges(changes []ParamChange) sdk.Error {
 		return ErrEmptyChanges(DefaultCodespace)
 	}
 
-	hasOpenswapSubspace := changes[0].Subspace == openswapSubspace
+	// hasOpenswapSubspace := changes[0].Subspace == openswapSubspace
 	for _, pc := range changes {
 		if len(pc.Subspace) == 0 {
 			return ErrEmptySubspace(DefaultCodespace)
@@ -134,9 +145,16 @@ func ValidateChanges(changes []ParamChange) sdk.Error {
 		if len(pc.Value) == 0 {
 			return ErrEmptyValue(DefaultCodespace)
 		}
-		if (hasOpenswapSubspace && pc.Subspace != openswapSubspace) ||
-			(!hasOpenswapSubspace && pc.Subspace == openswapSubspace) {
-			return ErrMixedSubspace(DefaultCodespace)
+		/*      if (hasOpenswapSubspace && pc.Subspace != openswapSubspace) || */
+		// (!hasOpenswapSubspace && pc.Subspace == openswapSubspace) {
+		// return ErrMixedSubspace(DefaultCodespace)
+		// }
+
+		for _, validator := range parameterChangeValidators {
+			err := validator.Validate(pc)
+			if err != nil {
+				return ErrInvalidChange(DefaultCodespace, err.Error())
+			}
 		}
 
 	}

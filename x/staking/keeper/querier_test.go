@@ -25,7 +25,7 @@ func TestNewQuerier(t *testing.T) {
 	amts := []sdk.Int{sdk.NewInt(90000), sdk.NewInt(80000)}
 	var validators [2]types.Validator
 	for i, amt := range amts {
-		validators[i] = types.NewValidator(sdk.ValAddress(Addrs[i]), PKs[i], types.Description{}, true)
+		validators[i] = types.NewValidator(sdk.ValAddress(Addrs[i]), PKs[i], types.Description{})
 		validators[i], _ = validators[i].AddTokensFromDel(amt)
 		keeper.SetValidator(ctx, validators[i])
 		keeper.SetValidatorByPowerIndex(ctx, validators[i])
@@ -90,7 +90,7 @@ func TestNewQuerier(t *testing.T) {
 
 func TestQueryParametersPool(t *testing.T) {
 	cdc := codec.New()
-	ctx, _, keeper, _ := CreateTestInput(t, false, 10000000)
+	ctx, _, keeper, _, trk := CreateTestInputEx(t, false, 10000000)
 	bondDenom := keeper.BondDenom(ctx)
 
 	res, err := queryParameters(ctx, keeper)
@@ -105,8 +105,8 @@ func TestQueryParametersPool(t *testing.T) {
 	require.Nil(t, err)
 
 	var pool types.Pool
-	bondedPool := keeper.GetBondedPool(ctx)
-	notBondedPool := keeper.GetNotBondedPool(ctx)
+	bondedPool := NewTestCU(ctx, trk, keeper.GetBondedPool(ctx))
+	notBondedPool := NewTestCU(ctx, trk, keeper.GetNotBondedPool(ctx))
 	errRes = cdc.UnmarshalJSON(res, &pool)
 	require.Nil(t, errRes)
 	require.Equal(t, bondedPool.GetCoins().AmountOf(bondDenom), pool.BondedTokens)
@@ -123,7 +123,7 @@ func TestQueryValidators(t *testing.T) {
 	status := []sdk.BondStatus{sdk.Bonded, sdk.Unbonded, sdk.Unbonding}
 	var validators [3]types.Validator
 	for i, amt := range amts {
-		validators[i] = types.NewValidator(sdk.ValAddress(Addrs[i]), PKs[i], types.Description{}, true)
+		validators[i] = types.NewValidator(sdk.ValAddress(Addrs[i]), PKs[i], types.Description{})
 		validators[i], _ = validators[i].AddTokensFromDel(amt)
 		validators[i] = validators[i].UpdateStatus(status[i])
 	}
@@ -182,11 +182,11 @@ func TestQueryDelegation(t *testing.T) {
 	params := keeper.GetParams(ctx)
 
 	// Create Validators and Delegation
-	val1 := types.NewValidator(addrVal1, pk1, types.Description{}, true)
+	val1 := types.NewValidator(addrVal1, pk1, types.Description{})
 	keeper.SetValidator(ctx, val1)
 	keeper.SetValidatorByPowerIndex(ctx, val1)
 
-	val2 := types.NewValidator(addrVal2, pk2, types.Description{}, true)
+	val2 := types.NewValidator(addrVal2, pk2, types.Description{})
 	keeper.SetValidator(ctx, val2)
 	keeper.SetValidatorByPowerIndex(ctx, val2)
 
@@ -401,8 +401,8 @@ func TestQueryRedelegations(t *testing.T) {
 	ctx, _, keeper, _ := CreateTestInput(t, false, 100000000)
 
 	// Create Validators and Delegation
-	val1 := types.NewValidator(addrVal1, pk1, types.Description{}, true)
-	val2 := types.NewValidator(addrVal2, pk2, types.Description{}, true)
+	val1 := types.NewValidator(addrVal1, pk1, types.Description{})
+	val2 := types.NewValidator(addrVal2, pk2, types.Description{})
 	keeper.SetValidator(ctx, val1)
 	keeper.SetValidator(ctx, val2)
 
@@ -466,7 +466,7 @@ func TestQueryUnbondingDelegation(t *testing.T) {
 	ctx, _, keeper, _ := CreateTestInput(t, false, 10000)
 
 	// Create Validators and Delegation
-	val1 := types.NewValidator(addrVal1, pk1, types.Description{}, true)
+	val1 := types.NewValidator(addrVal1, pk1, types.Description{})
 	keeper.SetValidator(ctx, val1)
 
 	// delegate

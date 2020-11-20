@@ -12,7 +12,7 @@ import (
 )
 
 func TestNewQuerier(t *testing.T) {
-	ctx, _, keeper := createTestInput(t, false, 1000, 2)
+	ctx, _, keeper, _ := createTestInput(t, false, 1000, 2)
 
 	supplyCoins := sdk.NewCoins(
 		sdk.NewCoin(sdk.DefaultBondDenom, sdk.NewInt(100)),
@@ -56,7 +56,7 @@ func TestNewQuerier(t *testing.T) {
 }
 
 func TestQuerySupply(t *testing.T) {
-	ctx, _, keeper := createTestInput(t, false, 1000, 2)
+	ctx, _, keeper, _ := createTestInput(t, false, 1000, 2)
 
 	supplyCoins := sdk.NewCoins(
 		sdk.NewCoin(sdk.DefaultBondDenom, sdk.NewInt(100)),

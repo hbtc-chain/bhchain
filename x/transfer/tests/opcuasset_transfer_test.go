@@ -12,7 +12,7 @@ import (
 
 	"github.com/hbtc-chain/bhchain/chainnode"
 	sdk "github.com/hbtc-chain/bhchain/types"
-	"github.com/hbtc-chain/bhchain/x/token"
+	"github.com/hbtc-chain/bhchain/x/custodianunit"
 )
 
 func TestOpcuAstTransferBtcSuccess(t *testing.T) {
@@ -23,16 +23,21 @@ func TestOpcuAstTransferBtcSuccess(t *testing.T) {
 	tk := input.tk
 	ok := input.ok
 	rk := input.rk
+	ik := input.ik
+	newTestCU := func(cu custodianunit.CU) *testCU {
+		return newTestCU(ctx, input.trk, input.ik, cu)
+	}
+
 	ctx = ctx.WithBlockHeight(10)
 	validators := input.validators
 	//cn := input.cn
 	mockCN = chainnode.MockChainnode{}
-	symbol := token.BtcToken
-	chain := token.BtcToken
+	symbol := "btc"
+	chain := "btc"
 	pubkey := ed25519.GenPrivKey().PubKey()
 
-	require.Equal(t, 1, len(ck.GetOpCUs(ctx, token.BtcToken)))
-	require.Equal(t, 1, len(ck.GetOpCUs(ctx, token.EthToken)))
+	require.Equal(t, 1, len(ck.GetOpCUs(ctx, "btc")))
+	require.Equal(t, 1, len(ck.GetOpCUs(ctx, "eth")))
 
 	// setup epoch
 	var valAddr []sdk.CUAddress
@@ -43,9 +48,9 @@ func TestOpcuAstTransferBtcSuccess(t *testing.T) {
 	ctx = ctx.WithBlockHeight(11)
 
 	//setup token
-	tokenInfo := tk.GetTokenInfo(ctx, sdk.Symbol(token.BtcToken))
+	tokenInfo := tk.GetIBCToken(ctx, sdk.Symbol("btc"))
 	tokenInfo.GasPrice = sdk.NewInt(10000000 / 380)
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tk.SetToken(ctx, tokenInfo)
 
 	//setup OpCU
 	opCUBtcAddress := "mh1DurxerNqH3nf9p3ivyn7yjgit1ep2Gg"
@@ -63,19 +68,19 @@ func TestOpcuAstTransferBtcSuccess(t *testing.T) {
 
 	btcOPCUAddr, err := sdk.CUAddressFromBase58("HBCPoshPen4yTWCwCvCVuwbfSmrb3EzNbXTo")
 	require.Nil(t, err)
-	opCU := ck.GetCU(ctx, btcOPCUAddr)
+	opCU := newTestCU(ck.GetCU(ctx, btcOPCUAddr))
 	err = opCU.SetAssetAddress(symbol, opCUBtcAddress, 1)
 	err = opCU.SetAssetAddress(symbol, newEpochAddress, 2)
 	opCU.SetAssetPubkey(pubkey.Bytes(), 2)
 	require.Nil(t, err)
 
-	ck.SetDepositList(ctx, symbol, sdk.CUAddress(btcOPCUAddr), depositList)
+	ik.SetDepositList(ctx, symbol, sdk.CUAddress(btcOPCUAddr), depositList)
 	opCU.AddAssetCoins(sdk.NewCoins(sdk.NewCoin(symbol, totalAmount)))
 	ck.SetCU(ctx, opCU)
 
-	opCU1 := ck.GetCU(ctx, btcOPCUAddr)
+	opCU1 := newTestCU(ck.GetCU(ctx, btcOPCUAddr))
 	require.Equal(t, totalAmount, opCU1.GetAssetCoins().AmountOf(symbol))
-	require.Equal(t, depositList, ck.GetDepositList(ctx, symbol, sdk.CUAddress(btcOPCUAddr)))
+	require.Equal(t, depositList, ik.GetDepositList(ctx, symbol, sdk.CUAddress(btcOPCUAddr)))
 
 	mockCN.On("ValidAddress", chain, symbol, newEpochAddress).Return(true, newEpochAddress)
 
@@ -125,9 +130,9 @@ func TestOpcuAstTransferBtcSuccess(t *testing.T) {
 	require.Equal(t, symbol, wf.Symbol)
 	require.Equal(t, orderID, wf.OrderID)
 
-	opcu := ck.GetCU(ctx, btcOPCUAddr)
+	opcu := newTestCU(ck.GetCU(ctx, btcOPCUAddr))
 	require.Equal(t, sdk.MigrationAssetBegin, opcu.GetMigrationStatus())
-	depositList = ck.GetDepositList(ctx, symbol, sdk.CUAddress(btcOPCUAddr))
+	depositList = ik.GetDepositList(ctx, symbol, sdk.CUAddress(btcOPCUAddr))
 	for i, item := range depositList {
 		if i < 6 {
 			require.Equal(t, sdk.DepositItemStatusInProcess, item.Status)
@@ -139,12 +144,12 @@ func TestOpcuAstTransferBtcSuccess(t *testing.T) {
 	// Step2, OpcuAssetTransferWaitSign
 	var vins []*sdk.UtxoIn
 	var signHashes [][]byte
-	var hashes []string
+	var hashes [][]byte
 	for i := 0; i < 6; i++ {
 		vin := sdk.NewUtxoIn(depositList[i].Hash, depositList[i].Index, depositList[i].Amount, opCUBtcAddress)
 		vins = append(vins, &vin)
 		signHashes = append(signHashes, []byte(strconv.Itoa(i)))
-		hashes = append(hashes, strconv.Itoa(i))
+		hashes = append(hashes, []byte(strconv.Itoa(i)))
 	}
 	opcuAstTransferTxHash := "opcuAstTransferTxHash"
 	gasFee := sdk.NewInt(25000)
@@ -202,7 +207,7 @@ func TestOpcuAstTransferBtcSuccess(t *testing.T) {
 	mockCN.On("QueryUtxoTransactionFromSignedData", chain, symbol, signedData, ins).Return(chainnodeTx, nil).Once()
 	mockCN.On("VerifyUtxoSignedTransaction", chain, symbol, mock.Anything, signedData, ins).Return(true, nil).Once()
 
-	result2 := keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData, "")
+	result2 := keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData)
 	require.Equal(t, sdk.CodeOK, result2.Code)
 
 	// check order
@@ -282,9 +287,9 @@ func TestOpcuAstTransferBtcSuccess(t *testing.T) {
 	require.Equal(t, orderID, wff.OrderID)
 	require.Equal(t, gasFee, wff.CostFee)
 
-	opcu = ck.GetCU(ctx, btcOPCUAddr)
+	opcu = newTestCU(ck.GetCU(ctx, btcOPCUAddr))
 	require.Equal(t, sdk.MigrationAssetBegin, opcu.GetMigrationStatus())
-	depositList = ck.GetDepositList(ctx, symbol, sdk.CUAddress(btcOPCUAddr))
+	depositList = ik.GetDepositList(ctx, symbol, sdk.CUAddress(btcOPCUAddr))
 	require.Equal(t, 2, len(depositList))
 	require.True(t, newEpochAddress == depositList[0].ExtAddress || newEpochAddress == depositList[1].ExtAddress)
 	require.Equal(t, sdk.DepositItemStatusConfirmed, depositList[0].Status)
@@ -299,21 +304,26 @@ func TestOpcuAstTransferBtcError(t *testing.T) {
 	tk := input.tk
 	ok := input.ok
 	rk := input.rk
+	ik := input.ik
+	newTestCU := func(cu custodianunit.CU) *testCU {
+		return newTestCU(ctx, input.trk, input.ik, cu)
+	}
+
 	ctx = ctx.WithBlockHeight(10)
 	validators := input.validators
 	//cn := input.cn
 	mockCN = chainnode.MockChainnode{}
-	symbol := token.BtcToken
-	chain := token.BtcToken
+	symbol := "btc"
+	chain := "btc"
 	pubkey := ed25519.GenPrivKey().PubKey()
 
-	require.Equal(t, 1, len(ck.GetOpCUs(ctx, token.BtcToken)))
-	require.Equal(t, 1, len(ck.GetOpCUs(ctx, token.EthToken)))
+	require.Equal(t, 1, len(ck.GetOpCUs(ctx, "btc")))
+	require.Equal(t, 1, len(ck.GetOpCUs(ctx, "eth")))
 
 	//setup token
-	tokenInfo := tk.GetTokenInfo(ctx, sdk.Symbol(token.BtcToken))
+	tokenInfo := tk.GetIBCToken(ctx, sdk.Symbol("btc"))
 	tokenInfo.GasPrice = sdk.NewInt(10000000 / 380)
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tk.SetToken(ctx, tokenInfo)
 
 	//setup OpCU
 	opCUBtcAddress := "mh1DurxerNqH3nf9p3ivyn7yjgit1ep2Gg"
@@ -331,19 +341,19 @@ func TestOpcuAstTransferBtcError(t *testing.T) {
 
 	btcOPCUAddr, err := sdk.CUAddressFromBase58("HBCPoshPen4yTWCwCvCVuwbfSmrb3EzNbXTo")
 	require.Nil(t, err)
-	opCU := ck.GetCU(ctx, btcOPCUAddr)
+	opCU := newTestCU(ck.GetCU(ctx, btcOPCUAddr))
 	err = opCU.SetAssetAddress(symbol, opCUBtcAddress, 1)
 	err = opCU.SetAssetAddress(symbol, newEpochAddress, 2)
 	opCU.SetAssetPubkey(pubkey.Bytes(), 2)
 	require.Nil(t, err)
 
-	ck.SetDepositList(ctx, symbol, sdk.CUAddress(btcOPCUAddr), depositList)
+	ik.SetDepositList(ctx, symbol, sdk.CUAddress(btcOPCUAddr), depositList)
 	opCU.AddAssetCoins(sdk.NewCoins(sdk.NewCoin(symbol, totalAmount)))
 	ck.SetCU(ctx, opCU)
 
-	opCU1 := ck.GetCU(ctx, btcOPCUAddr)
+	opCU1 := newTestCU(ck.GetCU(ctx, btcOPCUAddr))
 	require.Equal(t, totalAmount, opCU1.GetAssetCoins().AmountOf(symbol))
-	require.Equal(t, depositList, ck.GetDepositList(ctx, symbol, sdk.CUAddress(btcOPCUAddr)))
+	require.Equal(t, depositList, ik.GetDepositList(ctx, symbol, sdk.CUAddress(btcOPCUAddr)))
 
 	mockCN.On("ValidAddress", chain, symbol, newEpochAddress).Return(true, newEpochAddress)
 	mockCN.On("ValidAddress", chain, symbol, opCUBtcAddress).Return(true, opCUBtcAddress)
@@ -400,7 +410,7 @@ func TestOpcuAstTransferBtcError(t *testing.T) {
 			CUAddress: btcOPCUAddr,
 			ID:        duplicatedOrderID,
 			OrderType: sdk.OrderTypeOpcuAssetTransfer,
-			Symbol:    token.BtcToken,
+			Symbol:    "btc",
 		},
 	}
 	ok.SetOrder(ctx, duplicatdcOrder)
@@ -422,32 +432,32 @@ func TestOpcuAstTransferBtcError(t *testing.T) {
 
 	// utxo 状态不正确
 	depositList[0].Status = sdk.DepositItemStatusInProcess
-	ck.SetDepositList(ctx, symbol, sdk.CUAddress(btcOPCUAddr), depositList)
+	ik.SetDepositList(ctx, symbol, sdk.CUAddress(btcOPCUAddr), depositList)
 	result = keeper.OpcuAssetTransfer(ctx, btcOPCUAddr, newEpochAddress, orderID, symbol, transferItems[:6])
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 
 	// utxo 地址周期不对
 	depositList[0].Status = sdk.DepositItemStatusConfirmed
 	depositList[0].ExtAddress = newEpochAddress
-	ck.SetDepositList(ctx, symbol, sdk.CUAddress(btcOPCUAddr), depositList)
+	ik.SetDepositList(ctx, symbol, sdk.CUAddress(btcOPCUAddr), depositList)
 	result = keeper.OpcuAssetTransfer(ctx, btcOPCUAddr, newEpochAddress, orderID, symbol, transferItems[:6])
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 
 	// 所有都正确，通过
 	depositList[0].ExtAddress = opCUBtcAddress
-	ck.SetDepositList(ctx, symbol, sdk.CUAddress(btcOPCUAddr), depositList)
+	ik.SetDepositList(ctx, symbol, sdk.CUAddress(btcOPCUAddr), depositList)
 	result = keeper.OpcuAssetTransfer(ctx, btcOPCUAddr, newEpochAddress, orderID, symbol, transferItems[:6])
 	require.Equal(t, sdk.CodeOK, result.Code)
 
 	// OpcuAssetTransferWaitSign
 	var vins []*sdk.UtxoIn
 	var signHashes [][]byte
-	var hashes []string
+	var hashes [][]byte
 	for i := 0; i < 6; i++ {
 		vin := sdk.NewUtxoIn(depositList[i].Hash, depositList[i].Index, depositList[i].Amount, opCUBtcAddress)
 		vins = append(vins, &vin)
 		signHashes = append(signHashes, []byte(strconv.Itoa(i)))
-		hashes = append(hashes, strconv.Itoa(i))
+		hashes = append(hashes, []byte(strconv.Itoa(i)))
 	}
 	opcuAstTransferTxHash := "opcuAstTransferTxHash"
 	gasFee := sdk.NewInt(25000)
@@ -495,19 +505,19 @@ func TestOpcuAstTransferBtcError(t *testing.T) {
 	require.Contains(t, result.Log, "signhashes's number mismatch")
 
 	//hash mismatch
-	correctHash = hashes[0]
-	hashes[0] = "wrong_hash"
+	tmpHash := hashes[0]
+	hashes[0] = []byte("wrong_hash")
 	result = keeper.OpcuAssetTransferWaitSign(ctx, orderID, hashes, rawData)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	require.Contains(t, result.Log, "mismatch hashes")
-	hashes[0] = correctHash
+	hashes[0] = tmpHash
 
 	//price is too hight
 	size := sdk.EstimateSignedUtxoTxSize(6, 1).ToDec()
 	actualPrice := sdk.NewDecFromInt(gasFee).Quo(size).Mul(sdk.NewDec(sdk.KiloBytes))
 	tokenPrice := actualPrice.Quo(sdk.NewDecWithPrec(12, 1))
 	tokenInfo.GasPrice = tokenPrice.TruncateInt()
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tk.SetToken(ctx, tokenInfo)
 	result = keeper.OpcuAssetTransferWaitSign(ctx, orderID, hashes, rawData)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	require.Contains(t, result.Log, "gas price is too high")
@@ -515,14 +525,14 @@ func TestOpcuAstTransferBtcError(t *testing.T) {
 	//price is too low
 	tokenPrice = actualPrice.Quo(sdk.NewDecWithPrec(8, 1))
 	tokenInfo.GasPrice = tokenPrice.TruncateInt().AddRaw(1)
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tk.SetToken(ctx, tokenInfo)
 	result = keeper.OpcuAssetTransferWaitSign(ctx, orderID, hashes, rawData)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	require.Contains(t, result.Log, "gas price is too low")
 
 	//len(hashes) != len(signHashes)
 	tokenInfo.GasPrice = actualPrice.TruncateInt()
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tk.SetToken(ctx, tokenInfo)
 
 	//everything is ok
 	result = keeper.OpcuAssetTransferWaitSign(ctx, orderID, hashes, rawData)
@@ -534,19 +544,19 @@ func TestOpcuAstTransferBtcError(t *testing.T) {
 
 	// VerifyUtxoSignedTransaction error
 	mockCN.On("VerifyUtxoSignedTransaction", chain, symbol, mock.Anything, signedData, ins).Return(true, errors.New("VerifyUtxoSignedTransactionError")).Once()
-	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData, "")
+	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	require.Contains(t, result.Log, "VerifyUtxoSignedTransactionError")
 
 	// VerifyUtxoSignedTransaction,  verified = false
 	mockCN.On("VerifyUtxoSignedTransaction", chain, symbol, mock.Anything, signedData, ins).Return(false, nil).Once()
-	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData, "")
+	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 
 	// QueryUtxoTransactionFromSignedData error
 	mockCN.On("VerifyUtxoSignedTransaction", chain, symbol, mock.Anything, signedData, ins).Return(true, nil)
 	mockCN.On("QueryUtxoTransactionFromSignedData", chain, symbol, signedData, ins).Return(chainnodeTx, errors.New("QueryUtxoTransactionFromSignedDataError")).Once()
-	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData, "")
+	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 
 	chainnodeTx2 := &chainnode.ExtUtxoTransaction{
@@ -560,27 +570,27 @@ func TestOpcuAstTransferBtcError(t *testing.T) {
 	// vins mismatch
 	chainnodeTx2.Vins = append(vins, vins[0])
 	mockCN.On("QueryUtxoTransactionFromSignedData", chain, symbol, signedData, ins).Return(chainnodeTx2, nil).Once()
-	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData, "")
+	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	chainnodeTx2.Vins = vins
 
 	// vout mismatch
 	chainnodeTx2.Vouts = append(chainnodeTx2.Vouts, chainnodeTx2.Vouts[0])
 	mockCN.On("QueryUtxoTransactionFromSignedData", chain, symbol, signedData, ins).Return(chainnodeTx2, nil).Once()
-	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData, "")
+	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	chainnodeTx2.Vouts = chainnodeTx2.Vouts[:1]
 
 	// cost fee mismatch
 	chainnodeTx2.CostFee = gasFee.AddRaw(1)
 	mockCN.On("QueryUtxoTransactionFromSignedData", chain, symbol, signedData, ins).Return(chainnodeTx2, nil).Once()
-	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData, "")
+	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	chainnodeTx2.CostFee = gasFee
 
 	// everything is ok
 	mockCN.On("QueryUtxoTransactionFromSignedData", chain, symbol, signedData, ins).Return(chainnodeTx2, nil)
-	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData, "")
+	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData)
 	require.Equal(t, sdk.CodeOK, result.Code)
 
 	// OpcuAssetTransferFinish
@@ -638,9 +648,9 @@ func TestOpcuAstTransferBtcError(t *testing.T) {
 	require.Equal(t, orderID, wff.OrderID)
 	require.Equal(t, gasFee, wff.CostFee)
 
-	opcu := ck.GetCU(ctx, btcOPCUAddr)
+	opcu := newTestCU(ck.GetCU(ctx, btcOPCUAddr))
 	require.Equal(t, sdk.MigrationAssetBegin, opcu.GetMigrationStatus())
-	depositList = ck.GetDepositList(ctx, symbol, sdk.CUAddress(btcOPCUAddr))
+	depositList = ik.GetDepositList(ctx, symbol, sdk.CUAddress(btcOPCUAddr))
 	require.Equal(t, 2, len(depositList))
 	require.True(t, newEpochAddress == depositList[0].ExtAddress || newEpochAddress == depositList[1].ExtAddress)
 	require.Equal(t, sdk.DepositItemStatusConfirmed, depositList[0].Status)
@@ -655,16 +665,20 @@ func TestOpcuAstTransferEthSuccess(t *testing.T) {
 	tk := input.tk
 	ok := input.ok
 	rk := input.rk
+	newTestCU := func(cu custodianunit.CU) *testCU {
+		return newTestCU(ctx, input.trk, input.ik, cu)
+	}
+
 	ctx = ctx.WithBlockHeight(10)
 	validators := input.validators
 	//cn := input.cn
 	mockCN = chainnode.MockChainnode{}
-	symbol := token.EthToken
-	chain := token.EthToken
+	symbol := "eth"
+	chain := "eth"
 	pubkey := ed25519.GenPrivKey().PubKey()
 
-	require.Equal(t, 1, len(ck.GetOpCUs(ctx, token.BtcToken)))
-	require.Equal(t, 1, len(ck.GetOpCUs(ctx, token.EthToken)))
+	require.Equal(t, 1, len(ck.GetOpCUs(ctx, "btc")))
+	require.Equal(t, 1, len(ck.GetOpCUs(ctx, "eth")))
 
 	// setup epoch
 	var valAddr []sdk.CUAddress
@@ -675,11 +689,11 @@ func TestOpcuAstTransferEthSuccess(t *testing.T) {
 	ctx = ctx.WithBlockHeight(11)
 
 	//setup token
-	tokenInfo := tk.GetTokenInfo(ctx, sdk.Symbol(token.EthToken))
+	tokenInfo := tk.GetIBCToken(ctx, sdk.Symbol("eth"))
 	tokenInfo.GasLimit = sdk.NewInt(10000)
 	tokenInfo.GasPrice = sdk.NewInt(100)
 	tokenInfo.SysTransferNum = sdk.NewInt(3)
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tk.SetToken(ctx, tokenInfo)
 
 	//setup OpCU
 	opCUEthAddress := "0xd139E358aE9cB5424B2067da96F94cC938343446"
@@ -687,7 +701,7 @@ func TestOpcuAstTransferEthSuccess(t *testing.T) {
 
 	ethOPCUAddr, err := sdk.CUAddressFromBase58("HBCLXBebMwEWaEZYsqJij7xcpBayzJqdrKJP")
 	require.Nil(t, err)
-	opCU := ck.GetCU(ctx, ethOPCUAddr)
+	opCU := newTestCU(ck.GetCU(ctx, ethOPCUAddr))
 	err = opCU.SetAssetAddress(symbol, opCUEthAddress, 1)
 	err = opCU.SetAssetAddress(symbol, newEpochAddress, 2)
 	opCU.SetAssetPubkey(pubkey.Bytes(), 2)
@@ -697,7 +711,7 @@ func TestOpcuAstTransferEthSuccess(t *testing.T) {
 	opCU.AddAssetCoins(sdk.NewCoins(sdk.NewCoin(symbol, opCUEthAmt)))
 	ck.SetCU(ctx, opCU)
 
-	opCU1 := ck.GetCU(ctx, ethOPCUAddr)
+	opCU1 := newTestCU(ck.GetCU(ctx, ethOPCUAddr))
 	require.Equal(t, opCUEthAmt, opCU1.GetAssetCoins().AmountOf(symbol))
 
 	mockCN.On("ValidAddress", chain, symbol, newEpochAddress).Return(true, newEpochAddress)
@@ -741,7 +755,7 @@ func TestOpcuAstTransferEthSuccess(t *testing.T) {
 	require.Equal(t, symbol, wf.Symbol)
 	require.Equal(t, orderID, wf.OrderID)
 
-	opcu := ck.GetCU(ctx, ethOPCUAddr)
+	opcu := newTestCU(ck.GetCU(ctx, ethOPCUAddr))
 	require.Equal(t, sdk.MigrationAssetBegin, opcu.GetMigrationStatus())
 
 	// Step2, OpcuAssetTransferWaitSign
@@ -758,11 +772,11 @@ func TestOpcuAstTransferEthSuccess(t *testing.T) {
 	}
 
 	rawData := []byte("rawData")
-	signHash := "signHash"
+	signHash := []byte("signHash")
 	mockCN.On("QueryAccountTransactionFromData", chain, symbol, rawData).Return(chainnodeTx, []byte(signHash), nil)
 
 	ctx = ctx.WithBlockHeight(12)
-	result1 := keeper.OpcuAssetTransferWaitSign(ctx, orderID, []string{signHash}, rawData)
+	result1 := keeper.OpcuAssetTransferWaitSign(ctx, orderID, [][]byte{signHash}, rawData)
 	require.Equal(t, sdk.CodeOK, result1.Code)
 
 	//check order
@@ -799,7 +813,7 @@ func TestOpcuAstTransferEthSuccess(t *testing.T) {
 	mockCN.On("VerifyAccountSignedTransaction", chain, symbol, opCUEthAddress, signedData).Return(true, nil)
 	mockCN.On("QueryAccountTransactionFromSignedData", chain, symbol, signedData).Return(chainnodeTx, nil).Once()
 
-	result2 := keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData, "")
+	result2 := keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData)
 	require.Equal(t, sdk.CodeOK, result2.Code)
 
 	// check order
@@ -881,7 +895,7 @@ func TestOpcuAstTransferEthSuccess(t *testing.T) {
 	require.Equal(t, orderID, wff.OrderID)
 	require.Equal(t, gasFee, wff.CostFee)
 
-	opcu = ck.GetCU(ctx, ethOPCUAddr)
+	opcu = newTestCU(ck.GetCU(ctx, ethOPCUAddr))
 	require.Equal(t, sdk.MigrationFinish, opcu.GetMigrationStatus())
 }
 
@@ -893,23 +907,27 @@ func TestOpcuAstTransferEthError(t *testing.T) {
 	tk := input.tk
 	ok := input.ok
 	rk := input.rk
+	newTestCU := func(cu custodianunit.CU) *testCU {
+		return newTestCU(ctx, input.trk, input.ik, cu)
+	}
+
 	ctx = ctx.WithBlockHeight(10)
 	validators := input.validators
 	//cn := input.cn
 	mockCN = chainnode.MockChainnode{}
-	symbol := token.EthToken
-	chain := token.EthToken
+	symbol := "eth"
+	chain := "eth"
 	pubkey := ed25519.GenPrivKey().PubKey()
 
-	require.Equal(t, 1, len(ck.GetOpCUs(ctx, token.BtcToken)))
-	require.Equal(t, 1, len(ck.GetOpCUs(ctx, token.EthToken)))
+	require.Equal(t, 1, len(ck.GetOpCUs(ctx, "btc")))
+	require.Equal(t, 1, len(ck.GetOpCUs(ctx, "eth")))
 
 	//setup token
-	tokenInfo := tk.GetTokenInfo(ctx, sdk.Symbol(token.EthToken))
+	tokenInfo := tk.GetIBCToken(ctx, sdk.Symbol("eth"))
 	tokenInfo.GasLimit = sdk.NewInt(10000)
 	tokenInfo.GasPrice = sdk.NewInt(100)
 	tokenInfo.SysTransferNum = sdk.NewInt(3)
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tk.SetToken(ctx, tokenInfo)
 
 	//setup OpCU
 	opCUEthAddress := "0xd139E358aE9cB5424B2067da96F94cC938343446"
@@ -917,7 +935,7 @@ func TestOpcuAstTransferEthError(t *testing.T) {
 
 	ethOPCUAddr, err := sdk.CUAddressFromBase58("HBCLXBebMwEWaEZYsqJij7xcpBayzJqdrKJP")
 	require.Nil(t, err)
-	opCU := ck.GetCU(ctx, ethOPCUAddr)
+	opCU := newTestCU(ck.GetCU(ctx, ethOPCUAddr))
 	err = opCU.SetAssetAddress(symbol, opCUEthAddress, 1)
 	err = opCU.SetAssetAddress(symbol, newEpochAddress, 2)
 	opCU.SetAssetPubkey(pubkey.Bytes(), 2)
@@ -927,7 +945,7 @@ func TestOpcuAstTransferEthError(t *testing.T) {
 	opCU.AddAssetCoins(sdk.NewCoins(sdk.NewCoin(symbol, opCUEthAmt)))
 	ck.SetCU(ctx, opCU)
 
-	opCU1 := ck.GetCU(ctx, ethOPCUAddr)
+	opCU1 := newTestCU(ck.GetCU(ctx, ethOPCUAddr))
 	require.Equal(t, opCUEthAmt, opCU1.GetAssetCoins().AmountOf(symbol))
 
 	mockCN.On("ValidAddress", chain, symbol, newEpochAddress).Return(true, newEpochAddress)
@@ -968,7 +986,7 @@ func TestOpcuAstTransferEthError(t *testing.T) {
 			CUAddress: ethOPCUAddr,
 			ID:        duplicatedOrderID,
 			OrderType: sdk.OrderTypeOpcuAssetTransfer,
-			Symbol:    token.EthToken,
+			Symbol:    "eth",
 		},
 	}
 	ok.SetOrder(ctx, duplicatdcOrder)
@@ -1006,20 +1024,20 @@ func TestOpcuAstTransferEthError(t *testing.T) {
 	}
 
 	rawData := []byte("rawData")
-	signHash := "signHash"
-	hashes := []string{signHash}
+	signHash := []byte("signHash")
+	hashes := [][]byte{signHash}
 
 	ctx = ctx.WithBlockHeight(12)
 
 	// rawData 不正确
-	mockCN.On("QueryAccountTransactionFromData", chain, symbol, rawData).Return(chainnodeTx, []byte(signHash), errors.New("Fail to QueryAccountTransactionFromData")).Once()
+	mockCN.On("QueryAccountTransactionFromData", chain, symbol, rawData).Return(chainnodeTx, signHash, errors.New("Fail to QueryAccountTransactionFromData")).Once()
 	result = keeper.OpcuAssetTransferWaitSign(ctx, orderID, hashes, rawData)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 
 	// amount 不正确
 	correctAmount = chainnodeTx.Amount
 	chainnodeTx.Amount = chainnodeTx.Amount.AddRaw(1)
-	mockCN.On("QueryAccountTransactionFromData", chain, symbol, rawData).Return(chainnodeTx, []byte(signHash), nil).Once()
+	mockCN.On("QueryAccountTransactionFromData", chain, symbol, rawData).Return(chainnodeTx, signHash, nil).Once()
 	result = keeper.OpcuAssetTransferWaitSign(ctx, orderID, hashes, rawData)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	require.Contains(t, result.Log, "Unexpected opcu asset transfer Amount")
@@ -1028,13 +1046,13 @@ func TestOpcuAstTransferEthError(t *testing.T) {
 	// contract 不正确
 	correctContract := chainnodeTx.ContractAddress
 	chainnodeTx.ContractAddress = "wrong_contract"
-	mockCN.On("QueryAccountTransactionFromData", chain, symbol, rawData).Return(chainnodeTx, []byte(signHash), nil).Once()
+	mockCN.On("QueryAccountTransactionFromData", chain, symbol, rawData).Return(chainnodeTx, signHash, nil).Once()
 	result = keeper.OpcuAssetTransferWaitSign(ctx, orderID, hashes, rawData)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	require.Contains(t, result.Log, "Unexpected opcu asset transfer contract address")
 	chainnodeTx.ContractAddress = correctContract
 
-	mockCN.On("QueryAccountTransactionFromData", chain, symbol, rawData).Return(chainnodeTx, []byte(signHash), nil)
+	mockCN.On("QueryAccountTransactionFromData", chain, symbol, rawData).Return(chainnodeTx, signHash, nil)
 	// len(hashes) != len(signHashes)
 	result = keeper.OpcuAssetTransferWaitSign(ctx, orderID, append(hashes, hashes[0]), rawData)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
@@ -1042,7 +1060,7 @@ func TestOpcuAstTransferEthError(t *testing.T) {
 
 	//hash mismatch
 	correctHash := hashes[0]
-	hashes[0] = "wrong_hash"
+	hashes[0] = []byte("wrong_hash")
 	result = keeper.OpcuAssetTransferWaitSign(ctx, orderID, hashes, rawData)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	require.Contains(t, result.Log, "hash mismatch")
@@ -1051,20 +1069,20 @@ func TestOpcuAstTransferEthError(t *testing.T) {
 	//price is too hight
 	correctPrice := tokenInfo.GasPrice
 	tokenInfo.GasPrice = sdk.NewDecFromInt(correctPrice).Quo(sdk.NewDecWithPrec(12, 1)).TruncateInt()
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tk.SetToken(ctx, tokenInfo)
 	result = keeper.OpcuAssetTransferWaitSign(ctx, orderID, hashes, rawData)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	require.Contains(t, result.Log, "gas price is too high")
 
 	//price is too low
 	tokenInfo.GasPrice = sdk.NewDecFromInt(correctPrice).Quo(sdk.NewDecWithPrec(8, 1)).TruncateInt().AddRaw(1)
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tk.SetToken(ctx, tokenInfo)
 	result = keeper.OpcuAssetTransferWaitSign(ctx, orderID, hashes, rawData)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	require.Contains(t, result.Log, "gas price is too low")
 
 	tokenInfo.GasPrice = correctPrice
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tk.SetToken(ctx, tokenInfo)
 
 	//everything is ok
 	result = keeper.OpcuAssetTransferWaitSign(ctx, orderID, hashes, rawData)
@@ -1076,19 +1094,19 @@ func TestOpcuAstTransferEthError(t *testing.T) {
 
 	// VerifyAccountSignedTransaction error
 	mockCN.On("VerifyAccountSignedTransaction", chain, symbol, mock.Anything, signedData).Return(true, errors.New("VerifyAccountSignedTransactionError")).Once()
-	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData, "")
+	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	require.Contains(t, result.Log, "VerifyAccountSignedTransaction")
 
 	// VerifyAccountSignedTransaction,  verified = false
 	mockCN.On("VerifyAccountSignedTransaction", chain, symbol, mock.Anything, signedData).Return(false, nil).Once()
-	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData, "")
+	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 
 	// QueryAccountTransactionFromSignedData error
 	mockCN.On("VerifyAccountSignedTransaction", chain, symbol, mock.Anything, signedData).Return(true, nil)
 	mockCN.On("QueryAccountTransactionFromSignedData", chain, symbol, signedData).Return(chainnodeTx, errors.New("QueryAccountTransactionFromSignedData")).Once()
-	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData, "")
+	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 
 	chainnodeTx2 := &chainnode.ExtAccountTransaction{
@@ -1104,7 +1122,7 @@ func TestOpcuAstTransferEthError(t *testing.T) {
 	// toAddr mismatch
 	chainnodeTx2.To = "wrong_to"
 	mockCN.On("QueryAccountTransactionFromSignedData", chain, symbol, signedData).Return(chainnodeTx2, nil).Once()
-	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData, "")
+	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	chainnodeTx2.To = newEpochAddress
 
@@ -1112,7 +1130,7 @@ func TestOpcuAstTransferEthError(t *testing.T) {
 	correctAmount = chainnodeTx2.Amount
 	chainnodeTx2.Amount = chainnodeTx2.Amount.AddRaw(1)
 	mockCN.On("QueryAccountTransactionFromSignedData", chain, symbol, signedData).Return(chainnodeTx2, nil).Once()
-	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData, "")
+	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	chainnodeTx2.Amount = correctAmount
 
@@ -1120,13 +1138,13 @@ func TestOpcuAstTransferEthError(t *testing.T) {
 	correctContract = chainnodeTx2.ContractAddress
 	chainnodeTx2.ContractAddress = "wrong_contract"
 	mockCN.On("QueryAccountTransactionFromSignedData", chain, symbol, signedData).Return(chainnodeTx2, nil).Once()
-	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData, "")
+	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	chainnodeTx2.ContractAddress = correctContract
 
 	// everything is ok
 	mockCN.On("QueryAccountTransactionFromSignedData", chain, symbol, signedData).Return(chainnodeTx2, nil).Once()
-	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData, "")
+	result = keeper.OpcuAssetTransferSignFinish(ctx, orderID, signedData)
 	require.Equal(t, sdk.CodeOK, result.Code)
 
 	// OpcuAssetTransferFinish
@@ -1184,6 +1202,6 @@ func TestOpcuAstTransferEthError(t *testing.T) {
 	require.Equal(t, orderID, wff.OrderID)
 	require.Equal(t, gasFee, wff.CostFee)
 
-	opcu := ck.GetCU(ctx, ethOPCUAddr)
+	opcu := newTestCU(ck.GetCU(ctx, ethOPCUAddr))
 	require.Equal(t, sdk.MigrationFinish, opcu.GetMigrationStatus())
 }

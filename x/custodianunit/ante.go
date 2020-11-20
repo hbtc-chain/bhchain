@@ -16,6 +16,10 @@ import (
 	"github.com/hbtc-chain/bhchain/x/custodianunit/types"
 )
 
+const (
+	DefaultGasUsedForRefund = uint64(20000)
+)
+
 var (
 	// simulation signature values used to estimate gas consumption
 	simSecp256k1Pubkey secp256k1.PubKeySecp256k1
@@ -117,10 +121,7 @@ func NewAnteHandler(ck CUKeeper, supplyKeeper internal.SupplyKeeper, stakingKeep
 		}
 
 		// fetch first signer, who's going to pay the fees
-		signerAccs[0], res = GetSignerAcc(newCtx, ck, signerAddrs[0])
-		if !res.IsOK() {
-			return newCtx, res, true
-		}
+		signerAccs[0] = ck.GetOrNewCU(ctx, sdk.CUTypeUser, signerAddrs[0])
 
 		// deduct the fees
 		if !stdTx.Fee.Amount.IsZero() {
@@ -136,9 +137,6 @@ func NewAnteHandler(ck CUKeeper, supplyKeeper internal.SupplyKeeper, stakingKeep
 				if !res.IsOK() {
 					return newCtx, res, true
 				}
-
-				// reload the CU as fees have been deducted
-				signerAccs[0] = ck.GetCU(newCtx, signerAccs[0].GetAddress())
 			}
 		}
 
@@ -158,10 +156,7 @@ func NewAnteHandler(ck CUKeeper, supplyKeeper internal.SupplyKeeper, stakingKeep
 		for i := 0; i < len(stdSigs); i++ {
 			// skip the fee payer, CU is cached and fees were deducted already
 			if i != 0 {
-				signerAccs[i], res = GetSignerAcc(newCtx, ck, signerAddrs[i])
-				if !res.IsOK() {
-					return newCtx, res, true
-				}
+				signerAccs[i] = ck.GetOrNewCU(ctx, sdk.CUTypeUser, signerAddrs[i])
 			}
 
 			// check signature, return CU with incremented nonce
@@ -179,14 +174,30 @@ func NewAnteHandler(ck CUKeeper, supplyKeeper internal.SupplyKeeper, stakingKeep
 	}
 }
 
-// GetSignerAcc returns an CU for a given address that is expected to sign
-// a transaction.
-func GetSignerAcc(ctx sdk.Context, ak CUKeeper, addr sdk.CUAddress) (CU, sdk.Result) {
-	if cu := ak.GetCU(ctx, addr); cu != nil {
-		return cu, sdk.Result{}
-	}
+func NewGasRefundHandler(supplyKeeper internal.SupplyKeeper) sdk.GasRefundHandler {
+	return func(
+		ctx sdk.Context, tx sdk.Tx, gasWanted, gasUsed uint64,
+	) bool {
 
-	return nil, sdk.ErrUnknownAddress(fmt.Sprintf("CU %s does not exist", addr)).Result()
+		stdTx := tx.(StdTx)
+		if gasWanted < gasUsed+DefaultGasUsedForRefund || stdTx.IsSettleTx() {
+			return false
+		}
+		signerAddrs := stdTx.GetSigners()
+		usedFraction := sdk.NewDec(int64(gasUsed + DefaultGasUsedForRefund)).Quo(sdk.NewDec(int64(gasWanted)))
+		refundFraction := sdk.OneDec().Sub(usedFraction)
+		var refundCoins sdk.Coins
+		for _, coin := range stdTx.Fee.Amount {
+			amount := sdk.NewDecFromInt(coin.Amount).Mul(refundFraction).TruncateInt()
+			refundCoins = refundCoins.Add(sdk.NewCoins(sdk.NewCoin(coin.Denom, amount)))
+		}
+		if !refundCoins.IsValid() {
+			return false
+		}
+		supplyKeeper.SendCoinsFromModuleToAccount(ctx, types.FeeCollectorName, signerAddrs[0], refundCoins)
+
+		return true
+	}
 }
 
 func CheckCUType(ctx sdk.Context, ck CUKeeper, signers []sdk.CUAddress) sdk.Result {
@@ -370,30 +381,6 @@ func consumeMultisignatureVerificationGas(meter sdk.GasMeter,
 // NOTE: We could use the CoinKeeper (in addition to the CUKeeper, because
 // the CoinKeeper doesn't give us accounts), but it seems easier to do this.
 func DeductFees(supplyKeeper internal.SupplyKeeper, ctx sdk.Context, cu CU, fees sdk.Coins) sdk.Result {
-	//blockTime := ctx.BlockHeader().Time
-	coins := cu.GetCoins()
-
-	if !fees.IsValid() {
-		return sdk.ErrInsufficientFee(fmt.Sprintf("invalid fee amount: %s", fees)).Result()
-	}
-
-	// verify the CU has enough funds to pay for fees
-	_, hasNeg := coins.SafeSub(fees)
-	if hasNeg {
-		return sdk.ErrInsufficientFunds(
-			fmt.Sprintf("insufficient funds to pay for fees; %s < %s", coins, fees),
-		).Result()
-	}
-
-	// Validate the CU has enough "spendable" coins as this will cover cases
-	// such as vesting accounts.
-	spendableCoins := cu.GetCoins()
-	if _, hasNeg := spendableCoins.SafeSub(fees); hasNeg {
-		return sdk.ErrInsufficientFunds(
-			fmt.Sprintf("insufficient funds to pay for fees; %s < %s", spendableCoins, fees),
-		).Result()
-	}
-
 	_, err := supplyKeeper.SendCoinsFromAccountToModule(ctx, cu.GetAddress(), types.FeeCollectorName, fees)
 	if err != nil {
 		return err.Result()

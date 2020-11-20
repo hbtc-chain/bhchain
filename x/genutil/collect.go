@@ -133,7 +133,7 @@ func CollectStdTxs(cdc *codec.Codec, moniker, genTxsDir string,
 		delAddr := msg.DelegatorAddress.String()
 		valAddr := sdk.CUAddress(msg.ValidatorAddress).String()
 
-		delAcc, delOk := addrMap[delAddr]
+		_, delOk := addrMap[delAddr]
 		if !delOk {
 			return appGenTxs, persistentPeers, fmt.Errorf(
 				"CustodianUnit %v not in genesis.json: %+v", delAddr, addrMap)
@@ -143,13 +143,6 @@ func CollectStdTxs(cdc *codec.Codec, moniker, genTxsDir string,
 		if !valOk {
 			return appGenTxs, persistentPeers, fmt.Errorf(
 				"CustodianUnit %v not in genesis.json: %+v", valAddr, addrMap)
-		}
-
-		if delAcc.GetCoins().AmountOf(msg.Value.Denom).LT(msg.Value.Amount) {
-			return appGenTxs, persistentPeers, fmt.Errorf(
-				"insufficient fund for delegation %v: %v < %v",
-				delAcc.GetAddress(), delAcc.GetCoins().AmountOf(msg.Value.Denom), msg.Value.Amount,
-			)
 		}
 
 		// exclude itself from persistent peers

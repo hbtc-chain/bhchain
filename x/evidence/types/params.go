@@ -54,5 +54,5 @@ func (p *BehaviourParams) ParamSetPairs() params.ParamSetPairs {
 
 // DefaultParams defines the parameters for this module
 func DefaultBehaviourParams() BehaviourParams {
-	return NewBehaviourParams(100, 10, sdk.NewDecFromIntWithPrec(sdk.NewInt(1), 1))
+	return NewBehaviourParams(30000, 20000, sdk.NewDecFromIntWithPrec(sdk.NewInt(1), 2))
 }

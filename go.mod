@@ -15,7 +15,7 @@ require (
 	github.com/golang/mock v1.3.1
 	github.com/golang/protobuf v1.4.0
 	github.com/gorilla/mux v1.7.3
-	github.com/hbtc-chain/chainnode v0.9.1
+	github.com/hbtc-chain/chainnode v0.9.3
 	github.com/mattn/go-isatty v0.0.12
 	github.com/otiai10/copy v1.0.2
 	github.com/pelletier/go-toml v1.6.0

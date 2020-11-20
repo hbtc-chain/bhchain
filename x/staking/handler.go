@@ -76,11 +76,7 @@ func handleMsgCreateValidator(ctx sdk.Context, msg types.MsgCreateValidator, k k
 		}
 	}
 
-	if msg.IsKeyNode && ctx.BlockHeight() != 0 {
-		return ErrKeyNodeDeny(k.Codespace()).Result()
-	}
-
-	validator := NewValidator(msg.ValidatorAddress, msg.PubKey, msg.Description, msg.IsKeyNode)
+	validator := NewValidator(msg.ValidatorAddress, msg.PubKey, msg.Description)
 	commission := NewCommissionWithTime(
 		msg.Commission.Rate, msg.Commission.MaxRate,
 		msg.Commission.MaxChangeRate, ctx.BlockHeader().Time,
@@ -158,18 +154,6 @@ func handleMsgEditValidator(ctx sdk.Context, msg types.MsgEditValidator, k keepe
 			return ErrSelfDelegationBelowMinimum(k.Codespace()).Result()
 		}
 		validator.MinSelfDelegation = (*msg.MinSelfDelegation)
-	}
-	if msg.IsKeyNode != nil {
-		if *msg.IsKeyNode {
-			minKeyNodeDelegation := k.GetParams(ctx).MinKeyNodeDelegation
-			if validator.Tokens.LT(minKeyNodeDelegation) {
-				return ErrDelegationBelowKeyNodeThreshold(k.Codespace()).Result()
-			}
-			if validator.LastKeyNodeHeartbeatHeight == 0 || uint64(ctx.BlockHeight())-validator.LastKeyNodeHeartbeatHeight >= k.MaxCandidateKeyNodeHeartbeatInterval(ctx) {
-				return ErrKeyNodeNoHeartbeat(k.Codespace()).Result()
-			}
-		}
-		validator.IsKeyNode = *msg.IsKeyNode
 	}
 
 	k.SetValidator(ctx, validator)

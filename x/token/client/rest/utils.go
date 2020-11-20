@@ -14,7 +14,7 @@ type (
 
 		Title       string        `json:"title" yaml:"title"`
 		Description string        `json:"description" yaml:"description"`
-		TokenInfo   sdk.TokenInfo `json:"token_info" yaml:"token_info"`
+		TokenInfo   *sdk.IBCToken `json:"token_info" yaml:"token_info"`
 		Deposit     sdk.Coins     `json:"deposit" yaml:"deposit"`
 		Proposer    sdk.CUAddress `json:"proposer" yaml:"proposer"`
 	}
@@ -28,16 +28,5 @@ type (
 		Changes     cli.ParamChangesJSON `json:"changes" yaml:"changes"`
 		Deposit     sdk.Coins            `json:"deposit" yaml:"deposit"`
 		Proposer    sdk.CUAddress        `json:"proposer" yaml:"proposer"`
-	}
-
-	// DisableTokenProposalReq defines a disable token request body.
-	DisableTokenProposalReq struct {
-		BaseReq rest.BaseReq `json:"base_req" yaml:"base_req"`
-
-		Title       string        `json:"title" yaml:"title"`
-		Description string        `json:"description" yaml:"description"`
-		Symbol      string        `json:"symbol" yaml:"symbol"`
-		Deposit     sdk.Coins     `json:"deposit" yaml:"deposit`
-		Proposer    sdk.CUAddress `json:"proposer" yaml:"proposer"`
 	}
 )

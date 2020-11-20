@@ -26,26 +26,101 @@ func GetQueryCmd(queryRoute string, cdc *codec.Codec) *cobra.Command {
 		RunE:                       client.ValidateCmd,
 	}
 	openswapQueryCmd.AddCommand(client.GetCommands(
+		GetCmdQueryDex(queryRoute, cdc),
+		GetCmdQueryAllDex(queryRoute, cdc),
 		GetCmdQueryTradingPair(queryRoute, cdc),
+		GetCmdQueryAllTradingPairs(queryRoute, cdc),
 		GetCmdQueryAddrLiquidity(queryRoute, cdc),
 		GetCmdQueryOrderbook(queryRoute, cdc),
 		GetCmdQueryOrder(queryRoute, cdc),
 		GetCmdQueryUnfinishedOrders(queryRoute, cdc),
 		GetCmdQueryEarnings(queryRoute, cdc),
+		GetCmdQueryRepurchaseFunds(queryRoute, cdc),
 		GetCmdQueryParams(queryRoute, cdc),
 	)...)
 	return openswapQueryCmd
 }
 
-func GetCmdQueryTradingPair(storeName string, cdc *codec.Codec) *cobra.Command {
+func GetCmdQueryDex(storeName string, cdc *codec.Codec) *cobra.Command {
 	return &cobra.Command{
-		Use:   "pair [tokenA] [tokenB]",
+		Use:   "dex [dexID]",
+		Short: "Query a dex",
+		Long: strings.TrimSpace(
+			fmt.Sprintf(`Query details about a dex.
+
+Example:
+$ %s query openswap dex 1
+`,
+				version.ClientName,
+			),
+		),
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cliCtx := context.NewCLIContext().WithCodec(cdc)
+
+			id, err := strconv.ParseInt(args[0], 10, 64)
+			if err != nil {
+				return err
+			}
+
+			params := types.NewQueryDexParams(uint32(id))
+			bz := cliCtx.Codec.MustMarshalJSON(params)
+
+			res, _, err := cliCtx.QueryWithData(fmt.Sprintf("custom/%s/%s", types.QuerierKey, types.QueryDex), bz)
+			if err != nil {
+				return err
+			}
+
+			if len(res) == 0 {
+				return fmt.Errorf("dex %s not found", args[0])
+			}
+
+			fmt.Println(string(res))
+			return nil
+		},
+	}
+}
+
+func GetCmdQueryAllDex(storeName string, cdc *codec.Codec) *cobra.Command {
+	return &cobra.Command{
+		Use:   "dexs",
+		Short: "Query all dexs",
+		Long: strings.TrimSpace(
+			fmt.Sprintf(`Query list of all dex.
+
+Example:
+$ %s query openswap dexs
+`,
+				version.ClientName,
+			),
+		),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cliCtx := context.NewCLIContext().WithCodec(cdc)
+
+			res, _, err := cliCtx.QueryWithData(fmt.Sprintf("custom/%s/%s", types.QuerierKey, types.QueryAllDex), nil)
+			if err != nil {
+				return err
+			}
+
+			if len(res) == 0 {
+				return fmt.Errorf("dex %s not found", args[0])
+			}
+
+			fmt.Println(string(res))
+			return nil
+		},
+	}
+}
+
+func GetCmdQueryTradingPair(storeName string, cdc *codec.Codec) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "pair [tokenA] [tokenB] [--dex 0]",
 		Short: "Query a trading pair",
 		Long: strings.TrimSpace(
 			fmt.Sprintf(`Query details about a trading pair.
 
 Example:
-$ %s query openswap pair usdt hbc 
+$ %s query openswap pair eth hbc 
 `,
 				version.ClientName,
 			),
@@ -56,7 +131,7 @@ $ %s query openswap pair usdt hbc
 
 			tokenA, tokenB := sdk.Symbol(args[0]), sdk.Symbol(args[1])
 
-			params := types.NewQueryTradingPairParams(tokenA, tokenB)
+			params := types.NewQueryTradingPairParams(viper.GetUint32(FlagDexID), tokenA, tokenB)
 			bz := cliCtx.Codec.MustMarshalJSON(params)
 
 			res, _, err := cliCtx.QueryWithData(fmt.Sprintf("custom/%s/%s", types.QuerierKey, types.QueryTradingPair), bz)
@@ -72,11 +147,51 @@ $ %s query openswap pair usdt hbc
 			return nil
 		},
 	}
+
+	cmd.Flags().Uint32(FlagDexID, 0, "The dex id")
+	return cmd
+}
+
+func GetCmdQueryAllTradingPairs(storeName string, cdc *codec.Codec) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "pairs [--dex 0]",
+		Short: "Query all trading pairs of a dex",
+		Long: strings.TrimSpace(
+			fmt.Sprintf(`Query all trading pairs of a dex.
+
+Example:
+$ %s query openswap pairs --dex 0 
+`,
+				version.ClientName,
+			),
+		),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cliCtx := context.NewCLIContext().WithCodec(cdc)
+
+			params := types.NewQueryAllTradingPairParams(getDexID())
+			bz := cliCtx.Codec.MustMarshalJSON(params)
+
+			res, _, err := cliCtx.QueryWithData(fmt.Sprintf("custom/%s/%s", types.QuerierKey, types.QueryAllTradingPair), bz)
+			if err != nil {
+				return err
+			}
+
+			if len(res) == 0 {
+				return fmt.Errorf("trading pair %s-%s not found", args[0], args[1])
+			}
+
+			fmt.Println(string(res))
+			return nil
+		},
+	}
+
+	cmd.Flags().Int32(FlagDexID, -1, "The dex id")
+	return cmd
 }
 
 func GetCmdQueryAddrLiquidity(storeName string, cdc *codec.Codec) *cobra.Command {
-	return &cobra.Command{
-		Use:   "liquidity [addr]",
+	cmd := &cobra.Command{
+		Use:   "liquidity [addr] [--dex 0]",
 		Short: "Query all liquidity of an address",
 		Long: strings.TrimSpace(
 			fmt.Sprintf(`Query all liquidity of an address.
@@ -96,7 +211,7 @@ $ %s query openswap liquidity HBCWn2fXDbRPjyrzPyjYLsXYcAcUjE1PJDq9
 				return err
 			}
 
-			params := types.NewQueryAddrLiquidityParams(addr)
+			params := types.NewQueryAddrLiquidityParams(addr, getDexID())
 			bz := cliCtx.Codec.MustMarshalJSON(params)
 
 			res, _, err := cliCtx.QueryWithData(fmt.Sprintf("custom/%s/%s", types.QuerierKey, types.QueryAddrLiquidity), bz)
@@ -112,17 +227,19 @@ $ %s query openswap liquidity HBCWn2fXDbRPjyrzPyjYLsXYcAcUjE1PJDq9
 			return nil
 		},
 	}
+	cmd.Flags().Int32(FlagDexID, -1, "The dex id")
+	return cmd
 }
 
 func GetCmdQueryOrderbook(storeName string, cdc *codec.Codec) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "orderbook [pair]",
+		Use:   "orderbook [pair] [--dex 0]",
 		Short: "Query the orderbook of a trading pair",
 		Long: strings.TrimSpace(
 			fmt.Sprintf(`Query the orderbook of a trading pair.
 
 Example:
-$ %s query openswap orderbook btc-usdt
+$ %s query openswap orderbook eth-hbc
 `,
 				version.ClientName,
 			),
@@ -136,7 +253,7 @@ $ %s query openswap orderbook btc-usdt
 				return errors.New("invalid trading pair")
 			}
 			merge, _ := strconv.ParseBool(viper.GetString(FlagMergeOrderbook))
-			params := types.NewQueryOrderbookParams(sdk.Symbol(symbols[0]), sdk.Symbol(symbols[1]), merge)
+			params := types.NewQueryOrderbookParams(viper.GetUint32(FlagDexID), sdk.Symbol(symbols[0]), sdk.Symbol(symbols[1]), merge)
 			bz := cliCtx.Codec.MustMarshalJSON(params)
 
 			res, _, err := cliCtx.QueryWithData(fmt.Sprintf("custom/%s/%s", types.QuerierKey, types.QueryOrderbook), bz)
@@ -153,6 +270,7 @@ $ %s query openswap orderbook btc-usdt
 		},
 	}
 
+	cmd.Flags().Uint32(FlagDexID, 0, "The dex id")
 	cmd.Flags().String(FlagMergeOrderbook, "false", "Whether to merge orderbook")
 
 	return cmd
@@ -195,14 +313,14 @@ $ %s query openswap order 99466110-708d-47b4-8276-390bf115d675
 }
 
 func GetCmdQueryUnfinishedOrders(storeName string, cdc *codec.Codec) *cobra.Command {
-	return &cobra.Command{
-		Use:   "pending-orders [pair] [addr]",
+	cmd := &cobra.Command{
+		Use:   "pending-orders [pair] [addr] [--dex 0]",
 		Short: "Query the pending orders of an address",
 		Long: strings.TrimSpace(
 			fmt.Sprintf(`Query the pending orders of an address.
 
 Example:
-$ %s query openswap pending-orders btc-usdt HBCWn2fXDbRPjyrzPyjYLsXYcAcUjE1PJDq9
+$ %s query openswap pending-orders eth-hbc HBCWn2fXDbRPjyrzPyjYLsXYcAcUjE1PJDq9
 `,
 				version.ClientName,
 			),
@@ -219,7 +337,7 @@ $ %s query openswap pending-orders btc-usdt HBCWn2fXDbRPjyrzPyjYLsXYcAcUjE1PJDq9
 			if err != nil {
 				return err
 			}
-			params := types.NewQueryUnfinishedOrderParams(sdk.Symbol(symbols[0]), sdk.Symbol(symbols[1]), addr)
+			params := types.NewQueryUnfinishedOrderParams(addr, viper.GetUint32(FlagDexID), sdk.Symbol(symbols[0]), sdk.Symbol(symbols[1]))
 			bz := cliCtx.Codec.MustMarshalJSON(params)
 
 			res, _, err := cliCtx.QueryWithData(fmt.Sprintf("custom/%s/%s", types.QuerierKey, types.QueryUnfinishedOrder), bz)
@@ -231,6 +349,9 @@ $ %s query openswap pending-orders btc-usdt HBCWn2fXDbRPjyrzPyjYLsXYcAcUjE1PJDq9
 			return nil
 		},
 	}
+	cmd.Flags().Uint32(FlagDexID, 0, "The dex id")
+
+	return cmd
 }
 
 func GetCmdQueryEarnings(storeName string, cdc *codec.Codec) *cobra.Command {
@@ -273,6 +394,35 @@ $ %s query openswap earnings HBCWn2fXDbRPjyrzPyjYLsXYcAcUjE1PJDq9
 	}
 }
 
+func GetCmdQueryRepurchaseFunds(storeName string, cdc *codec.Codec) *cobra.Command {
+	return &cobra.Command{
+		Use:   "repurchase-funds",
+		Args:  cobra.NoArgs,
+		Short: "Query the funds to repurchase hbc",
+		Long: strings.TrimSpace(
+			fmt.Sprintf(`Query the funds to repurchase hbc.
+
+Example:
+$ %s query openswap repurchase-funds
+`,
+				version.ClientName,
+			),
+		),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cliCtx := context.NewCLIContext().WithCodec(cdc)
+
+			route := fmt.Sprintf("custom/%s/%s", storeName, types.QueryRepurchaseFunds)
+			bz, _, err := cliCtx.QueryWithData(route, nil)
+			if err != nil {
+				return err
+			}
+
+			fmt.Println(string(bz))
+			return nil
+		},
+	}
+}
+
 func GetCmdQueryParams(storeName string, cdc *codec.Codec) *cobra.Command {
 	return &cobra.Command{
 		Use:   "params",
@@ -301,4 +451,14 @@ $ %s query openswap params
 			return cliCtx.PrintOutput(params)
 		},
 	}
+}
+
+func getDexID() *uint32 {
+	var ret *uint32
+	dexID := viper.GetInt32(FlagDexID)
+	if dexID >= 0 {
+		uint32Dex := uint32(dexID)
+		ret = &uint32Dex
+	}
+	return ret
 }

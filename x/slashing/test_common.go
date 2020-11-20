@@ -86,6 +86,7 @@ func createTestInput(t *testing.T, defaults Params) (sdk.Context, transfer.Keepe
 	ms.MountStoreWithDB(keySlashing, sdk.StoreTypeIAVL, db)
 	ms.MountStoreWithDB(keyParams, sdk.StoreTypeIAVL, db)
 	ms.MountStoreWithDB(tkeyParams, sdk.StoreTypeTransient, db)
+	ms.MountStoreWithDB(keyTransfer, sdk.StoreTypeIAVL, db)
 
 	err := ms.LoadLatestVersion()
 	require.Nil(t, err)
@@ -103,9 +104,9 @@ func createTestInput(t *testing.T, defaults Params) (sdk.Context, transfer.Keepe
 	blacklistedAddrs[bondPool.String()] = true
 
 	paramsKeeper := params.NewKeeper(cdc, keyParams, tkeyParams, params.DefaultCodespace)
-	cuKeeper := custodianunit.NewCUKeeper(cdc, keyAcc, nil, paramsKeeper.Subspace(custodianunit.DefaultParamspace), custodianunit.ProtoBaseCU)
+	cuKeeper := custodianunit.NewCUKeeper(cdc, keyAcc, paramsKeeper.Subspace(custodianunit.DefaultParamspace), custodianunit.ProtoBaseCU)
 	rk := receipt.NewKeeper(cdc)
-	bk := transfer.NewBaseKeeper(cdc, keyTransfer, cuKeeper, nil, nil, rk, nil, nil, paramsKeeper.Subspace(transfer.DefaultParamspace), transfer.DefaultCodespace, blacklistedAddrs)
+	bk := transfer.NewBaseKeeper(cdc, keyTransfer, cuKeeper, nil, nil, nil, rk, nil, nil, paramsKeeper.Subspace(transfer.DefaultParamspace), transfer.DefaultCodespace, blacklistedAddrs)
 	maccPerms := map[string][]string{
 		custodianunit.FeeCollectorName: nil,
 		staking.NotBondedPoolName:      []string{supply.Burner, supply.Staking},
@@ -118,12 +119,12 @@ func createTestInput(t *testing.T, defaults Params) (sdk.Context, transfer.Keepe
 
 	sk := staking.NewKeeper(cdc, keyStaking, tkeyStaking, supplyKeeper, paramsKeeper.Subspace(staking.DefaultParamspace), staking.DefaultCodespace)
 	genesis := staking.DefaultGenesisState()
-	genesis.Params.ElectionPeriod = 5
 
 	// set module accounts
 	supplyKeeper.SetModuleAccount(ctx, feeCollectorAcc)
 	supplyKeeper.SetModuleAccount(ctx, bondPool)
 	supplyKeeper.SetModuleAccount(ctx, notBondedPool)
+	sk.SetTransferKeeper(bk)
 
 	_ = staking.InitGenesis(ctx, sk, cuKeeper, supplyKeeper, genesis)
 
@@ -161,7 +162,7 @@ func NewTestMsgCreateValidator(address sdk.ValAddress, pubKey crypto.PubKey, amt
 	commission := staking.NewCommissionRates(sdk.ZeroDec(), sdk.ZeroDec(), sdk.ZeroDec())
 	return staking.NewMsgCreateValidator(
 		address, pubKey, sdk.NewCoin(sdk.DefaultBondDenom, amt),
-		staking.Description{}, commission, sdk.OneInt(), false,
+		staking.Description{}, commission, sdk.OneInt(),
 	)
 }
 

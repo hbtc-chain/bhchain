@@ -192,9 +192,9 @@ func GenGenesisAccounts(
 
 	// randomly generate some genesis accounts
 	for _, acc := range accs {
-		coins := sdk.Coins{sdk.NewCoin(sdk.DefaultBondDenom, sdk.NewInt(amount))}
+		// coins := sdk.Coins{sdk.NewCoin(sdk.DefaultBondDenom, sdk.NewInt(amount))}
 		bacc := custodianunit.NewBaseCUWithAddress(acc.Address, sdk.CUTypeUser)
-		bacc.SetCoins(coins)
+		// bacc.SetCoins(coins)
 
 		var gacc genaccounts.GenesisCU
 
@@ -443,12 +443,11 @@ func GenStakingGenesisState(
 			11,
 			7,
 			sdk.DefaultBondDenom,
-			1,
 			sdk.NewIntWithDecimal(10, 22),
 			sdk.NewIntWithDecimal(50, 22),
-			10000,
 			100,
 		),
+		nil,
 		nil,
 		nil,
 	)
@@ -463,7 +462,7 @@ func GenStakingGenesisState(
 		valAddr := sdk.ValAddress(accs[i].Address)
 		valAddrs[i] = valAddr
 
-		validator := staking.NewValidator(valAddr, accs[i].PubKey, staking.Description{}, true)
+		validator := staking.NewValidator(valAddr, accs[i].PubKey, staking.Description{})
 		validator.Tokens = sdk.NewInt(amount)
 		validator.DelegatorShares = sdk.NewDec(amount)
 		delegation := staking.NewDelegation(accs[i].Address, valAddr, sdk.NewDec(amount))

@@ -10,10 +10,11 @@ import (
 const (
 	DefaultCodespace sdk.CodespaceType = "params"
 
-	CodeUnknownSubspace  sdk.CodeType = 1
-	CodeSettingParameter sdk.CodeType = 2
-	CodeEmptyData        sdk.CodeType = 3
-	CodeMixedSubspace    sdk.CodeType = 4
+	CodeUnknownSubspace     sdk.CodeType = 1
+	CodeSettingParameter    sdk.CodeType = 2
+	CodeEmptyData           sdk.CodeType = 3
+	CodeMixedSubspace       sdk.CodeType = 4
+	CodeInvalidChangeParams sdk.CodeType = 5
 )
 
 // ErrUnknownSubspace returns an unknown subspace error.
@@ -48,4 +49,9 @@ func ErrEmptyValue(codespace sdk.CodespaceType) sdk.Error {
 
 func ErrMixedSubspace(codespace sdk.CodespaceType) sdk.Error {
 	return sdk.NewError(codespace, CodeMixedSubspace, "subspace is mixed")
+}
+
+// ErrInvalidChange returns an error for invalid parameter changes.
+func ErrInvalidChange(codespace sdk.CodespaceType, msg string) sdk.Error {
+	return sdk.NewError(codespace, CodeInvalidChangeParams, msg)
 }

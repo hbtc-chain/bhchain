@@ -45,7 +45,7 @@ func makeTestCodec() *codec.Codec {
 }
 
 // nolint: deadcode unused
-func createTestInput(t *testing.T, isCheckTx bool, initPower int64, nAccs int64) (sdk.Context, custodianunit.CUKeeper, Keeper) {
+func createTestInput(t *testing.T, isCheckTx bool, initPower int64, nAccs int64) (sdk.Context, custodianunit.CUKeeper, Keeper, transfer.Keeper) {
 
 	keyAcc := sdk.NewKVStoreKey(custodianunit.StoreKey)
 	keyParams := sdk.NewKVStoreKey(params.StoreKey)
@@ -59,6 +59,7 @@ func createTestInput(t *testing.T, isCheckTx bool, initPower int64, nAccs int64)
 	ms.MountStoreWithDB(keySupply, sdk.StoreTypeIAVL, db)
 	ms.MountStoreWithDB(keyParams, sdk.StoreTypeIAVL, db)
 	ms.MountStoreWithDB(tkeyParams, sdk.StoreTypeTransient, db)
+	ms.MountStoreWithDB(keyTransfer, sdk.StoreTypeIAVL, db)
 	err := ms.LoadLatestVersion()
 	require.Nil(t, err)
 
@@ -75,8 +76,8 @@ func createTestInput(t *testing.T, isCheckTx bool, initPower int64, nAccs int64)
 	blacklistedAddrs := make(map[string]bool)
 	rk := receipt.NewKeeper(cdc)
 	pk := params.NewKeeper(cdc, keyParams, tkeyParams, params.DefaultCodespace)
-	ak := custodianunit.NewCUKeeper(cdc, keyAcc, nil, pk.Subspace(custodianunit.DefaultParamspace), custodianunit.ProtoBaseCU)
-	bk := transfer.NewBaseKeeper(cdc, keyTransfer, ak, nil, nil, rk, nil, nil,
+	ak := custodianunit.NewCUKeeper(cdc, keyAcc, pk.Subspace(custodianunit.DefaultParamspace), custodianunit.ProtoBaseCU)
+	bk := transfer.NewBaseKeeper(cdc, keyTransfer, ak, nil, nil, nil, rk, nil, nil,
 		pk.Subspace(transfer.DefaultParamspace), transfer.DefaultCodespace, blacklistedAddrs)
 
 	valTokens := sdk.TokensFromConsensusPower(initPower)
@@ -95,7 +96,7 @@ func createTestInput(t *testing.T, isCheckTx bool, initPower int64, nAccs int64)
 	totalSupply := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, valTokens.MulRaw(nAccs)))
 	keeper.SetSupply(ctx, types.NewSupply(totalSupply))
 
-	return ctx, ak, *keeper
+	return ctx, ak, *keeper, bk
 }
 
 // nolint: unparam deadcode unused
@@ -105,9 +106,14 @@ func createTestAccs(ctx sdk.Context, numAccs int, initialCoins sdk.Coins, ak *cu
 		pubKey := privKey.PubKey()
 		addr := sdk.CUAddress(pubKey.Address())
 		acc := custodianunit.NewBaseCUWithAddress(addr, sdk.CUTypeUser)
-		acc.Coins = initialCoins
 		acc.PubKey = pubKey
 		ak.SetCU(ctx, &acc)
 	}
 	return
+}
+
+func testSetCUCoins(ctx sdk.Context, trk transfer.Keeper, cu sdk.CUAddress, coins sdk.Coins) {
+	curCoins := trk.GetAllBalance(ctx, cu)
+	trk.SubCoins(ctx, cu, curCoins)
+	trk.AddCoins(ctx, cu, coins)
 }

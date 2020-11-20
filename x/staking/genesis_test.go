@@ -23,6 +23,7 @@ func TestInitGenesis(t *testing.T) {
 
 	params := keeper.GetParams(ctx)
 	validators := make([]Validator, 2)
+	keyNodes := make([]sdk.CUAddress, 2)
 	var delegations []Delegation
 
 	// initialize the validators
@@ -38,8 +39,10 @@ func TestInitGenesis(t *testing.T) {
 	validators[1].Status = sdk.Bonded
 	validators[1].Tokens = valTokens
 	validators[1].DelegatorShares = valTokens.ToDec()
+	keyNodes[0] = keep.Addrs[0]
+	keyNodes[1] = keep.Addrs[1]
 
-	genesisState := types.NewGenesisState(params, validators, delegations)
+	genesisState := types.NewGenesisState(params, validators, delegations, keyNodes)
 	vals := InitGenesis(ctx, keeper, accKeeper, supplyKeeper, genesisState)
 
 	actualGenesis := ExportGenesis(ctx, keeper)
@@ -78,7 +81,7 @@ func TestInitGenesisLargeValidatorSet(t *testing.T) {
 
 	for i := range validators {
 		validators[i] = NewValidator(sdk.ValAddress(keep.Addrs[i]),
-			keep.PKs[i], NewDescription(fmt.Sprintf("#%d", i), "", "", ""), true)
+			keep.PKs[i], NewDescription(fmt.Sprintf("#%d", i), "", "", ""))
 
 		validators[i].Status = sdk.Bonded
 
@@ -90,7 +93,7 @@ func TestInitGenesisLargeValidatorSet(t *testing.T) {
 		validators[i].DelegatorShares = tokens.ToDec()
 	}
 
-	genesisState := types.NewGenesisState(params, validators, delegations)
+	genesisState := types.NewGenesisState(params, validators, delegations, nil)
 	vals := InitGenesis(ctx, keeper, accKeeper, supplyKeeper, genesisState)
 
 	abcivals := make([]abci.ValidatorUpdate, 100)
@@ -104,7 +107,7 @@ func TestInitGenesisLargeValidatorSet(t *testing.T) {
 func TestValidateGenesis(t *testing.T) {
 	genValidators1 := make([]types.Validator, 1, 5)
 	pk := ed25519.GenPrivKey().PubKey()
-	genValidators1[0] = types.NewValidator(sdk.ValAddress(pk.Address()), pk, types.NewDescription("", "", "", ""), true)
+	genValidators1[0] = types.NewValidator(sdk.ValAddress(pk.Address()), pk, types.NewDescription("", "", "", ""))
 	genValidators1[0].Tokens = sdk.OneInt()
 	genValidators1[0].DelegatorShares = sdk.OneDec()
 

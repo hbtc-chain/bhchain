@@ -99,8 +99,8 @@ func TestDeposits(t *testing.T) {
 	fourStake := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, sdk.NewIntWithDecimal(4, 18)))
 	stake25 := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, sdk.NewIntWithDecimal(25, 18)))
 
-	addr0Initial := input.mApp.CUKeeper.GetCU(ctx, input.addrs[0]).GetCoins()
-	addr1Initial := input.mApp.CUKeeper.GetCU(ctx, input.addrs[1]).GetCoins()
+	addr0Initial := input.tk.GetAllBalance(ctx, input.addrs[0])
+	addr1Initial := input.tk.GetAllBalance(ctx, input.addrs[1])
 
 	expTokens := sdk.TokensFromConsensusPower(4200000)
 	require.Equal(t, sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, expTokens)), addr0Initial)
@@ -124,7 +124,7 @@ func TestDeposits(t *testing.T) {
 	proposal, ok = input.keeper.GetProposal(ctx, proposalID)
 	require.True(t, ok)
 	require.Equal(t, fourStake, proposal.TotalDeposit)
-	require.Equal(t, addr0Initial.Sub(fourStake), input.mApp.CUKeeper.GetCU(ctx, input.addrs[0]).GetCoins())
+	require.Equal(t, addr0Initial.Sub(fourStake), input.tk.GetAllBalance(ctx, input.addrs[0]))
 
 	// Check a second deposit from same address
 	_, err, votingStarted = input.keeper.AddDeposit(ctx, proposalID, input.addrs[0], stake25)
@@ -137,7 +137,7 @@ func TestDeposits(t *testing.T) {
 	proposal, ok = input.keeper.GetProposal(ctx, proposalID)
 	require.True(t, ok)
 	require.Equal(t, fourStake.Add(stake25), proposal.TotalDeposit)
-	require.Equal(t, addr0Initial.Sub(fourStake).Sub(stake25), input.mApp.CUKeeper.GetCU(ctx, input.addrs[0]).GetCoins())
+	require.Equal(t, addr0Initial.Sub(fourStake).Sub(stake25), input.tk.GetAllBalance(ctx, input.addrs[0]))
 
 	// Check third deposit from a new address
 	_, err, votingStarted = input.keeper.AddDeposit(ctx, proposalID, input.addrs[1], stake25)
@@ -150,7 +150,7 @@ func TestDeposits(t *testing.T) {
 	proposal, ok = input.keeper.GetProposal(ctx, proposalID)
 	require.True(t, ok)
 	require.Equal(t, fourStake.Add(stake25).Add(stake25), proposal.TotalDeposit)
-	require.Equal(t, addr1Initial.Sub(stake25), input.mApp.CUKeeper.GetCU(ctx, input.addrs[1]).GetCoins())
+	require.Equal(t, addr1Initial.Sub(stake25), input.tk.GetAllBalance(ctx, input.addrs[1]))
 
 	// Check that proposal moved to voting period
 	proposal, ok = input.keeper.GetProposal(ctx, proposalID)
@@ -178,8 +178,8 @@ func TestDeposits(t *testing.T) {
 	input.keeper.RefundDeposits(ctx, proposalID)
 	deposit, found = input.keeper.GetDeposit(ctx, proposalID, input.addrs[1])
 	require.False(t, found)
-	require.Equal(t, addr0Initial, input.mApp.CUKeeper.GetCU(ctx, input.addrs[0]).GetCoins())
-	require.Equal(t, addr1Initial, input.mApp.CUKeeper.GetCU(ctx, input.addrs[1]).GetCoins())
+	require.Equal(t, addr0Initial, input.tk.GetAllBalance(ctx, input.addrs[0]))
+	require.Equal(t, addr1Initial, input.tk.GetAllBalance(ctx, input.addrs[1]))
 
 }
 

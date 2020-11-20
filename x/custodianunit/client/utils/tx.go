@@ -321,23 +321,21 @@ func parseQueryResponse(cdc *codec.Codec, rawRes []byte) (uint64, error) {
 func PrepareTxBuilder(txBldr authtypes.TxBuilder, cliCtx context.CLIContext) (authtypes.TxBuilder, error) {
 	from := cliCtx.GetFromAddress()
 
-	cuGetter := authtypes.NewCURetriever(cliCtx)
-	if err := cuGetter.EnsureExists(from); err != nil {
-		return txBldr, err
-	}
+	/* cuGetter := authtypes.NewCURetriever(cliCtx) */
+	// if err := cuGetter.EnsureExists(from); err != nil {
+	// return txBldr, err
+	/* } */
 
 	txbldrCUSeq := txBldr.Sequence()
 	// TODO: (ref #1903) Allow for user supplied CU number without
 	// automatically doing a manual lookup.
 	if txbldrCUSeq == 0 {
-		seq, err := authtypes.NewCURetriever(cliCtx).GetSequence(from)
-		if err != nil {
-			return txBldr, err
-		}
+		seq, _ := authtypes.NewCURetriever(cliCtx).GetSequence(from)
+		/*      if err != nil { */
+		// return txBldr, err
+		// }
 
-		if txbldrCUSeq == 0 {
-			txBldr = txBldr.WithSequence(seq)
-		}
+		txBldr = txBldr.WithSequence(seq)
 	}
 
 	return txBldr, nil

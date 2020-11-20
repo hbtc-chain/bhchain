@@ -18,13 +18,13 @@ func NewGenesisState(sendEnabled bool) GenesisState {
 func DefaultGenesisState() GenesisState { return NewGenesisState(true) }
 
 // InitGenesis sets distribution information for genesis.
-func InitGenesis(ctx sdk.Context, keeper Keeper, data GenesisState) {
+func InitGenesis(ctx sdk.Context, keeper BaseKeeper, data GenesisState) {
 	keeper.SetSendEnabled(ctx, data.SendEnabled)
 }
 
 // ExportGenesis returns a GenesisState for a given context and keeper.
-func ExportGenesis(ctx sdk.Context, keeper Keeper) GenesisState {
-	return NewGenesisState(keeper.GetSendEnabled(ctx))
+func ExportGenesis(ctx sdk.Context, keeper BaseKeeper) GenesisState {
+	return NewGenesisState(keeper.IsSendEnabled(ctx))
 }
 
 // ValidateGenesis performs basic validation of bank genesis data returning an

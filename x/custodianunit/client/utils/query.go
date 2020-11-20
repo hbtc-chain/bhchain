@@ -3,7 +3,6 @@ package utils
 import (
 	"encoding/hex"
 	"errors"
-	"github.com/hbtc-chain/bhchain/x/custodianunit/exported"
 	"strings"
 	"time"
 
@@ -178,26 +177,4 @@ func parseTx(cdc *codec.Codec, txBytes []byte) (sdk.Tx, error) {
 	}
 
 	return tx, nil
-}
-
-func GetCUCoinFromCu(cu exported.CustodianUnit, symbol string) (types.CUCoin, error) {
-	if cu == nil {
-		return types.CUCoin{}, errors.New("nil cu")
-	}
-
-	token := sdk.Symbol(symbol)
-	if !token.IsValidTokenName() {
-		return types.CUCoin{}, errors.New("invalid symbol")
-	}
-
-	cuCoin := types.CUCoin{Denom: symbol,
-		Address:    cu.GetAddress(),
-		Amount:     cu.GetCoins().AmountOf(symbol),
-		AmountHold: cu.GetCoinsHold().AmountOf(symbol),
-
-		ExtAddress:    cu.GetAssetAddress(symbol, cu.GetAssetPubkeyEpoch()),
-		ExtAmount:     cu.GetAssetCoins().AmountOf(symbol),
-		ExtAmountHold: cu.GetAssetCoinsHold().AmountOf(symbol),
-	}
-	return cuCoin, nil
 }

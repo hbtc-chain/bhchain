@@ -27,6 +27,7 @@ type Keeper struct {
 	// The reference to the DelegationSet and ValidatorSet to get information about validators and delegators
 	sk StakingKeeper
 
+	tk TransferKeeper
 	// The DistributionKeeper to donate unpassed proposal
 	dk DistributionKeeper
 
@@ -50,7 +51,7 @@ type Keeper struct {
 // - and tallying the result of the vote.
 func NewKeeper(
 	cdc *codec.Codec, key sdk.StoreKey, paramsKeeper params.Keeper, paramSpace params.Subspace,
-	supplyKeeper SupplyKeeper, sk StakingKeeper, dk DistributionKeeper, codespace sdk.CodespaceType, rtr Router,
+	supplyKeeper SupplyKeeper, sk StakingKeeper, dk DistributionKeeper, tk TransferKeeper, codespace sdk.CodespaceType, rtr Router,
 ) Keeper {
 
 	// ensure governance module CustodianUnit is set
@@ -70,6 +71,7 @@ func NewKeeper(
 		supplyKeeper: supplyKeeper,
 		sk:           sk,
 		dk:           dk,
+		tk:           tk,
 		cdc:          cdc,
 		codespace:    codespace,
 		router:       rtr,

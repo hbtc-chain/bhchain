@@ -58,13 +58,15 @@ func (AppModuleBasic) GetTxCmd(cdc *codec.Codec) *cobra.Command {
 }
 
 // get the root query command of this module
-func (AppModuleBasic) GetQueryCmd(_ *codec.Codec) *cobra.Command { return nil }
+func (AppModuleBasic) GetQueryCmd(cdc *codec.Codec) *cobra.Command {
+	return cli.GetQueryCmd(cdc)
+}
 
 //___________________________
 // app module
 type AppModule struct {
 	AppModuleBasic
-	keeper        Keeper
+	keeper        *BaseKeeper
 	cuKeeper      types.CUKeeper
 	tokenKeeper   types.TokenKeeper
 	orderKeeper   types.OrderKeeper
@@ -73,7 +75,7 @@ type AppModule struct {
 }
 
 // NewAppModule creates a new AppModule object
-func NewAppModule(keeper Keeper, cuKeeper types.CUKeeper, tk types.TokenKeeper, ok types.OrderKeeper, rk types.ReceiptKeeper, cn types.Chainnode) AppModule {
+func NewAppModule(keeper *BaseKeeper, cuKeeper types.CUKeeper, tk types.TokenKeeper, ok types.OrderKeeper, rk types.ReceiptKeeper, cn types.Chainnode) AppModule {
 	return AppModule{
 		AppModuleBasic: AppModuleBasic{},
 		keeper:         keeper,
@@ -97,27 +99,27 @@ func (am AppModule) RegisterInvariants(ir sdk.InvariantRegistry) {
 func (AppModule) Route() string { return RouterKey }
 
 // module handler
-func (am AppModule) NewHandler() sdk.Handler { return NewHandler(am.keeper) }
+func (am AppModule) NewHandler() sdk.Handler { return NewHandler(*am.keeper) }
 
 // module querier route name
 func (AppModule) QuerierRoute() string { return RouterKey }
 
 // module querier
 func (am AppModule) NewQuerierHandler() sdk.Querier {
-	return keeper.NewQuerier(am.keeper)
+	return keeper.NewQuerier(*am.keeper)
 }
 
 // module init-genesis
 func (am AppModule) InitGenesis(ctx sdk.Context, data json.RawMessage) []abci.ValidatorUpdate {
 	var genesisState GenesisState
 	ModuleCdc.MustUnmarshalJSON(data, &genesisState)
-	InitGenesis(ctx, am.keeper, genesisState)
+	InitGenesis(ctx, *am.keeper, genesisState)
 	return []abci.ValidatorUpdate{}
 }
 
 // module export genesis
 func (am AppModule) ExportGenesis(ctx sdk.Context) json.RawMessage {
-	gs := ExportGenesis(ctx, am.keeper)
+	gs := ExportGenesis(ctx, *am.keeper)
 	return ModuleCdc.MustMarshalJSON(gs)
 }
 

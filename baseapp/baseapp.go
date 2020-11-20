@@ -60,13 +60,14 @@ type BaseApp struct {
 	// set upon LoadVersion or LoadLatestVersion.
 	baseKey *sdk.KVStoreKey // Main KVStore in cms
 
-	anteHandler    sdk.AnteHandler  // ante handler for fee and auth
-	initChainer    sdk.InitChainer  // initialize state with validators and state blob
-	beginBlocker   sdk.BeginBlocker // logic to run before any txs
-	endBlocker     sdk.EndBlocker   // logic to run after all txs, and to determine valset changes
-	addrPeerFilter sdk.PeerFilter   // filter peers by address and port
-	idPeerFilter   sdk.PeerFilter   // filter peers by node ID
-	fauxMerkleMode bool             // if true, IAVL MountStores uses MountStoresDB for simulation speed.
+	anteHandler      sdk.AnteHandler // ante handler for fee and auth
+	gasRefundHandler sdk.GasRefundHandler
+	initChainer      sdk.InitChainer  // initialize state with validators and state blob
+	beginBlocker     sdk.BeginBlocker // logic to run before any txs
+	endBlocker       sdk.EndBlocker   // logic to run after all txs, and to determine valset changes
+	addrPeerFilter   sdk.PeerFilter   // filter peers by address and port
+	idPeerFilter     sdk.PeerFilter   // filter peers by node ID
+	fauxMerkleMode   bool             // if true, IAVL MountStores uses MountStoresDB for simulation speed.
 
 	// --------------------
 	// Volatile state
@@ -957,6 +958,7 @@ func (app *BaseApp) runTx(mode runTxMode, txBytes []byte, tx sdk.Tx) (result sdk
 	// Create a new context based off of the existing context with a cache wrapped
 	// multi-store in case message processing fails.
 	runMsgCtx, msCache := app.cacheTxContext(ctx, txBytes)
+	runMsgCtxFinal, msCacheFinal := app.cacheTxContext(ctx, txBytes)
 	result = app.runMsgs(runMsgCtx, msgs, mode)
 	result.GasWanted = gasWanted
 
@@ -967,7 +969,11 @@ func (app *BaseApp) runTx(mode runTxMode, txBytes []byte, tx sdk.Tx) (result sdk
 
 	// only update state if all messages pass
 	if result.IsOK() {
-		msCache.Write()
+		runMsgCtxFinal, msCacheFinal = runMsgCtx, msCache
+	}
+	refunded := app.gasRefundHandler(runMsgCtxFinal, tx, result.GasWanted, result.GasUsed)
+	if result.IsOK() || refunded {
+		msCacheFinal.Write()
 	}
 
 	return result

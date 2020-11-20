@@ -1,9 +1,18 @@
 package mapping
 
 import (
+	cutypes "github.com/hbtc-chain/bhchain/x/custodianunit/types"
+	"github.com/hbtc-chain/bhchain/x/ibcasset"
 	"github.com/hbtc-chain/bhchain/x/mapping/types"
+	"github.com/hbtc-chain/bhchain/x/transfer"
+
 	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	abci "github.com/tendermint/tendermint/abci/types"
+	"github.com/tendermint/tendermint/libs/log"
+	dbm "github.com/tendermint/tm-db"
 
 	"github.com/hbtc-chain/bhchain/codec"
 	"github.com/hbtc-chain/bhchain/store"
@@ -13,129 +22,140 @@ import (
 	"github.com/hbtc-chain/bhchain/x/params/subspace"
 	"github.com/hbtc-chain/bhchain/x/receipt"
 	"github.com/hbtc-chain/bhchain/x/token"
-	"github.com/stretchr/testify/assert"
-	abci "github.com/tendermint/tendermint/abci/types"
-	"github.com/tendermint/tendermint/libs/log"
-	dbm "github.com/tendermint/tm-db"
 )
 
 type testEnv struct {
 	mk       Keeper
 	ck       custodianunit.CUKeeperI
 	tk       *token.Keeper
+	trk      transfer.Keeper
 	rk       *receipt.Keeper
 	storeKey sdk.StoreKey // Unexposed key to access store from sdk.Context
 	cdc      *codec.Codec // The wire codec for binary encoding/decoding
 	ctx      sdk.Context
 }
 
-var testTokenInfo = []sdk.TokenInfo{
+var testTokenInfo = []sdk.IBCToken{
 	{
-		Symbol:              "btc",
-		Chain:               "btc",
-		Issuer:              "",
-		TokenType:           sdk.UtxoBased,
-		IsSendEnabled:       true,
-		IsDepositEnabled:    false,
-		IsWithdrawalEnabled: false,
-		Decimals:            8,
-		TotalSupply:         sdk.NewInt(2100),
-		CollectThreshold:    sdk.NewInt(100),
-		OpenFee:             sdk.NewInt(1000),
-		SysOpenFee:          sdk.NewInt(1200),
-		WithdrawalFeeRate:   sdk.NewDecWithPrec(2, 0),
+		BaseToken: sdk.BaseToken{
+			Symbol:      "btc",
+			Chain:       "btc",
+			Issuer:      "",
+			SendEnabled: true,
+			Decimals:    8,
+			TotalSupply: sdk.NewInt(2100),
+		},
+		TokenType:         sdk.UtxoBased,
+		DepositEnabled:    false,
+		WithdrawalEnabled: false,
+		CollectThreshold:  sdk.NewInt(100),
+		OpenFee:           sdk.NewInt(1000),
+		SysOpenFee:        sdk.NewInt(1200),
+		WithdrawalFeeRate: sdk.NewDecWithPrec(2, 0),
 	},
 	{
-		Symbol:              "eth",
-		Chain:               "eth",
-		Issuer:              "",
-		TokenType:           sdk.AccountBased,
-		IsSendEnabled:       true,
-		IsDepositEnabled:    false,
-		IsWithdrawalEnabled: false,
-		Decimals:            18,
-		TotalSupply:         sdk.NewInt(10000),
-		CollectThreshold:    sdk.NewInt(100),
-		OpenFee:             sdk.NewInt(1000),
-		SysOpenFee:          sdk.NewInt(1200),
-		WithdrawalFeeRate:   sdk.NewDecWithPrec(2, 0),
+		BaseToken: sdk.BaseToken{
+			Symbol:      "eth",
+			Chain:       "eth",
+			Issuer:      "",
+			SendEnabled: true,
+			Decimals:    18,
+			TotalSupply: sdk.NewInt(10000),
+		},
+		TokenType:         sdk.AccountBased,
+		DepositEnabled:    false,
+		WithdrawalEnabled: false,
+		CollectThreshold:  sdk.NewInt(100),
+		OpenFee:           sdk.NewInt(1000),
+		SysOpenFee:        sdk.NewInt(1200),
+		WithdrawalFeeRate: sdk.NewDecWithPrec(2, 0),
 	},
 
 	//ERC20
 	{
-		Symbol:              "tbtc",
-		Chain:               "eth",
-		Issuer:              "0x123456",
-		TokenType:           sdk.AccountBased,
-		IsSendEnabled:       true,
-		IsDepositEnabled:    false,
-		IsWithdrawalEnabled: false,
-		Decimals:            8,
-		TotalSupply:         sdk.NewInt(2100),
-		CollectThreshold:    sdk.NewInt(100),
-		OpenFee:             sdk.NewInt(1000),
-		SysOpenFee:          sdk.NewInt(1200),
-		WithdrawalFeeRate:   sdk.NewDecWithPrec(2, 0),
+		BaseToken: sdk.BaseToken{
+			Symbol:      "tbtc",
+			Chain:       "eth",
+			Issuer:      "0x123456",
+			SendEnabled: true,
+			Decimals:    8,
+			TotalSupply: sdk.NewInt(2100),
+		},
+		TokenType:         sdk.AccountBased,
+		DepositEnabled:    false,
+		WithdrawalEnabled: false,
+		CollectThreshold:  sdk.NewInt(100),
+		OpenFee:           sdk.NewInt(1000),
+		SysOpenFee:        sdk.NewInt(1200),
+		WithdrawalFeeRate: sdk.NewDecWithPrec(2, 0),
 	},
 	{
-		Symbol:              "tbtc2",
-		Chain:               "eth",
-		Issuer:              "0x12345678",
-		TokenType:           sdk.AccountBased,
-		IsSendEnabled:       true,
-		IsDepositEnabled:    false,
-		IsWithdrawalEnabled: false,
-		Decimals:            8,
-		TotalSupply:         sdk.NewInt(1100), // Does not match total supply for BTC
-		CollectThreshold:    sdk.NewInt(100),
-		OpenFee:             sdk.NewInt(1000),
-		SysOpenFee:          sdk.NewInt(1200),
-		WithdrawalFeeRate:   sdk.NewDecWithPrec(2, 0),
+		BaseToken: sdk.BaseToken{
+			Symbol:      "tbtc2",
+			Chain:       "eth",
+			Issuer:      "0x12345678",
+			SendEnabled: true,
+			Decimals:    8,
+			TotalSupply: sdk.NewInt(1100), // Does not match total supply for BTC
+		},
+		TokenType:         sdk.AccountBased,
+		DepositEnabled:    false,
+		WithdrawalEnabled: false,
+		CollectThreshold:  sdk.NewInt(100),
+		OpenFee:           sdk.NewInt(1000),
+		SysOpenFee:        sdk.NewInt(1200),
+		WithdrawalFeeRate: sdk.NewDecWithPrec(2, 0),
 	},
 	{
-		Symbol:              "tbtc3",
-		Chain:               "eth",
-		Issuer:              "0x1234567890",
-		TokenType:           sdk.AccountBased,
-		IsSendEnabled:       true,
-		IsDepositEnabled:    false,
-		IsWithdrawalEnabled: false,
-		Decimals:            18, // Does not match decimals for BTC
-		TotalSupply:         sdk.NewInt(2100),
-		CollectThreshold:    sdk.NewInt(100),
-		OpenFee:             sdk.NewInt(1000),
-		SysOpenFee:          sdk.NewInt(1200),
-		WithdrawalFeeRate:   sdk.NewDecWithPrec(2, 0),
+		BaseToken: sdk.BaseToken{
+			Symbol:      "tbtc3",
+			Chain:       "eth",
+			Issuer:      "0x1234567890",
+			SendEnabled: true,
+			Decimals:    18, // Does not match decimals for BTC
+			TotalSupply: sdk.NewInt(2100),
+		},
+		TokenType:         sdk.AccountBased,
+		DepositEnabled:    false,
+		WithdrawalEnabled: false,
+		CollectThreshold:  sdk.NewInt(100),
+		OpenFee:           sdk.NewInt(1000),
+		SysOpenFee:        sdk.NewInt(1200),
+		WithdrawalFeeRate: sdk.NewDecWithPrec(2, 0),
 	},
 	{ // Identical to btc
-		Symbol:              "tbtc4",
-		Chain:               "eth",
-		Issuer:              "0x123456789012",
-		TokenType:           sdk.AccountBased,
-		IsSendEnabled:       true,
-		IsDepositEnabled:    false,
-		IsWithdrawalEnabled: false,
-		Decimals:            8,
-		TotalSupply:         sdk.NewInt(2100),
-		CollectThreshold:    sdk.NewInt(100),
-		OpenFee:             sdk.NewInt(1000),
-		SysOpenFee:          sdk.NewInt(1200),
-		WithdrawalFeeRate:   sdk.NewDecWithPrec(2, 0),
+		BaseToken: sdk.BaseToken{
+			Symbol:      "tbtc4",
+			Chain:       "eth",
+			Issuer:      "0x123456789012",
+			SendEnabled: true,
+			Decimals:    8,
+			TotalSupply: sdk.NewInt(2100),
+		},
+		TokenType:         sdk.AccountBased,
+		DepositEnabled:    false,
+		WithdrawalEnabled: false,
+		CollectThreshold:  sdk.NewInt(100),
+		OpenFee:           sdk.NewInt(1000),
+		SysOpenFee:        sdk.NewInt(1200),
+		WithdrawalFeeRate: sdk.NewDecWithPrec(2, 0),
 	},
 	{ // Identical to btc
-		Symbol:              "tbtc5",
-		Chain:               "eth",
-		Issuer:              "0x12345678901234",
-		TokenType:           sdk.AccountBased,
-		IsSendEnabled:       true,
-		IsDepositEnabled:    false,
-		IsWithdrawalEnabled: false,
-		Decimals:            8,
-		TotalSupply:         sdk.NewInt(2100),
-		CollectThreshold:    sdk.NewInt(100),
-		OpenFee:             sdk.NewInt(1000),
-		SysOpenFee:          sdk.NewInt(1200),
-		WithdrawalFeeRate:   sdk.NewDecWithPrec(2, 0),
+		BaseToken: sdk.BaseToken{
+			Symbol:      "tbtc5",
+			Chain:       "eth",
+			Issuer:      "0x12345678901234",
+			SendEnabled: true,
+			Decimals:    8,
+			TotalSupply: sdk.NewInt(2100),
+		},
+		TokenType:         sdk.AccountBased,
+		DepositEnabled:    false,
+		WithdrawalEnabled: false,
+		CollectThreshold:  sdk.NewInt(100),
+		OpenFee:           sdk.NewInt(1000),
+		SysOpenFee:        sdk.NewInt(1200),
+		WithdrawalFeeRate: sdk.NewDecWithPrec(2, 0),
 	},
 }
 
@@ -154,6 +174,8 @@ func setupUnitTestEnv() testEnv {
 	cuKey := sdk.NewKVStoreKey(custodianunit.StoreKey)
 	keyParams := sdk.NewKVStoreKey(params.StoreKey)
 	tkeyParams := sdk.NewTransientStoreKey(params.TStoreKey)
+	transferKey := sdk.NewKVStoreKey(transfer.StoreKey)
+	keyIbcAsset := sdk.NewKVStoreKey(ibcasset.StoreKey)
 
 	ms := store.NewCommitMultiStore(db)
 	ms.MountStoreWithDB(mappingKey, sdk.StoreTypeIAVL, db)
@@ -161,22 +183,27 @@ func setupUnitTestEnv() testEnv {
 	ms.MountStoreWithDB(cuKey, sdk.StoreTypeIAVL, db)
 	ms.MountStoreWithDB(keyParams, sdk.StoreTypeIAVL, db)
 	ms.MountStoreWithDB(tkeyParams, sdk.StoreTypeTransient, db)
+	ms.MountStoreWithDB(transferKey, sdk.StoreTypeIAVL, db)
+	ms.MountStoreWithDB(keyIbcAsset, sdk.StoreTypeIAVL, db)
+
 	ms.LoadLatestVersion()
 
 	ctx := sdk.NewContext(ms, abci.Header{ChainID: "test-chain-id"}, false, log.NewNopLogger())
 
 	ps := subspace.NewSubspace(cdc, keyParams, tkeyParams, custodianunit.DefaultParamspace)
 	rk := receipt.NewKeeper(cdc)
-	tk := token.NewKeeper(tokenKey, cdc, subspace.NewSubspace(cdc, keyParams, tkeyParams, token.DefaultParamspace))
-	ck := custodianunit.NewCUKeeper(cdc, cuKey, &tk, ps, custodianunit.ProtoBaseCU)
-
+	tk := token.NewKeeper(tokenKey, cdc)
+	ck := custodianunit.NewCUKeeper(cdc, cuKey, ps, cutypes.ProtoBaseCU)
+	ik := ibcasset.NewKeeper(cdc, keyIbcAsset, ck, &tk, ibcasset.ProtoBaseCUIBCAsset)
 	pk := params.NewKeeper(cdc, keyParams, tkeyParams, sdk.CodespaceType("mapping"))
-	mk := NewKeeper(mappingKey, cdc, &tk, ck, rk, pk.Subspace(types.DefaultParamspace))
+	trk := transfer.NewBaseKeeper(cdc, transferKey, ck, ik, &tk, nil, rk, nil, nil, pk.Subspace(transfer.DefaultParamspace), transfer.DefaultCodespace, nil)
+
+	mk := NewKeeper(mappingKey, cdc, &tk, ck, rk, trk, pk.Subspace(types.DefaultParamspace))
 
 	ck.SetParams(ctx, custodianunit.DefaultParams())
 
 	for _, tokenInfo := range testTokenInfo {
-		tk.SetTokenInfo(ctx, &tokenInfo)
+		tk.SetToken(ctx, &tokenInfo)
 	}
 
 	return testEnv{
@@ -184,6 +211,7 @@ func setupUnitTestEnv() testEnv {
 		ck:       ck,
 		tk:       &tk,
 		rk:       rk,
+		trk:      trk,
 		storeKey: tokenKey,
 		cdc:      cdc,
 		ctx:      ctx,

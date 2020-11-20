@@ -1,15 +1,41 @@
 package types
 
-import (
-	sdk "github.com/hbtc-chain/bhchain/types"
+import sdk "github.com/hbtc-chain/bhchain/types"
+
+const (
+	// query balance path
+	QueryBalance    = "balance"
+	QueryAllBalance = "balances"
 )
 
-// QueryBalanceParams defines the params for querying an CU balance.
 type QueryBalanceParams struct {
-	Address sdk.CUAddress
+	Addr   sdk.CUAddress
+	Symbol string
 }
 
-// NewQueryBalanceParams creates a new instance of QueryBalanceParams.
-func NewQueryBalanceParams(addr sdk.CUAddress) QueryBalanceParams {
-	return QueryBalanceParams{Address: addr}
+func NewQueryBalanceParams(addr sdk.CUAddress, symbol string) QueryBalanceParams {
+	return QueryBalanceParams{
+		Addr:   addr,
+		Symbol: symbol,
+	}
+}
+
+type QueryAllBalanceParams struct {
+	Addr sdk.CUAddress
+}
+
+func NewQueryAllBalanceParams(addr sdk.CUAddress) QueryAllBalanceParams {
+	return QueryAllBalanceParams{
+		Addr: addr,
+	}
+}
+
+type ResBalance struct {
+	Available sdk.Coin `json:"available"`
+	Locked    sdk.Coin `json:"locked"`
+}
+
+type ResAllBalance struct {
+	Available sdk.Coins `json:"available"`
+	Locked    sdk.Coins `json:"locked"`
 }

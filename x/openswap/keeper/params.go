@@ -21,8 +21,18 @@ func (k Keeper) MinimumLiquidity(ctx sdk.Context) (res sdk.Int) {
 	return
 }
 
-func (k Keeper) FeeRate(ctx sdk.Context) (res sdk.Dec) {
-	k.paramstore.Get(ctx, types.KeyFeeRate, &res)
+func (k Keeper) LimitSwapMatchingGas(ctx sdk.Context) (res sdk.Uint) {
+	k.paramstore.Get(ctx, types.KeyLimitSwapMatchingGas, &res)
+	return
+}
+
+func (k Keeper) MaxFeeRate(ctx sdk.Context) (res sdk.Dec) {
+	k.paramstore.Get(ctx, types.KeyMaxFeeRate, &res)
+	return
+}
+
+func (k Keeper) LpRewardRate(ctx sdk.Context) (res sdk.Dec) {
+	k.paramstore.Get(ctx, types.KeyLpRewardRate, &res)
 	return
 }
 
@@ -41,6 +51,11 @@ func (k Keeper) RefererMiningBonusRate(ctx sdk.Context) (res sdk.Dec) {
 	return
 }
 
+func (k Keeper) RepurchaseDuration(ctx sdk.Context) (res int64) {
+	k.paramstore.Get(ctx, types.KeyRepurchaseDuration, &res)
+	return
+}
+
 func (k Keeper) MiningWeights(ctx sdk.Context) (res []*types.MiningWeight) {
 	k.paramstore.Get(ctx, types.KeyMiningWeights, &res)
 	return
@@ -55,10 +70,13 @@ func (k Keeper) MiningPlans(ctx sdk.Context) (res []*types.MiningPlan) {
 func (k Keeper) GetParams(ctx sdk.Context) types.Params {
 	return types.NewParams(
 		k.MinimumLiquidity(ctx),
-		k.FeeRate(ctx),
+		k.LimitSwapMatchingGas(ctx),
+		k.MaxFeeRate(ctx),
+		k.LpRewardRate(ctx),
 		k.RepurchaseRate(ctx),
 		k.RefererTransactionBonusRate(ctx),
 		k.RefererMiningBonusRate(ctx),
+		k.RepurchaseDuration(ctx),
 		k.MiningWeights(ctx),
 		k.MiningPlans(ctx),
 	)

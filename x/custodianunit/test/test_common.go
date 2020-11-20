@@ -13,10 +13,14 @@ import (
 	cu "github.com/hbtc-chain/bhchain/x/custodianunit"
 	"github.com/hbtc-chain/bhchain/x/custodianunit/internal"
 	"github.com/hbtc-chain/bhchain/x/custodianunit/types"
+	"github.com/hbtc-chain/bhchain/x/ibcasset"
+	"github.com/hbtc-chain/bhchain/x/params"
 	"github.com/hbtc-chain/bhchain/x/params/subspace"
+	"github.com/hbtc-chain/bhchain/x/receipt"
 	"github.com/hbtc-chain/bhchain/x/supply/exported"
 	supplyexported "github.com/hbtc-chain/bhchain/x/supply/exported"
 	"github.com/hbtc-chain/bhchain/x/token"
+	"github.com/hbtc-chain/bhchain/x/transfer"
 )
 
 type testInput struct {
@@ -24,6 +28,8 @@ type testInput struct {
 	ctx sdk.Context
 	ak  cu.CUKeeper
 	sk  internal.SupplyKeeper
+	ik  ibcasset.IBCAssetKeeperI
+	tk  transfer.Keeper
 }
 
 // moduleAccount defines an CustodianUnit for modules that holds coins on a pool
@@ -59,82 +65,78 @@ func setupTestInput() testInput {
 	cdc := codec.New()
 	types.RegisterCodec(cdc)
 	cdc.RegisterInterface((*exported.ModuleAccountI)(nil), nil)
-	cdc.RegisterConcrete(&moduleAccount{}, "hbtcchain/ModuleAccount", nil)
 	// remove this sentence,after sdk.OpCUInfo move to settle
-	cdc.RegisterConcrete(&sdk.OpCUInfo{}, "cu/sdk.OpCUInfo", nil)
+	cdc.RegisterConcrete(&sdk.OpCUAstInfo{}, "cu/sdk.OpCUAstInfo", nil)
 	codec.RegisterCrypto(cdc)
+	receipt.RegisterCodec(cdc)
+	transfer.RegisterCodec(cdc)
 
 	authCapKey := sdk.NewKVStoreKey("authCapKey")
+	keyReceipt := sdk.NewKVStoreKey(receipt.StoreKey)
 	keyParams := sdk.NewKVStoreKey("subspace")
+	keyTransfer := sdk.NewKVStoreKey(transfer.StoreKey)
 	tkeyParams := sdk.NewTransientStoreKey("transient_subspace")
+	keyIbcasset := sdk.NewKVStoreKey(ibcasset.StoreKey)
 	tokenKey := sdk.NewKVStoreKey(token.ModuleName)
 
 	ms := store.NewCommitMultiStore(db)
 	ms.MountStoreWithDB(authCapKey, sdk.StoreTypeIAVL, db)
 	ms.MountStoreWithDB(keyParams, sdk.StoreTypeIAVL, db)
+	ms.MountStoreWithDB(keyReceipt, sdk.StoreTypeIAVL, db)
 	ms.MountStoreWithDB(tkeyParams, sdk.StoreTypeTransient, db)
+	ms.MountStoreWithDB(keyTransfer, sdk.StoreTypeIAVL, db)
 	ms.MountStoreWithDB(tokenKey, sdk.StoreTypeIAVL, db)
+	ms.MountStoreWithDB(keyIbcasset, sdk.StoreTypeIAVL, db)
+
 	ms.LoadLatestVersion()
 
 	ps := subspace.NewSubspace(cdc, keyParams, tkeyParams, types.DefaultParamspace)
-	tk := token.NewKeeper(tokenKey, cdc, subspace.NewSubspace(cdc, keyParams, tkeyParams, token.DefaultParamspace))
+	rk := receipt.NewKeeper(cdc)
+	tk := token.NewKeeper(tokenKey, cdc)
 
-	ak := cu.NewCUKeeper(cdc, authCapKey, &tk, ps, types.ProtoBaseCU)
-	sk := NewDummySupplyKeeper(ak)
-
+	pk := params.NewKeeper(cdc, keyParams, tkeyParams, params.DefaultCodespace)
+	ak := cu.NewCUKeeper(cdc, authCapKey, ps, types.ProtoBaseCU)
+	transferKeeper := transfer.NewBaseKeeper(cdc, keyTransfer, ak, nil, &tk, nil, rk, nil, nil, pk.Subspace(transfer.DefaultParamspace), transfer.DefaultCodespace, nil)
+	sk := NewDummySupplyKeeper(cdc, ak, transferKeeper)
+	ik := ibcasset.NewKeeper(cdc, keyIbcasset, ak, &tk, ibcasset.ProtoBaseCUIBCAsset)
 	ctx := sdk.NewContext(ms, abci.Header{ChainID: "test-chain-id"}, false, log.NewNopLogger())
 
 	ak.SetParams(ctx, types.DefaultParams())
 
 	//init token info
 	for _, tokenInfo := range token.TestTokenData {
-		token := token.NewTokenInfo(tokenInfo.Symbol, tokenInfo.Chain, tokenInfo.Issuer, tokenInfo.TokenType,
-			tokenInfo.IsSendEnabled, tokenInfo.IsDepositEnabled, tokenInfo.IsWithdrawalEnabled, tokenInfo.Decimals,
-			tokenInfo.TotalSupply, tokenInfo.CollectThreshold, tokenInfo.DepositThreshold, tokenInfo.OpenFee,
-			tokenInfo.SysOpenFee, tokenInfo.WithdrawalFeeRate, tokenInfo.SysTransferNum, tokenInfo.OpCUSysTransferNum,
-			tokenInfo.GasLimit, tokenInfo.GasPrice, tokenInfo.MaxOpCUNumber, tokenInfo.Confirmations, tokenInfo.IsNonceBased) //WithdrawalAddress and depositAddress will be added later.
-		tk.SetTokenInfo(ctx, token)
+		tk.CreateToken(ctx, tokenInfo)
 	}
 
-	return testInput{cdc: cdc, ctx: ctx, ak: ak, sk: sk}
+	return testInput{cdc: cdc, ctx: ctx, ak: ak, sk: sk, ik: ik, tk: transferKeeper}
 }
 
 // DummySupplyKeeper defines a supply keeper used only for testing to avoid
 // circle dependencies
 type DummySupplyKeeper struct {
 	ak cu.CUKeeper
+	tk internal.TransferKeeper
 }
 
 // NewDummySupplyKeeper creates a DummySupplyKeeper instance
-func NewDummySupplyKeeper(ak cu.CUKeeper) DummySupplyKeeper {
-	return DummySupplyKeeper{ak}
+func NewDummySupplyKeeper(cdc *codec.Codec, ak cu.CUKeeper, tk internal.TransferKeeper) DummySupplyKeeper {
+	cdc.RegisterConcrete(&moduleAccount{}, "hbtcchain/test/ModuleAccount", nil)
+	return DummySupplyKeeper{ak, tk}
 }
 
 // SendCoinsFromAccountToModule for the dummy supply keeper
 func (sk DummySupplyKeeper) SendCoinsFromAccountToModule(ctx sdk.Context, fromAddr sdk.CUAddress, recipientModule string, amt sdk.Coins) (sdk.Result, sdk.Error) {
 
-	fromAcc := sk.ak.GetCU(ctx, fromAddr)
 	moduleAcc := sk.GetModuleAccount(ctx, recipientModule)
+	res, _, err := sk.tk.SendCoins(ctx, fromAddr, moduleAcc.GetAddress(), amt)
+	return res, err
+}
 
-	newFromCoins, hasNeg := fromAcc.GetCoins().SafeSub(amt)
-	if hasNeg {
-		return sdk.Result{}, sdk.ErrInsufficientCoins(fromAcc.GetCoins().String())
-	}
+func (sk DummySupplyKeeper) SendCoinsFromModuleToAccount(ctx sdk.Context, senderModule string, recipientAddr sdk.CUAddress, amt sdk.Coins) (sdk.Result, sdk.Error) {
 
-	newToCoins := moduleAcc.GetCoins().Add(amt)
-
-	if err := fromAcc.SetCoins(newFromCoins); err != nil {
-		return sdk.Result{}, sdk.ErrInternal(err.Error())
-	}
-
-	if err := moduleAcc.SetCoins(newToCoins); err != nil {
-		return sdk.Result{}, sdk.ErrInternal(err.Error())
-	}
-
-	sk.ak.SetCU(ctx, fromAcc)
-	sk.ak.SetCU(ctx, moduleAcc)
-
-	return sdk.Result{}, nil
+	moduleAcc := sk.GetModuleAccount(ctx, senderModule)
+	res, _, err := sk.tk.SendCoins(ctx, moduleAcc.GetAddress(), recipientAddr, amt)
+	return res, err
 }
 
 // GetModuleAccount for dummy supply keeper
@@ -197,8 +199,8 @@ func setupTestInputForCUKeeper() testInputForCUKeeper {
 	ms.LoadLatestVersion()
 
 	ps := subspace.NewSubspace(cdc, keyParams, tkeyParams, types.DefaultParamspace)
-	tk := token.NewKeeper(tokenKey, cdc, subspace.NewSubspace(cdc, keyParams, tkeyParams, token.DefaultParamspace))
-	ak := cu.NewCUKeeper(cdc, authCapKey, &tk, ps, types.ProtoBaseCU)
+	tk := token.NewKeeper(tokenKey, cdc)
+	ak := cu.NewCUKeeper(cdc, authCapKey, ps, types.ProtoBaseCU)
 	sk := DummySupplyKeeper{}
 
 	ctx := sdk.NewContext(ms, abci.Header{ChainID: "test-chain-id"}, false, log.NewNopLogger())
@@ -206,12 +208,7 @@ func setupTestInputForCUKeeper() testInputForCUKeeper {
 	ak.SetParams(ctx, types.DefaultParams())
 	//init token info
 	for _, tokenInfo := range token.TestTokenData {
-		token := token.NewTokenInfo(tokenInfo.Symbol, tokenInfo.Chain, tokenInfo.Issuer, tokenInfo.TokenType,
-			tokenInfo.IsSendEnabled, tokenInfo.IsDepositEnabled, tokenInfo.IsWithdrawalEnabled, tokenInfo.Decimals,
-			tokenInfo.TotalSupply, tokenInfo.CollectThreshold, tokenInfo.DepositThreshold, tokenInfo.OpenFee,
-			tokenInfo.SysOpenFee, tokenInfo.WithdrawalFeeRate, tokenInfo.SysTransferNum, tokenInfo.OpCUSysTransferNum,
-			tokenInfo.GasLimit, tokenInfo.GasPrice, tokenInfo.MaxOpCUNumber, tokenInfo.Confirmations, tokenInfo.IsNonceBased) //WithdrawalAddress and depositAddress will be added later.
-		tk.SetTokenInfo(ctx, token)
+		tk.CreateToken(ctx, tokenInfo)
 	}
 
 	return testInputForCUKeeper{Cdc: cdc, Ctx: ctx, Ck: ak, Sk: sk}

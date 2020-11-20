@@ -8,7 +8,6 @@ import (
 
 // param change proposal handler
 var (
-	DisableTokenProposalHandler      = govclient.NewProposalHandler(cli.GetCmdDisableTokenProposal, rest.DisableTokenProposalRESTHandler)
 	AddTokenProposalHandler          = govclient.NewProposalHandler(cli.GetCmdAddTokenProposal, rest.AddTokenProposalRESTHandler)
 	TokenParamsChangeProposalHandler = govclient.NewProposalHandler(cli.GetCmdTokenParamsChangeProposal, rest.TokenParamsChangeProposalRESTHandler)
 )

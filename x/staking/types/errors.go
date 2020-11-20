@@ -54,12 +54,24 @@ func ErrValidatorJailed(codespace sdk.CodespaceType) sdk.Error {
 	return sdk.NewError(codespace, CodeInvalidValidator, "validator for this address is currently jailed")
 }
 
-func ErrKeyNodeDeny(codespace sdk.CodespaceType) sdk.Error {
-	return sdk.NewError(codespace, CodeInvalidValidator, "validator cannot be keynode directly")
+func ErrNoQualification(codespace sdk.CodespaceType) sdk.Error {
+	return sdk.NewError(codespace, CodeInvalidValidator, "validator has no qualification to be keynode")
 }
 
-func ErrBadRemoveValidator(codespace sdk.CodespaceType) sdk.Error {
-	return sdk.NewError(codespace, CodeInvalidValidator, "error removing validator")
+func ErrRemoveTooManyKeyNodes(codespace sdk.CodespaceType) sdk.Error {
+	return sdk.NewError(codespace, CodeInvalidValidator, "removing too many keynodes")
+}
+
+func ErrRemoveNotKeyNode(codespace sdk.CodespaceType) sdk.Error {
+	return sdk.NewError(codespace, CodeInvalidValidator, "not a key node")
+}
+
+func ErrAddDuplicatedKeyNode(codespace sdk.CodespaceType) sdk.Error {
+	return sdk.NewError(codespace, CodeInvalidValidator, "add duplicated key node")
+}
+
+func ErrKeyNodeNumExceeds(codespace sdk.CodespaceType) sdk.Error {
+	return sdk.NewError(codespace, CodeInvalidValidator, "key node number exceeds the threshold")
 }
 
 func ErrDescriptionLength(codespace sdk.CodespaceType, descriptor string, got, max int) sdk.Error {
@@ -227,4 +239,12 @@ func ErrNeitherShareMsgsGiven(codespace sdk.CodespaceType) sdk.Error {
 
 func ErrMissingSignature(codespace sdk.CodespaceType) sdk.Error {
 	return sdk.NewError(codespace, CodeInvalidValidator, "missing signature")
+}
+
+func ErrDuplicatedValidatorAddr(codespace sdk.CodespaceType) sdk.Error {
+	return sdk.NewError(codespace, CodeInvalidValidator, "duplicated validator address")
+}
+
+func ErrBadUpdateKeyNodesTime(codespace sdk.CodespaceType) sdk.Error {
+	return sdk.NewError(codespace, CodeInvalidInput, "cannot update keynodes until migration finishes")
 }

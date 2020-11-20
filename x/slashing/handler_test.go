@@ -14,7 +14,7 @@ import (
 
 func TestCannotUnjailUnlessJailed(t *testing.T) {
 	// initial setup
-	ctx, ck, sk, _, keeper := createTestInput(t, DefaultParams())
+	ctx, trk, sk, _, keeper := createTestInput(t, DefaultParams())
 	slh := NewHandler(keeper)
 	amt := sdk.TokensFromConsensusPower(1000000)
 	addr, val := addrs[0], pks[0]
@@ -24,7 +24,7 @@ func TestCannotUnjailUnlessJailed(t *testing.T) {
 	staking.EndBlocker(ctx, sk)
 
 	require.Equal(
-		t, ck.GetCoins(ctx, sdk.CUAddress(addr)),
+		t, trk.GetAllBalance(ctx, sdk.CUAddress(addr)),
 		sdk.Coins{sdk.NewCoin(sk.GetParams(ctx).BondDenom, initTokens.Sub(amt))},
 	)
 	require.Equal(t, amt, sk.Validator(ctx, addr).GetBondedTokens())
@@ -38,7 +38,7 @@ func TestCannotUnjailUnlessJailed(t *testing.T) {
 
 func TestCannotUnjailUnlessMeetMinSelfDelegation(t *testing.T) {
 	// initial setup
-	ctx, ck, sk, _, keeper := createTestInput(t, DefaultParams())
+	ctx, trk, sk, _, keeper := createTestInput(t, DefaultParams())
 	slh := NewHandler(keeper)
 	amtInt := int64(1000000)
 	addr, val, amt := addrs[0], pks[0], sdk.TokensFromConsensusPower(amtInt)
@@ -49,7 +49,7 @@ func TestCannotUnjailUnlessMeetMinSelfDelegation(t *testing.T) {
 	staking.EndBlocker(ctx, sk)
 
 	require.Equal(
-		t, ck.GetCoins(ctx, sdk.CUAddress(addr)),
+		t, trk.GetAllBalance(ctx, sdk.CUAddress(addr)),
 		sdk.Coins{sdk.NewCoin(sk.GetParams(ctx).BondDenom, initTokens.Sub(amt))},
 	)
 

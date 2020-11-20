@@ -2,16 +2,18 @@ package tests
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
-	"github.com/hbtc-chain/bhchain/chainnode"
-	sdk "github.com/hbtc-chain/bhchain/types"
-	"github.com/hbtc-chain/bhchain/x/token"
 	uuid "github.com/satori/go.uuid"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/tendermint/tendermint/crypto/ed25519"
 	"github.com/tendermint/tendermint/crypto/secp256k1"
+
+	"github.com/hbtc-chain/bhchain/chainnode"
+	sdk "github.com/hbtc-chain/bhchain/types"
+	"github.com/hbtc-chain/bhchain/x/custodianunit"
 )
 
 func TestColletEthSuccess(t *testing.T) {
@@ -22,20 +24,24 @@ func TestColletEthSuccess(t *testing.T) {
 	tk := input.tk
 	ok := input.ok
 	rk := input.rk
+	ik := input.ik
 	validators := input.validators
 	mockCN = chainnode.MockChainnode{}
+	newTestCU := func(cu custodianunit.CU) *testCU {
+		return newTestCU(ctx, input.trk, input.ik, cu)
+	}
 
-	tokenInfo := tk.GetTokenInfo(ctx, sdk.Symbol(token.EthToken))
+	tokenInfo := tk.GetIBCToken(ctx, sdk.Symbol("eth"))
 	tokenInfo.GasLimit = sdk.NewInt(21000)
 	tokenInfo.GasPrice = sdk.NewInt(10000000000)
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tk.SetToken(ctx, tokenInfo)
 
 	toCUAddr, err := sdk.CUAddressFromBase58("HBCLmQcskpdQivEkRrh1gNPm7c9aVB8hh1fy")
 	require.Nil(t, err)
 	fromCUAddr := toCUAddr
 
 	//step1, deposit 2 ETH items
-	chain := token.EthToken
+	chain := "eth"
 	symbol := chain
 	//deposit item1
 	hash1 := "0x84ed75bfad4b6d1c405a123990a1750974aa1f053394d442dfbc76090eeed44a"
@@ -56,7 +62,7 @@ func TestColletEthSuccess(t *testing.T) {
 	mockCN.On("ValidAddress", chain, symbol, toAddr).Return(true, toAddr)
 	mockCN.On("ValidAddress", chain, symbol, fromAddr1).Return(true, fromAddr1)
 
-	toCU := ck.GetCU(ctx, toCUAddr)
+	toCU := newTestCU(ck.GetCU(ctx, toCUAddr))
 	key := secp256k1.GenPrivKey()
 	pub := key.PubKey()
 	toCU.SetAssetPubkey(pub.Bytes(), 1)
@@ -64,9 +70,9 @@ func TestColletEthSuccess(t *testing.T) {
 	err = toCU.AddAsset(symbol, toAddr, 1)
 	require.Nil(t, err)
 	ck.SetCU(ctx, toCU)
-	require.Equal(t, toAddr, ck.GetCU(ctx, toCUAddr).GetAssetAddress(symbol, 1))
+	require.Equal(t, toAddr, newTestCU(ck.GetCU(ctx, toCUAddr)).GetAssetAddress(symbol, 1))
 
-	result1 := keeper.Deposit(ctx, fromCUAddr, toCUAddr, sdk.Symbol(token.EthToken), toAddr, hash1, 0, amt1, orderID1, memo1)
+	result1 := keeper.Deposit(ctx, fromCUAddr, toCUAddr, sdk.Symbol("eth"), toAddr, hash1, 0, amt1, orderID1, memo1)
 	require.Equal(t, sdk.CodeOK, result1.Code)
 
 	//check order
@@ -80,7 +86,7 @@ func TestColletEthSuccess(t *testing.T) {
 	require.Equal(t, sdk.DepositUnconfirm, int(order.(*sdk.OrderCollect).DepositStatus))
 
 	//no deposit item now
-	dls1 := ck.GetDepositList(ctx, symbol, toCUAddr)
+	dls1 := ik.GetDepositList(ctx, symbol, toCUAddr)
 	require.Equal(t, 0, len(dls1))
 
 	//check receipt
@@ -110,13 +116,13 @@ func TestColletEthSuccess(t *testing.T) {
 	require.Equal(t, sdk.DepositTypeCU, df.DepositType)
 
 	//check CU's coins and assetcoins
-	toCU = ck.GetCU(ctx, toCUAddr)
+	toCU = newTestCU(ck.GetCU(ctx, toCUAddr))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetAssetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetAssetCoinsHold().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetCoinsHold().AmountOf(symbol))
 
-	result2 := keeper.Deposit(ctx, fromCUAddr, toCUAddr, sdk.Symbol(token.EthToken), toAddr, hash2, 0, amt2, orderID2, memo2)
+	result2 := keeper.Deposit(ctx, fromCUAddr, toCUAddr, sdk.Symbol("eth"), toAddr, hash2, 0, amt2, orderID2, memo2)
 	require.Equal(t, sdk.CodeOK, result2.Code)
 
 	//check order
@@ -130,7 +136,7 @@ func TestColletEthSuccess(t *testing.T) {
 	require.Equal(t, sdk.DepositUnconfirm, int(order.(*sdk.OrderCollect).DepositStatus))
 
 	//no deposit item now
-	dls1 = ck.GetDepositList(ctx, symbol, toCUAddr)
+	dls1 = ik.GetDepositList(ctx, symbol, toCUAddr)
 	require.Equal(t, 0, len(dls1))
 
 	//check receipt
@@ -160,7 +166,7 @@ func TestColletEthSuccess(t *testing.T) {
 	require.Equal(t, sdk.DepositTypeCU, df.DepositType)
 
 	//check CU's coins and assetcoins
-	toCU = ck.GetCU(ctx, toCUAddr)
+	toCU = newTestCU(ck.GetCU(ctx, toCUAddr))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetAssetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetAssetCoinsHold().AmountOf(symbol))
@@ -246,7 +252,7 @@ func TestColletEthSuccess(t *testing.T) {
 	_, err = rk.GetReceiptFromResult(&result)
 	require.NotNil(t, err)
 
-	dls1 = ck.GetDepositList(ctx, symbol, toCUAddr)
+	dls1 = ik.GetDepositList(ctx, symbol, toCUAddr)
 	require.Equal(t, 2, len(dls1))
 	require.Equal(t, hash1, dls1[1].Hash)
 	require.Equal(t, amt1, dls1[1].Amount)
@@ -254,14 +260,14 @@ func TestColletEthSuccess(t *testing.T) {
 	require.Equal(t, memo1, dls1[1].Memo)
 	require.Equal(t, uint64(0), dls1[1].Index)
 
-	depositItem := ck.GetDeposit(ctx, symbol, toCUAddr, hash1, 0)
+	depositItem := ik.GetDeposit(ctx, symbol, toCUAddr, hash1, 0)
 	require.Equal(t, dls1[1], depositItem)
 
-	depositItem = ck.GetDeposit(ctx, symbol, toCUAddr, hash2, 0)
+	depositItem = ik.GetDeposit(ctx, symbol, toCUAddr, hash2, 0)
 	require.Equal(t, dls1[0], depositItem)
 
 	//check deposit item
-	dls := ck.GetDepositList(ctx, symbol, toCUAddr)
+	dls := ik.GetDepositList(ctx, symbol, toCUAddr)
 	require.Equal(t, 2, len(dls))
 	require.Equal(t, hash1, dls[1].Hash)
 	require.Equal(t, amt1, dls[1].Amount)
@@ -275,7 +281,7 @@ func TestColletEthSuccess(t *testing.T) {
 	require.Equal(t, uint64(0), dls[0].Index)
 
 	//check CU's coins and assetcoins
-	toCU = ck.GetCU(ctx, toCUAddr)
+	toCU = newTestCU(ck.GetCU(ctx, toCUAddr))
 	require.Equal(t, amt1.Add(amt2), toCU.GetAssetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetAssetCoinsHold().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetCoinsHold().AmountOf(symbol))
@@ -290,7 +296,7 @@ func TestColletEthSuccess(t *testing.T) {
 	ck.SetCU(ctx, collectFromCU)
 
 	collectToCUAddr, err := sdk.CUAddressFromBase58("HBCLXBebMwEWaEZYsqJij7xcpBayzJqdrKJP")
-	collectToCU := ck.GetCU(ctx, collectToCUAddr)
+	collectToCU := newTestCU(ck.GetCU(ctx, collectToCUAddr))
 	require.Nil(t, err)
 	collectToAddr := "0xd139E358aE9cB5424B2067da96F94cC938343446"
 	err = collectToCU.SetAssetAddress(symbol, collectToAddr, 1)
@@ -352,18 +358,18 @@ func TestColletEthSuccess(t *testing.T) {
 	require.Equal(t, rawData, collectOrder2.RawData)
 
 	//check deposit item
-	dls = ck.GetDepositList(ctx, symbol, toCUAddr)
+	dls = ik.GetDepositList(ctx, symbol, toCUAddr)
 	require.Equal(t, sdk.DepositItemStatusInProcess, dls[0].Status)
 	require.Equal(t, sdk.DepositItemStatusInProcess, dls[1].Status)
 
 	//check collectFromCU's coins
-	collectFromCU = ck.GetCU(ctx, collectFromCUAddr)
-	require.Equal(t, amt1.Add(amt2), collectFromCU.GetAssetCoins().AmountOf(symbol))
-	require.Equal(t, sdk.ZeroInt(), collectFromCU.GetAssetCoinsHold().AmountOf(symbol))
+	collectFromCU = newTestCU(ck.GetCU(ctx, collectFromCUAddr))
+	require.Equal(t, amt1.Add(amt2), collectFromCU.GetAssetCoinsHold().AmountOf(symbol))
+	require.Equal(t, sdk.ZeroInt(), collectFromCU.GetAssetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), collectFromCU.GetCoinsHold().AmountOf(symbol))
 
 	//check collectToCU's coins
-	collectToCU = ck.GetCU(ctx, collectToCUAddr)
+	collectToCU = newTestCU(ck.GetCU(ctx, collectToCUAddr))
 	require.Equal(t, sdk.ZeroInt(), collectToCU.GetAssetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), collectToCU.GetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), collectToCU.GetAssetCoinsHold().AmountOf(symbol))
@@ -375,7 +381,7 @@ func TestColletEthSuccess(t *testing.T) {
 	mockCN.On("VerifyAccountSignedTransaction", chain, symbol, collectFromAddr, signedData).Return(true, nil)
 	mockCN.On("QueryAccountTransactionFromSignedData", chain, symbol, signedData).Return(&chainnodeCollectTx, nil).Once()
 
-	result4 := keeper.CollectSignFinish(ctx, []string{orderID1, orderID2}, signedData, "")
+	result4 := keeper.CollectSignFinish(ctx, []string{orderID1, orderID2}, signedData)
 	require.Equal(t, sdk.CodeOK, result4.Code)
 
 	//check receipts
@@ -417,18 +423,18 @@ func TestColletEthSuccess(t *testing.T) {
 	require.Equal(t, signedData, collectOrder2.SignedTx)
 
 	//check deposit item
-	dls = ck.GetDepositList(ctx, symbol, toCUAddr)
+	dls = ik.GetDepositList(ctx, symbol, toCUAddr)
 	require.Equal(t, sdk.DepositItemStatusInProcess, dls[0].Status)
 	require.Equal(t, sdk.DepositItemStatusInProcess, dls[1].Status)
 
 	//check collectFromCU's coins
-	collectFromCU = ck.GetCU(ctx, collectFromCUAddr)
-	require.Equal(t, amt1.Add(amt2), collectFromCU.GetAssetCoins().AmountOf(symbol))
-	require.Equal(t, sdk.ZeroInt(), collectFromCU.GetAssetCoinsHold().AmountOf(symbol))
+	collectFromCU = newTestCU(ck.GetCU(ctx, collectFromCUAddr))
+	require.Equal(t, amt1.Add(amt2), collectFromCU.GetAssetCoinsHold().AmountOf(symbol))
+	require.Equal(t, sdk.ZeroInt(), collectFromCU.GetAssetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), collectFromCU.GetCoinsHold().AmountOf(symbol))
 
 	//check collectToCU's coins
-	collectToCU = ck.GetCU(ctx, collectToCUAddr)
+	collectToCU = newTestCU(ck.GetCU(ctx, collectToCUAddr))
 	require.Equal(t, sdk.ZeroInt(), collectToCU.GetAssetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), collectToCU.GetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), collectToCU.GetAssetCoinsHold().AmountOf(symbol))
@@ -476,25 +482,26 @@ func TestColletEthSuccess(t *testing.T) {
 	require.Equal(t, sdk.OrderStatusFinish, collectOrder2.GetOrderStatus())
 
 	//check deposit item
-	dls = ck.GetDepositList(ctx, symbol, toCUAddr)
+	dls = ik.GetDepositList(ctx, symbol, toCUAddr)
 	require.Equal(t, sdk.DepositItemStatusConfirmed, dls[0].Status)
 	require.Equal(t, sdk.DepositItemStatusConfirmed, dls[1].Status)
 
 	//check new generate deposit item
-	collectDepositItem := ck.GetDeposit(ctx, symbol, collectToCUAddr, collectTxHash, 0)
+	collectDepositItem := ik.GetDeposit(ctx, symbol, collectToCUAddr, collectTxHash, 0)
 	require.Equal(t, sdk.DepositItemStatusConfirmed, collectDepositItem.Status)
 	require.Equal(t, collectAmt, collectDepositItem.Amount)
 
 	//check collectFromCU's coins
-	collectFromCU = ck.GetCU(ctx, collectFromCUAddr)
+	collectFromCU = newTestCU(ck.GetCU(ctx, collectFromCUAddr))
 	require.Equal(t, sdk.ZeroInt(), collectFromCU.GetAssetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), collectFromCU.GetAssetCoinsHold().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), collectFromCU.GetCoinsHold().AmountOf(symbol))
-	require.Equal(t, gas.Add(gasOriginal), collectFromCU.GetGasReceived().AmountOf(chain))
-	require.Equal(t, costFee, collectFromCU.GetGasUsed().AmountOf(chain))
+
+	require.Equal(t, amt1.Add(amt2).Sub(chainnodeCollectTx.Amount).Add(gasOriginal), collectFromCU.GetGasReceived().AmountOf(chain))
+	require.Equal(t, costFee.String(), collectFromCU.GetGasUsed().AmountOf(chain).String())
 
 	//check collectToCU's coins
-	collectToCU = ck.GetCU(ctx, collectToCUAddr)
+	collectToCU = newTestCU(ck.GetCU(ctx, collectToCUAddr))
 	require.Equal(t, collectAmt, collectToCU.GetAssetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), collectToCU.GetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), collectToCU.GetAssetCoinsHold().AmountOf(symbol))
@@ -516,39 +523,43 @@ func TestColletEthError(t *testing.T) {
 	ok := input.ok
 	//rk := input.rk
 	//cn := input.cn
+	ik := input.ik
+	newTestCU := func(cu custodianunit.CU) *testCU {
+		return newTestCU(ctx, input.trk, input.ik, cu)
+	}
 	mockCN = chainnode.MockChainnode{}
 	validators := input.validators
 
-	tokenInfo := tk.GetTokenInfo(ctx, sdk.Symbol(token.EthToken))
-	tokenInfo.IsSendEnabled = true
-	tokenInfo.IsWithdrawalEnabled = true
-	tokenInfo.IsDepositEnabled = true
-	tk.SetTokenInfo(ctx, tokenInfo)
-	chain := token.EthToken
-	symbol := token.EthToken
+	tokenInfo := tk.GetIBCToken(ctx, "eth")
+	tokenInfo.SendEnabled = true
+	tokenInfo.WithdrawalEnabled = true
+	tokenInfo.DepositEnabled = true
+	tk.SetToken(ctx, tokenInfo)
+	chain := "eth"
+	symbol := "eth"
 
 	fromCUAddr, err := sdk.CUAddressFromBase58("HBCiopN1Vw38QyjEnfJ7nKeVgMSi9sFjQfkg")
 	require.Nil(t, err)
 
 	user1CUAddr, err := sdk.CUAddressFromBase58("HBCLmQcskpdQivEkRrh1gNPm7c9aVB8hh1fy")
 	require.Nil(t, err)
-	user1CU := ck.GetCU(ctx, user1CUAddr)
+	user1CU := newTestCU(ck.GetCU(ctx, user1CUAddr))
 	require.NotNil(t, user1CU)
 	user1EthAddr := "0xc96d141c9110a8E61eD62caaD8A7c858dB15B82c"
 	user1BtcAddr := "mh1DurxerNqH3nf9p3ivyn7yjgit1ep2Gg"
-	user1CU.SetAssetAddress(token.EthToken, user1EthAddr, 1)
-	user1CU.SetAssetAddress(token.BtcToken, user1BtcAddr, 1)
+	user1CU.SetAssetAddress("eth", user1EthAddr, 1)
+	user1CU.SetAssetAddress("btc", user1BtcAddr, 1)
 
 	user1EthDeposit1, err := sdk.NewDepositItem("user1EthDeposit1", 0, sdk.NewInt(1000000000), "", "", sdk.DepositItemStatusWaitCollect)
 	require.Nil(t, err)
 	user1EthDeposit2, err := sdk.NewDepositItem("user1EthDeposit2", 0, sdk.NewInt(2000000000), "", "", sdk.DepositItemStatusWaitCollect)
 	require.Nil(t, err)
-	user1CU.AddCoins(sdk.NewCoins(sdk.NewCoin(token.EthToken, sdk.NewInt(3000000000))))
-	user1CU.AddAssetCoins(sdk.NewCoins(sdk.NewCoin(token.EthToken, sdk.NewInt(3000000000))))
+	user1CU.AddCoins(sdk.NewCoins(sdk.NewCoin("eth", sdk.NewInt(3000000000))))
+	user1CU.AddAssetCoins(sdk.NewCoins(sdk.NewCoin("eth", sdk.NewInt(3000000000))))
 	ck.SetCU(ctx, user1CU)
 
-	ck.SetDepositList(ctx, token.EthToken, user1CUAddr, sdk.DepositList{user1EthDeposit1, user1EthDeposit2})
-	user1EthDepositList := ck.GetDepositList(ctx, token.EthToken, user1CUAddr)
+	ik.SetDepositList(ctx, "eth", user1CUAddr, sdk.DepositList{user1EthDeposit1, user1EthDeposit2})
+	user1EthDepositList := ik.GetDepositList(ctx, "eth", user1CUAddr)
 	require.Equal(t, 2, len(user1EthDepositList))
 
 	user1EthOrderID1 := uuid.NewV1().String()
@@ -591,10 +602,10 @@ func TestColletEthError(t *testing.T) {
 	require.Nil(t, err)
 	user1BtcDeposit2, err := sdk.NewDepositItem("user1BtcDeposit2", 0, sdk.NewInt(4000000000), "", "", sdk.DepositItemStatusWaitCollect)
 	require.Nil(t, err)
-	ck.SetDepositList(ctx, token.BtcToken, user1CUAddr, sdk.DepositList{user1BtcDeposit1, user1BtcDeposit2})
-	user1CU.AddAssetCoins(sdk.NewCoins(sdk.NewCoin(token.BtcToken, sdk.NewInt(7000000000))))
+	ik.SetDepositList(ctx, "btc", user1CUAddr, sdk.DepositList{user1BtcDeposit1, user1BtcDeposit2})
+	user1CU.AddAssetCoins(sdk.NewCoins(sdk.NewCoin("btc", sdk.NewInt(7000000000))))
 	ck.SetCU(ctx, user1CU)
-	user1BtcDepositList := ck.GetDepositList(ctx, token.BtcToken, user1CUAddr)
+	user1BtcDepositList := ik.GetDepositList(ctx, "btc", user1CUAddr)
 
 	user1BtcOrderID1 := uuid.NewV1().String()
 	order = &sdk.OrderCollect{
@@ -602,7 +613,7 @@ func TestColletEthError(t *testing.T) {
 			CUAddress: user1CUAddr,
 			ID:        user1BtcOrderID1,
 			OrderType: sdk.OrderTypeCollect,
-			Symbol:    token.BtcToken,
+			Symbol:    "btc",
 		},
 		CollectFromCU:      user1CUAddr,
 		CollectFromAddress: user1BtcAddr,
@@ -620,7 +631,7 @@ func TestColletEthError(t *testing.T) {
 			CUAddress: user1CUAddr,
 			ID:        user1BtcOrderID2,
 			OrderType: sdk.OrderTypeCollect,
-			Symbol:    token.BtcToken,
+			Symbol:    "btc",
 		},
 		CollectFromCU:      user1CUAddr,
 		CollectFromAddress: user1BtcAddr,
@@ -664,7 +675,7 @@ func TestColletEthError(t *testing.T) {
 	//opCU's address is not valid
 	collectToAddr := "0xd139E358aE9cB5424B2067da96F94cC938343446"
 	mockCN.On("ValidAddress", chain, symbol, collectToAddr).Return(false, "").Once()
-	ethOpCU := ck.GetCU(ctx, ethOpCUAddr)
+	ethOpCU := newTestCU(ck.GetCU(ctx, ethOpCUAddr))
 	err = ethOpCU.SetAssetAddress(symbol, collectToAddr, 1)
 	ck.SetCU(ctx, ethOpCU)
 	result = keeper.CollectWaitSign(ctx, ethOpCUAddr, []string{user1EthOrderID1, user1EthOrderID2}, rawData)
@@ -695,7 +706,7 @@ func TestColletEthError(t *testing.T) {
 	require.Contains(t, result.Log, "collet to an unexpected address")
 
 	tokenInfo.GasLimit = sdk.NewInt(21000)
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tk.SetToken(ctx, tokenInfo)
 
 	// gasLimit != tokenInfo.GasLimit
 	chainnodeCollectTx = chainnode.ExtAccountTransaction{
@@ -756,11 +767,11 @@ func TestColletEthError(t *testing.T) {
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 
 	tokenInfo.CollectThreshold = sdk.NewInt(3000000000)
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tk.SetToken(ctx, tokenInfo)
 
 	//gas price too high
 	tokenInfo.GasPrice = sdk.NewInt(6)
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tk.SetToken(ctx, tokenInfo)
 	chainnodeCollectTx = chainnode.ExtAccountTransaction{
 		Hash:     collectTxHash,
 		To:       collectToAddr,
@@ -776,7 +787,7 @@ func TestColletEthError(t *testing.T) {
 
 	//gas price is too low
 	tokenInfo.GasPrice = sdk.NewInt(22)
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tk.SetToken(ctx, tokenInfo)
 	mockCN.On("QueryAccountTransactionFromData", chain, symbol, rawData).Return(&chainnodeCollectTx, []byte{0x0}, nil).Once()
 	result = keeper.CollectWaitSign(ctx, ethOpCUAddr, []string{user1EthOrderID1, user1EthOrderID2}, rawData)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
@@ -792,12 +803,12 @@ func TestColletEthError(t *testing.T) {
 		GasPrice: sdk.NewInt(10), //
 	}
 	tokenInfo.GasPrice = sdk.NewInt(10)
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tk.SetToken(ctx, tokenInfo)
 	mockCN.On("QueryAccountTransactionFromData", chain, symbol, rawData).Return(&chainnodeCollectTx, []byte{0x0}, nil)
 	result = keeper.CollectWaitSign(ctx, ethOpCUAddr, []string{user1EthOrderID1, user1EthOrderID2}, rawData)
 	require.Equal(t, sdk.CodeOK, result.Code)
 
-	user1CU = ck.GetCU(ctx, user1CUAddr)
+	user1CU = newTestCU(ck.GetCU(ctx, user1CUAddr))
 	sendable := user1CU.IsEnabledSendTx(chain, user1CU.GetAssetAddress(chain, 1))
 	require.Equal(t, false, sendable)
 
@@ -807,20 +818,20 @@ func TestColletEthError(t *testing.T) {
 	chainnodeCollectTx.From = user1EthAddr
 	signedTx := []byte("singedTx")
 	mockCN.On("VerifyAccountSignedTransaction", chain, symbol, user1EthAddr, signedTx).Return(true, errors.New("err")).Once()
-	result = keeper.CollectSignFinish(ctx, []string{user1EthOrderID1, user1EthOrderID2}, signedTx, "")
+	result = keeper.CollectSignFinish(ctx, []string{user1EthOrderID1, user1EthOrderID2}, signedTx)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	require.Contains(t, result.Log, "Fail to verify signed transaction")
 
 	//VerifyAccountSignedTransaction verified =false
 	mockCN.On("VerifyAccountSignedTransaction", chain, symbol, user1EthAddr, signedTx).Return(false, nil).Once()
-	result = keeper.CollectSignFinish(ctx, []string{user1EthOrderID1, user1EthOrderID2}, signedTx, "")
+	result = keeper.CollectSignFinish(ctx, []string{user1EthOrderID1, user1EthOrderID2}, signedTx)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	require.Contains(t, result.Log, "Fail to verify signed transaction")
 
 	//QueryAccountTransactionFromSignedData, err
 	mockCN.On("VerifyAccountSignedTransaction", chain, symbol, user1EthAddr, signedTx).Return(true, nil)
 	mockCN.On("QueryAccountTransactionFromSignedData", chain, symbol, signedTx).Return(&chainnodeCollectTx, errors.New("err")).Once()
-	result = keeper.CollectSignFinish(ctx, []string{user1EthOrderID1, user1EthOrderID2}, signedTx, "")
+	result = keeper.CollectSignFinish(ctx, []string{user1EthOrderID1, user1EthOrderID2}, signedTx)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	//require.Contains(t, result.Log, "Fail to get transaction")
 
@@ -835,7 +846,7 @@ func TestColletEthError(t *testing.T) {
 		GasPrice: sdk.NewInt(10), // 10Gwei
 	}
 	mockCN.On("QueryAccountTransactionFromSignedData", chain, symbol, signedTx).Return(&chainnodeCollectTx1, nil).Once()
-	result = keeper.CollectSignFinish(ctx, []string{user1EthOrderID1, user1EthOrderID2}, signedTx, "")
+	result = keeper.CollectSignFinish(ctx, []string{user1EthOrderID1, user1EthOrderID2}, signedTx)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	//require.Contains(t, result.Log, "collet from an unexpected address")
 
@@ -850,7 +861,7 @@ func TestColletEthError(t *testing.T) {
 		GasPrice: sdk.NewInt(10), // 10Gwei
 	}
 	mockCN.On("QueryAccountTransactionFromSignedData", chain, symbol, signedTx).Return(&chainnodeCollectTx1, nil).Once()
-	result = keeper.CollectSignFinish(ctx, []string{user1EthOrderID1, user1EthOrderID2}, signedTx, "")
+	result = keeper.CollectSignFinish(ctx, []string{user1EthOrderID1, user1EthOrderID2}, signedTx)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	//require.Contains(t, result.Log, "collet to an unexpected address")
 
@@ -865,7 +876,7 @@ func TestColletEthError(t *testing.T) {
 		GasPrice: sdk.NewInt(1), // 10Gwei
 	}
 	mockCN.On("QueryAccountTransactionFromSignedData", chain, symbol, signedTx).Return(&chainnodeCollectTx1, nil).Once()
-	result = keeper.CollectSignFinish(ctx, []string{user1EthOrderID1, user1EthOrderID2}, signedTx, "")
+	result = keeper.CollectSignFinish(ctx, []string{user1EthOrderID1, user1EthOrderID2}, signedTx)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	require.Contains(t, result.Log, "amount mismatch")
 
@@ -880,7 +891,7 @@ func TestColletEthError(t *testing.T) {
 		GasPrice: sdk.NewInt(11), // 10Gwei
 	}
 	mockCN.On("QueryAccountTransactionFromSignedData", chain, symbol, signedTx).Return(&chainnodeCollectTx1, nil).Once()
-	result = keeper.CollectSignFinish(ctx, []string{user1EthOrderID1, user1EthOrderID2}, signedTx, "")
+	result = keeper.CollectSignFinish(ctx, []string{user1EthOrderID1, user1EthOrderID2}, signedTx)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	require.Contains(t, result.Log, "gasPrice mismatch")
 
@@ -895,7 +906,7 @@ func TestColletEthError(t *testing.T) {
 		GasPrice: sdk.NewInt(10), // 10Gwei
 	}
 	mockCN.On("QueryAccountTransactionFromSignedData", chain, symbol, signedTx).Return(&chainnodeCollectTx1, nil).Once()
-	result = keeper.CollectSignFinish(ctx, []string{user1EthOrderID1, user1EthOrderID2}, signedTx, "")
+	result = keeper.CollectSignFinish(ctx, []string{user1EthOrderID1, user1EthOrderID2}, signedTx)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	require.Contains(t, result.Log, "gasLimit mismatch")
 
@@ -910,7 +921,7 @@ func TestColletEthError(t *testing.T) {
 		GasPrice: sdk.NewInt(10), // 10Gwei
 	}
 	mockCN.On("QueryAccountTransactionFromSignedData", chain, symbol, signedTx).Return(&chainnodeCollectTx1, nil).Once()
-	result = keeper.CollectSignFinish(ctx, []string{user1EthOrderID1, user1EthOrderID2}, signedTx, "")
+	result = keeper.CollectSignFinish(ctx, []string{user1EthOrderID1, user1EthOrderID2}, signedTx)
 	require.Equal(t, sdk.CodeOK, result.Code)
 
 	/*---CollectFinish----*/
@@ -969,7 +980,7 @@ func TestColletEthError(t *testing.T) {
 	require.Equal(t, sdk.CodeOK, result.Code)
 
 	//check user1's coins, coinsOnhold,AssetCoins, gr, gu
-	user1CU = ck.GetCU(ctx, user1CUAddr)
+	user1CU = newTestCU(ck.GetCU(ctx, user1CUAddr))
 	require.Equal(t, sdk.NewInt(3000000000), user1CU.GetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), user1CU.GetCoinsHold().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt().String(), user1CU.GetAssetCoins().AmountOf(symbol).String())
@@ -978,7 +989,7 @@ func TestColletEthError(t *testing.T) {
 	require.Equal(t, sdk.NewInt(210000), user1CU.GetGasReceived().AmountOf(symbol))
 
 	//check btcOpCU's coins
-	ethOpCU = ck.GetCU(ctx, ethOpCUAddr)
+	ethOpCU = newTestCU(ck.GetCU(ctx, ethOpCUAddr))
 	require.Equal(t, sdk.ZeroInt(), ethOpCU.GetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), ethOpCU.GetCoinsHold().AmountOf(symbol))
 	require.Equal(t, sdk.NewInt(3000000000).SubRaw(210000), ethOpCU.GetAssetCoins().AmountOf(symbol))
@@ -992,10 +1003,10 @@ func TestColletEthError(t *testing.T) {
 
 	//check deposit status
 
-	require.Equal(t, sdk.DepositItemStatusConfirmed, ck.GetDeposit(ctx, symbol, user1CUAddr, "user1EthDeposit1", 0).Status)
-	require.Equal(t, sdk.DepositItemStatusConfirmed, ck.GetDeposit(ctx, symbol, user1CUAddr, "user1EthDeposit2", 0).Status)
-	require.Equal(t, sdk.DepositItemStatusWaitCollect, ck.GetDeposit(ctx, token.BtcToken, user1CUAddr, "user1BtcDeposit1", 0).Status)
-	require.Equal(t, sdk.DepositItemStatusWaitCollect, ck.GetDeposit(ctx, token.BtcToken, user1CUAddr, "user1BtcDeposit2", 0).Status)
+	require.Equal(t, sdk.DepositItemStatusConfirmed, ik.GetDeposit(ctx, symbol, user1CUAddr, "user1EthDeposit1", 0).Status)
+	require.Equal(t, sdk.DepositItemStatusConfirmed, ik.GetDeposit(ctx, symbol, user1CUAddr, "user1EthDeposit2", 0).Status)
+	require.Equal(t, sdk.DepositItemStatusWaitCollect, ik.GetDeposit(ctx, "btc", user1CUAddr, "user1BtcDeposit1", 0).Status)
+	require.Equal(t, sdk.DepositItemStatusWaitCollect, ik.GetDeposit(ctx, "btc", user1CUAddr, "user1BtcDeposit2", 0).Status)
 
 }
 
@@ -1008,17 +1019,21 @@ func TestCollectBtcSuccess(t *testing.T) {
 	ok := input.ok
 	rk := input.rk
 	validators := input.validators
+	ik := input.ik
+	newTestCU := func(cu custodianunit.CU) *testCU {
+		return newTestCU(ctx, input.trk, input.ik, cu)
+	}
 	mockCN = chainnode.MockChainnode{}
-	chain := token.BtcToken
+	chain := "btc"
 	symbol := chain
 
 	pubkey := ed25519.GenPrivKey().PubKey()
 
 	require.Equal(t, 1, len(ck.GetOpCUs(ctx, symbol)))
 
-	tokenInfo := tk.GetTokenInfo(ctx, sdk.Symbol(symbol))
+	tokenInfo := tk.GetIBCToken(ctx, sdk.Symbol(symbol))
 	tokenInfo.GasPrice = sdk.NewInt(551000 / 190) //Adjust gasPrice according txsize calculation
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tk.SetToken(ctx, tokenInfo)
 
 	toCUAddr, err := sdk.CUAddressFromBase58("HBCLmQcskpdQivEkRrh1gNPm7c9aVB8hh1fy")
 	require.Nil(t, err)
@@ -1038,13 +1053,13 @@ func TestCollectBtcSuccess(t *testing.T) {
 	mockCN.On("ValidAddress", chain, symbol, fromAddr).Return(true, fromAddr)
 
 	//step1, Deposit 1 BTC item
-	toCU := ck.GetCU(ctx, toCUAddr)
+	toCU := newTestCU(ck.GetCU(ctx, toCUAddr))
 	require.Equal(t, "", toCU.GetAssetAddress(symbol, 1))
 	err = toCU.AddAsset(symbol, toAddr, 1)
 	require.Nil(t, err)
 	toCU.SetAssetPubkey(pubkey.Bytes(), 1)
 	ck.SetCU(ctx, toCU)
-	require.Equal(t, toAddr, ck.GetCU(ctx, toCUAddr).GetAssetAddress(symbol, 1))
+	require.Equal(t, toAddr, newTestCU(ck.GetCU(ctx, toCUAddr)).GetAssetAddress(symbol, 1))
 
 	result := keeper.Deposit(ctx, fromCUAddr, toCUAddr, sdk.Symbol(symbol), toAddr, hash, index, amt, orderID, memo)
 	require.Equal(t, sdk.CodeOK, result.Code)
@@ -1060,7 +1075,7 @@ func TestCollectBtcSuccess(t *testing.T) {
 	require.Equal(t, sdk.DepositUnconfirm, int(order.(*sdk.OrderCollect).DepositStatus))
 
 	//no deposit item now
-	dls1 := ck.GetDepositList(ctx, symbol, toCUAddr)
+	dls1 := ik.GetDepositList(ctx, symbol, toCUAddr)
 	require.Equal(t, 0, len(dls1))
 
 	//check receipt
@@ -1090,7 +1105,7 @@ func TestCollectBtcSuccess(t *testing.T) {
 	require.Equal(t, sdk.DepositTypeCU, df.DepositType)
 
 	//check CU's coins and assetcoins
-	toCU = ck.GetCU(ctx, toCUAddr)
+	toCU = newTestCU(ck.GetCU(ctx, toCUAddr))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetAssetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetAssetCoinsHold().AmountOf(symbol))
@@ -1164,7 +1179,7 @@ func TestCollectBtcSuccess(t *testing.T) {
 	_, err = rk.GetReceiptFromResult(&result)
 	require.NotNil(t, err)
 
-	dls1 = ck.GetDepositList(ctx, symbol, toCUAddr)
+	dls1 = ik.GetDepositList(ctx, symbol, toCUAddr)
 	require.Equal(t, 1, len(dls1))
 	require.Equal(t, hash, dls1[0].Hash)
 	require.Equal(t, amt, dls1[0].Amount)
@@ -1172,11 +1187,11 @@ func TestCollectBtcSuccess(t *testing.T) {
 	require.Equal(t, memo, dls1[0].Memo)
 	require.Equal(t, uint64(1), dls1[0].Index)
 
-	depositItem := ck.GetDeposit(ctx, symbol, toCUAddr, hash, index)
+	depositItem := ik.GetDeposit(ctx, symbol, toCUAddr, hash, index)
 	require.Equal(t, dls1[0], depositItem)
 
 	//check deposit item
-	dls := ck.GetDepositList(ctx, symbol, toCUAddr)
+	dls := ik.GetDepositList(ctx, symbol, toCUAddr)
 	require.Equal(t, 1, len(dls))
 	require.Equal(t, hash, dls[0].Hash)
 	require.Equal(t, amt, dls[0].Amount)
@@ -1185,7 +1200,7 @@ func TestCollectBtcSuccess(t *testing.T) {
 	require.Equal(t, index, dls[0].Index)
 
 	//check CU's coins and assetcoins
-	toCU = ck.GetCU(ctx, toCUAddr)
+	toCU = newTestCU(ck.GetCU(ctx, toCUAddr))
 	require.Equal(t, amt, toCU.GetAssetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetAssetCoinsHold().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), toCU.GetCoinsHold().AmountOf(symbol))
@@ -1195,7 +1210,7 @@ func TestCollectBtcSuccess(t *testing.T) {
 	collectFromCU := toCU
 	collectFromAddr := toAddr
 	collectToCUAddr, err := sdk.CUAddressFromBase58("HBCPoshPen4yTWCwCvCVuwbfSmrb3EzNbXTo")
-	collectToCU := ck.GetCU(ctx, collectToCUAddr)
+	collectToCU := newTestCU(ck.GetCU(ctx, collectToCUAddr))
 	require.Nil(t, err)
 	require.Nil(t, err)
 	collectToAddr := "mh1DurxerNqH3nf9p3ivyn7yjgit1ep2Gg"
@@ -1251,19 +1266,19 @@ func TestCollectBtcSuccess(t *testing.T) {
 	require.Equal(t, rawData, collectOrder1.RawData)
 
 	//check deposit item
-	dls = ck.GetDepositList(ctx, symbol, toCUAddr)
+	dls = ik.GetDepositList(ctx, symbol, toCUAddr)
 	require.Equal(t, sdk.DepositItemStatusInProcess, dls[0].Status)
 
 	//check collectFromCU's coins
-	collectFromCU = ck.GetCU(ctx, collectFromCUAddr)
-	require.Equal(t, amt, collectFromCU.GetAssetCoins().AmountOf(symbol))
-	require.Equal(t, sdk.ZeroInt(), collectFromCU.GetAssetCoinsHold().AmountOf(symbol))
+	collectFromCU = newTestCU(ck.GetCU(ctx, collectFromCUAddr))
+	require.Equal(t, amt, collectFromCU.GetAssetCoinsHold().AmountOf(symbol))
+	require.Equal(t, sdk.ZeroInt(), collectFromCU.GetAssetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), collectFromCU.GetCoinsHold().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), collectFromCU.GetGasUsed().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), collectFromCU.GetGasReceived().AmountOf(symbol))
 
 	//check collectToCU's coins
-	collectToCU = ck.GetCU(ctx, collectToCUAddr)
+	collectToCU = newTestCU(ck.GetCU(ctx, collectToCUAddr))
 	require.Equal(t, sdk.ZeroInt(), collectToCU.GetAssetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), collectToCU.GetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), collectToCU.GetAssetCoinsHold().AmountOf(symbol))
@@ -1277,7 +1292,7 @@ func TestCollectBtcSuccess(t *testing.T) {
 	mockCN.On("QueryUtxoTransactionFromSignedData", chain, symbol, signedData, ins).Return(chainnodeCollectTx, nil).Once()
 	mockCN.On("QueryUtxoTransactionFromData", chain, symbol, rawData, ins).Return(chainnodeCollectTx, [][]byte{signBytes}, nil).Once()
 
-	result4 := keeper.CollectSignFinish(ctx, []string{orderID}, signedData, "")
+	result4 := keeper.CollectSignFinish(ctx, []string{orderID}, signedData)
 	require.Equal(t, sdk.CodeOK, result4.Code)
 
 	//check receipts
@@ -1307,19 +1322,19 @@ func TestCollectBtcSuccess(t *testing.T) {
 	require.Equal(t, signedData, collectOrder1.SignedTx)
 
 	//check deposit item
-	dls = ck.GetDepositList(ctx, symbol, toCUAddr)
+	dls = ik.GetDepositList(ctx, symbol, toCUAddr)
 	require.Equal(t, sdk.DepositItemStatusInProcess, dls[0].Status)
 
 	//check collectFromCU's coins
-	collectFromCU = ck.GetCU(ctx, collectFromCUAddr)
-	require.Equal(t, amt, collectFromCU.GetAssetCoins().AmountOf(symbol))
-	require.Equal(t, sdk.ZeroInt(), collectFromCU.GetAssetCoinsHold().AmountOf(symbol))
+	collectFromCU = newTestCU(ck.GetCU(ctx, collectFromCUAddr))
+	require.Equal(t, amt, collectFromCU.GetAssetCoinsHold().AmountOf(symbol))
+	require.Equal(t, sdk.ZeroInt(), collectFromCU.GetAssetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), collectFromCU.GetCoinsHold().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), collectFromCU.GetGasUsed().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), collectFromCU.GetGasReceived().AmountOf(symbol))
 
 	//check collectToCU's coins
-	collectToCU = ck.GetCU(ctx, collectToCUAddr)
+	collectToCU = newTestCU(ck.GetCU(ctx, collectToCUAddr))
 	require.Equal(t, sdk.ZeroInt(), collectToCU.GetAssetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), collectToCU.GetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), collectToCU.GetAssetCoinsHold().AmountOf(symbol))
@@ -1365,16 +1380,16 @@ func TestCollectBtcSuccess(t *testing.T) {
 	require.Equal(t, sdk.OrderStatusFinish, collectOrder1.GetOrderStatus())
 
 	//check deposit item
-	dls = ck.GetDepositList(ctx, symbol, toCUAddr)
+	dls = ik.GetDepositList(ctx, symbol, toCUAddr)
 	require.Equal(t, sdk.DepositItemStatusConfirmed, dls[0].Status)
 
 	//check new generate deposit item
-	collectDepositItem := ck.GetDeposit(ctx, symbol, collectToCUAddr, collectTxHash, 0)
+	collectDepositItem := ik.GetDeposit(ctx, symbol, collectToCUAddr, collectTxHash, 0)
 	require.Equal(t, sdk.DepositItemStatusConfirmed, collectDepositItem.Status)
 	require.Equal(t, collectAmt, collectDepositItem.Amount)
 
 	//check collectFromCU's coins
-	collectFromCU = ck.GetCU(ctx, collectFromCUAddr)
+	collectFromCU = newTestCU(ck.GetCU(ctx, collectFromCUAddr))
 	require.Equal(t, sdk.ZeroInt(), collectFromCU.GetAssetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), collectFromCU.GetAssetCoinsHold().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), collectFromCU.GetCoinsHold().AmountOf(symbol))
@@ -1382,7 +1397,7 @@ func TestCollectBtcSuccess(t *testing.T) {
 	require.Equal(t, collectFee, collectFromCU.GetGasReceived().AmountOf(symbol))
 
 	//check collectToCU's coins
-	collectToCU = ck.GetCU(ctx, collectToCUAddr)
+	collectToCU = newTestCU(ck.GetCU(ctx, collectToCUAddr))
 	require.Equal(t, collectAmt, collectToCU.GetAssetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), collectToCU.GetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), collectToCU.GetAssetCoinsHold().AmountOf(symbol))
@@ -1404,38 +1419,42 @@ func TestColletBtcError(t *testing.T) {
 	ok := input.ok
 	//rk := input.rk
 	//cn := input.cn
+	ik := input.ik
+	newTestCU := func(cu custodianunit.CU) *testCU {
+		return newTestCU(ctx, input.trk, input.ik, cu)
+	}
 	mockCN = chainnode.MockChainnode{}
-	symbol := token.BtcToken
-	chain := token.BtcToken
+	symbol := "btc"
+	chain := "btc"
 	validators := input.validators
 
 	pubkey := ed25519.GenPrivKey().PubKey()
 
-	tokenInfo := tk.GetTokenInfo(ctx, sdk.Symbol(symbol))
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tokenInfo := tk.GetIBCToken(ctx, sdk.Symbol(symbol))
+	tk.SetToken(ctx, tokenInfo)
 
 	fromCUAddr, err := sdk.CUAddressFromBase58("HBCiopN1Vw38QyjEnfJ7nKeVgMSi9sFjQfkg")
 	require.Nil(t, err)
 
 	user1CUAddr, err := sdk.CUAddressFromBase58("HBCLmQcskpdQivEkRrh1gNPm7c9aVB8hh1fy")
 	require.Nil(t, err)
-	user1CU := ck.GetCU(ctx, user1CUAddr)
+	user1CU := newTestCU(ck.GetCU(ctx, user1CUAddr))
 	require.NotNil(t, user1CU)
 	user1EthAddr := "0xc96d141c9110a8e61ed62caad8a7c858db15b82c"
 	user1BtcAddr := "mh1DurxerNqH3nf9p3ivyn7yjgit1ep2Gg"
 	user1CU.SetAssetPubkey(pubkey.Bytes(), 1)
-	user1CU.SetAssetAddress(token.EthToken, user1EthAddr, 1)
-	user1CU.SetAssetAddress(token.BtcToken, user1BtcAddr, 1)
+	user1CU.SetAssetAddress("eth", user1EthAddr, 1)
+	user1CU.SetAssetAddress("btc", user1BtcAddr, 1)
 
 	user1BtcDeposit1, err := sdk.NewDepositItem("user1BtcDeposit1", 0, sdk.NewInt(3000000000), user1BtcAddr, "", sdk.DepositItemStatusWaitCollect)
 	require.Nil(t, err)
 	user1BtcDeposit2, err := sdk.NewDepositItem("user1BtcDeposit2", 1, sdk.NewInt(4000000000), user1BtcAddr, "", sdk.DepositItemStatusWaitCollect)
 	require.Nil(t, err)
-	ck.SetDepositList(ctx, token.BtcToken, user1CUAddr, sdk.DepositList{user1BtcDeposit1, user1BtcDeposit2})
-	user1CU.AddCoins(sdk.NewCoins(sdk.NewCoin(token.BtcToken, sdk.NewInt(7000000000))))
-	user1CU.AddAssetCoins(sdk.NewCoins(sdk.NewCoin(token.BtcToken, sdk.NewInt(7000000000))))
+	ik.SetDepositList(ctx, "btc", user1CUAddr, sdk.DepositList{user1BtcDeposit1, user1BtcDeposit2})
+	user1CU.AddCoins(sdk.NewCoins(sdk.NewCoin("btc", sdk.NewInt(7000000000))))
+	user1CU.AddAssetCoins(sdk.NewCoins(sdk.NewCoin("btc", sdk.NewInt(7000000000))))
 	ck.SetCU(ctx, user1CU)
-	user1BtcDepositList := ck.GetDepositList(ctx, token.BtcToken, user1CUAddr)
+	user1BtcDepositList := ik.GetDepositList(ctx, "btc", user1CUAddr)
 
 	user1BtcOrderID1 := uuid.NewV1().String()
 	order := &sdk.OrderCollect{
@@ -1478,23 +1497,23 @@ func TestColletBtcError(t *testing.T) {
 	//setup user2
 	user2CUAddr, err := sdk.CUAddressFromBase58("HBCLG5zCH4FtXi3G6wZps8TNfYYWgzb1Rr2q")
 	require.Nil(t, err)
-	user2CU := ck.GetCU(ctx, user2CUAddr)
+	user2CU := newTestCU(ck.GetCU(ctx, user2CUAddr))
 	require.NotNil(t, user2CU)
 	user2EthAddr := "0xd139e358ae9cb5424b2067da96f94cc938343446"
 	user2BtcAddr := "n3buST7Uz99E3ERQ1kMCQ848JbTVNQVUeP"
 	user2CU.SetAssetPubkey(pubkey.Bytes(), 1)
-	user2CU.SetAssetAddress(token.BtcToken, user2BtcAddr, 1)
-	user2CU.SetAssetAddress(token.EthToken, user2EthAddr, 1)
+	user2CU.SetAssetAddress("btc", user2BtcAddr, 1)
+	user2CU.SetAssetAddress("eth", user2EthAddr, 1)
 
 	user2BtcDeposit1, err := sdk.NewDepositItem("user2BtcDeposit1", 0, sdk.NewInt(5000000000), user2BtcAddr, "", sdk.DepositItemStatusWaitCollect)
 	require.Nil(t, err)
 	user2BtcDeposit2, err := sdk.NewDepositItem("user2BtcDeposit2", 1, sdk.NewInt(6000000000), user2BtcAddr, "", sdk.DepositItemStatusWaitCollect)
 	require.Nil(t, err)
-	ck.SetDepositList(ctx, token.BtcToken, user2CUAddr, sdk.DepositList{user2BtcDeposit1, user2BtcDeposit2})
-	user2CU.AddCoins(sdk.NewCoins(sdk.NewCoin(token.BtcToken, sdk.NewInt(11000000000))))
-	user2CU.AddAssetCoins(sdk.NewCoins(sdk.NewCoin(token.BtcToken, sdk.NewInt(11000000000))))
+	ik.SetDepositList(ctx, "btc", user2CUAddr, sdk.DepositList{user2BtcDeposit1, user2BtcDeposit2})
+	user2CU.AddCoins(sdk.NewCoins(sdk.NewCoin("btc", sdk.NewInt(11000000000))))
+	user2CU.AddAssetCoins(sdk.NewCoins(sdk.NewCoin("btc", sdk.NewInt(11000000000))))
 	ck.SetCU(ctx, user2CU)
-	user2BtcDepositList := ck.GetDepositList(ctx, token.BtcToken, user2CUAddr)
+	user2BtcDepositList := ik.GetDepositList(ctx, "btc", user2CUAddr)
 
 	user2BtcOrderID1 := uuid.NewV1().String()
 	order = &sdk.OrderCollect{
@@ -1502,7 +1521,7 @@ func TestColletBtcError(t *testing.T) {
 			CUAddress: user2CUAddr,
 			ID:        user2BtcOrderID1,
 			OrderType: sdk.OrderTypeCollect,
-			Symbol:    token.BtcToken,
+			Symbol:    "btc",
 		},
 		CollectFromCU:      user2CUAddr,
 		CollectFromAddress: user2BtcAddr,
@@ -1520,7 +1539,7 @@ func TestColletBtcError(t *testing.T) {
 			CUAddress: user2CUAddr,
 			ID:        user2BtcOrderID2,
 			OrderType: sdk.OrderTypeCollect,
-			Symbol:    token.BtcToken,
+			Symbol:    "btc",
 		},
 		CollectFromCU:      user2CUAddr,
 		CollectFromAddress: user2BtcAddr,
@@ -1546,7 +1565,7 @@ func TestColletBtcError(t *testing.T) {
 
 	//CU is not opCU
 	user3CUAddr, _ := sdk.CUAddressFromBase58("HBCiopN1Vw38QyjEnfJ7nKeVgMSi9sFjQfkg")
-	cu := ck.NewCUWithAddress(ctx, sdk.CUTypeUser, user3CUAddr)
+	cu := newTestCU(ck.NewCUWithAddress(ctx, sdk.CUTypeUser, user3CUAddr))
 	cu.SetAssetPubkey(pubkey.Bytes(), 1)
 	ck.SetCU(ctx, cu)
 	result = keeper.CollectWaitSign(ctx, user3CUAddr, []string{user1BtcOrderID1, user1BtcOrderID2, user2BtcOrderID1}, rawData)
@@ -1567,7 +1586,7 @@ func TestColletBtcError(t *testing.T) {
 	//opCU's address is not valid
 	collectToAddr := "mhoGjKn5xegDXL6u5LFSUQdm5ozdM6xao9"
 	mockCN.On("ValidAddress", chain, symbol, collectToAddr).Return(false, collectToAddr).Once()
-	btcOpCU := ck.GetCU(ctx, btcOpCUAddr)
+	btcOpCU := newTestCU(ck.GetCU(ctx, btcOpCUAddr))
 	err = btcOpCU.SetAssetAddress(symbol, collectToAddr, 1)
 	ck.SetCU(ctx, btcOpCU)
 	result = keeper.CollectWaitSign(ctx, btcOpCUAddr, []string{user1BtcOrderID1, user1BtcOrderID2, user2BtcOrderID1}, rawData)
@@ -1662,7 +1681,7 @@ func TestColletBtcError(t *testing.T) {
 	actualPrice := sdk.NewDecFromInt(costFee).Quo(sdk.NewDec(490)).Mul(sdk.NewDec(sdk.KiloBytes))
 	tokenPrice := actualPrice.Quo(sdk.NewDecWithPrec(12, 1))
 	tokenInfo.GasPrice = tokenPrice.TruncateInt()
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tk.SetToken(ctx, tokenInfo)
 
 	chainnodeCollectTx = chainnode.ExtUtxoTransaction{
 		Hash:   collectTxHash,
@@ -1685,7 +1704,7 @@ func TestColletBtcError(t *testing.T) {
 	//gas price roo low
 	tokenPrice = actualPrice.Quo(sdk.NewDecWithPrec(8, 1))
 	tokenInfo.GasPrice = tokenPrice.TruncateInt().AddRaw(1)
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tk.SetToken(ctx, tokenInfo)
 	chainnodeCollectTx = chainnode.ExtUtxoTransaction{
 		Hash:   collectTxHash,
 		Status: chainnode.StatusSuccess,
@@ -1707,7 +1726,7 @@ func TestColletBtcError(t *testing.T) {
 	//everything is ok
 	tokenPrice = actualPrice
 	tokenInfo.GasPrice = tokenPrice.TruncateInt()
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tk.SetToken(ctx, tokenInfo)
 
 	//tokenInfo.GasLimit = sdk.NewInt(10000)
 	//tk.SetTokenInfo(ctx, tokenInfo)
@@ -1733,13 +1752,13 @@ func TestColletBtcError(t *testing.T) {
 	signedTx := []byte("singedTx")
 	mockCN.On("VerifyUtxoSignedTransaction", chain, symbol, []string{user1BtcAddr, user1BtcAddr, user2BtcAddr}, signedTx, ins).Return(true, errors.New("err")).Once()
 	mockCN.On("QueryUtxoInsFromData", chain, symbol, rawData).Return(ins, nil)
-	result = keeper.CollectSignFinish(ctx, []string{user1BtcOrderID1, user1BtcOrderID2, user2BtcOrderID1}, signedTx, "")
+	result = keeper.CollectSignFinish(ctx, []string{user1BtcOrderID1, user1BtcOrderID2, user2BtcOrderID1}, signedTx)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	require.Contains(t, result.Log, "Fail to verify signed transaction")
 
 	//VerifyUtxoSignedTransaction verified =false
 	mockCN.On("VerifyUtxoSignedTransaction", chain, symbol, []string{user1BtcAddr, user1BtcAddr, user2BtcAddr}, signedTx, ins).Return(false, nil).Once()
-	result = keeper.CollectSignFinish(ctx, []string{user1BtcOrderID1, user1BtcOrderID2, user2BtcOrderID1}, signedTx, "")
+	result = keeper.CollectSignFinish(ctx, []string{user1BtcOrderID1, user1BtcOrderID2, user2BtcOrderID1}, signedTx)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	require.Contains(t, result.Log, "Fail to verify signed transaction")
 
@@ -1759,7 +1778,7 @@ func TestColletBtcError(t *testing.T) {
 	}
 	mockCN.On("VerifyUtxoSignedTransaction", chain, symbol, []string{user1BtcAddr, user1BtcAddr, user2BtcAddr}, signedTx, ins).Return(true, nil)
 	mockCN.On("QueryUtxoTransactionFromSignedData", chain, symbol, signedTx, ins).Return(&chainnodeCollectTx1, errors.New("err")).Once()
-	result = keeper.CollectSignFinish(ctx, []string{user1BtcOrderID1, user1BtcOrderID2, user2BtcOrderID1}, signedTx, "")
+	result = keeper.CollectSignFinish(ctx, []string{user1BtcOrderID1, user1BtcOrderID2, user2BtcOrderID1}, signedTx)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	require.Contains(t, result.Log, "Fail to get transaction")
 
@@ -1778,7 +1797,7 @@ func TestColletBtcError(t *testing.T) {
 		CostFee: costFee,
 	}
 	mockCN.On("QueryUtxoTransactionFromSignedData", chain, symbol, signedTx, ins).Return(&chainnodeCollectTx1, nil).Once()
-	result = keeper.CollectSignFinish(ctx, []string{user1BtcOrderID1, user1BtcOrderID2, user2BtcOrderID1}, signedTx, "")
+	result = keeper.CollectSignFinish(ctx, []string{user1BtcOrderID1, user1BtcOrderID2, user2BtcOrderID1}, signedTx)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	require.Contains(t, result.Log, "vin mismatch, expected")
 
@@ -1797,7 +1816,7 @@ func TestColletBtcError(t *testing.T) {
 		CostFee: costFee,
 	}
 	mockCN.On("QueryUtxoTransactionFromSignedData", chain, symbol, signedTx, ins).Return(&chainnodeCollectTx1, nil).Once()
-	result = keeper.CollectSignFinish(ctx, []string{user1BtcOrderID1, user1BtcOrderID2, user2BtcOrderID1}, signedTx, "")
+	result = keeper.CollectSignFinish(ctx, []string{user1BtcOrderID1, user1BtcOrderID2, user2BtcOrderID1}, signedTx)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	require.Contains(t, result.Log, "vout mismatch, expected")
 
@@ -1816,7 +1835,7 @@ func TestColletBtcError(t *testing.T) {
 		CostFee: costFee.SubRaw(1),
 	}
 	mockCN.On("QueryUtxoTransactionFromSignedData", chain, symbol, signedTx, ins).Return(&chainnodeCollectTx1, nil).Once()
-	result = keeper.CollectSignFinish(ctx, []string{user1BtcOrderID1, user1BtcOrderID2, user2BtcOrderID1}, signedTx, "")
+	result = keeper.CollectSignFinish(ctx, []string{user1BtcOrderID1, user1BtcOrderID2, user2BtcOrderID1}, signedTx)
 	require.Equal(t, sdk.CodeInvalidTx, result.Code)
 	require.Contains(t, result.Log, "costFee mismatch, expected")
 
@@ -1835,7 +1854,7 @@ func TestColletBtcError(t *testing.T) {
 		CostFee: costFee,
 	}
 	mockCN.On("QueryUtxoTransactionFromSignedData", chain, symbol, signedTx, ins).Return(&chainnodeCollectTx1, nil).Once()
-	result = keeper.CollectSignFinish(ctx, []string{user1BtcOrderID1, user1BtcOrderID2, user2BtcOrderID1}, signedTx, "")
+	result = keeper.CollectSignFinish(ctx, []string{user1BtcOrderID1, user1BtcOrderID2, user2BtcOrderID1}, signedTx)
 	require.Equal(t, sdk.CodeOK, result.Code)
 
 	/*---CollectFinish----*/
@@ -1880,7 +1899,7 @@ func TestColletBtcError(t *testing.T) {
 	require.Equal(t, sdk.CodeOK, result.Code)
 
 	//check user1's coins, coinsOnhold， AssetCoins，
-	user1CU = ck.GetCU(ctx, user1CUAddr)
+	user1CU = newTestCU(ck.GetCU(ctx, user1CUAddr))
 	require.Equal(t, sdk.NewInt(7000000000), user1CU.GetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), user1CU.GetCoinsHold().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), user1CU.GetAssetCoins().AmountOf(symbol))
@@ -1889,7 +1908,7 @@ func TestColletBtcError(t *testing.T) {
 	require.Equal(t, costFee, user1CU.GetGasReceived().AmountOf(symbol))
 
 	//check user2's coins, coinsOnhold
-	user2CU = ck.GetCU(ctx, user2CUAddr)
+	user2CU = newTestCU(ck.GetCU(ctx, user2CUAddr))
 	require.Equal(t, sdk.NewInt(11000000000), user2CU.GetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), user2CU.GetCoinsHold().AmountOf(symbol))
 	require.Equal(t, sdk.NewInt(6000000000), user2CU.GetAssetCoins().AmountOf(symbol))
@@ -1898,7 +1917,7 @@ func TestColletBtcError(t *testing.T) {
 	require.Equal(t, sdk.ZeroInt(), user2CU.GetGasUsed().AmountOf(symbol))
 
 	//check btcOpCU's coins
-	btcOpCU = ck.GetCU(ctx, btcOpCUAddr)
+	btcOpCU = newTestCU(ck.GetCU(ctx, btcOpCUAddr))
 	require.Equal(t, sdk.ZeroInt(), btcOpCU.GetCoins().AmountOf(symbol))
 	require.Equal(t, sdk.ZeroInt(), btcOpCU.GetCoinsHold().AmountOf(symbol))
 	require.Equal(t, sdk.NewInt(12000000000).Sub(costFee), btcOpCU.GetAssetCoins().AmountOf(symbol))
@@ -1912,10 +1931,10 @@ func TestColletBtcError(t *testing.T) {
 
 	//check deposit status
 
-	require.Equal(t, sdk.DepositItemStatusConfirmed, ck.GetDeposit(ctx, symbol, user1CUAddr, "user1BtcDeposit1", 0).Status)
-	require.Equal(t, sdk.DepositItemStatusConfirmed, ck.GetDeposit(ctx, symbol, user1CUAddr, "user1BtcDeposit2", 1).Status)
-	require.Equal(t, sdk.DepositItemStatusConfirmed, ck.GetDeposit(ctx, symbol, user2CUAddr, "user2BtcDeposit1", 0).Status)
-	require.Equal(t, sdk.DepositItemStatusWaitCollect, ck.GetDeposit(ctx, symbol, user2CUAddr, "user2BtcDeposit2", 1).Status)
+	require.Equal(t, sdk.DepositItemStatusConfirmed, ik.GetDeposit(ctx, symbol, user1CUAddr, "user1BtcDeposit1", 0).Status)
+	require.Equal(t, sdk.DepositItemStatusConfirmed, ik.GetDeposit(ctx, symbol, user1CUAddr, "user1BtcDeposit2", 1).Status)
+	require.Equal(t, sdk.DepositItemStatusConfirmed, ik.GetDeposit(ctx, symbol, user2CUAddr, "user2BtcDeposit1", 0).Status)
+	require.Equal(t, sdk.DepositItemStatusWaitCollect, ik.GetDeposit(ctx, symbol, user2CUAddr, "user2BtcDeposit2", 1).Status)
 
 }
 
@@ -1926,26 +1945,30 @@ func TestCheckCollectOrders(t *testing.T) {
 	ck := input.ck
 	tk := input.tk
 	ok := input.ok
+	ik := input.ik
+	newTestCU := func(cu custodianunit.CU) *testCU {
+		return newTestCU(ctx, input.trk, input.ik, cu)
+	}
 	//rk := input.rk
 	//cn := input.cn
 	mockCN = chainnode.MockChainnode{}
 
 	user1CUAddr, err := sdk.CUAddressFromBase58("HBCLmQcskpdQivEkRrh1gNPm7c9aVB8hh1fy")
 	require.Nil(t, err)
-	user1CU := ck.GetCU(ctx, user1CUAddr)
+	user1CU := newTestCU(ck.GetCU(ctx, user1CUAddr))
 	require.NotNil(t, user1CU)
 	user1EthAddr := "0xc96d141c9110a8E61eD62caaD8A7c858dB15B82c"
 	user1BtcAddr := "mh1DurxerNqH3nf9p3ivyn7yjgit1ep2Gg"
-	user1CU.SetAssetAddress(token.EthToken, user1EthAddr, 1)
-	user1CU.SetAssetAddress(token.BtcToken, user1BtcAddr, 1)
+	user1CU.SetAssetAddress("eth", user1EthAddr, 1)
+	user1CU.SetAssetAddress("btc", user1BtcAddr, 1)
 
-	user1EthDeposit1, err := sdk.NewDepositItem("user1EthDeposit1", 0, sdk.NewInt(1000000000), "", "", sdk.DepositItemStatusUnCollected)
+	user1EthDeposit1, err := sdk.NewDepositItem("user1EthDeposit1", 0, sdk.NewInt(1000000000), "", "", sdk.DepositItemStatusWaitCollect)
 	require.Nil(t, err)
-	user1EthDeposit2, err := sdk.NewDepositItem("user1EthDeposit2", 0, sdk.NewInt(2000000000), "", "", sdk.DepositItemStatusUnCollected)
+	user1EthDeposit2, err := sdk.NewDepositItem("user1EthDeposit2", 0, sdk.NewInt(2000000000), "", "", sdk.DepositItemStatusWaitCollect)
 	require.Nil(t, err)
 
-	ck.SetDepositList(ctx, token.EthToken, user1CUAddr, sdk.DepositList{user1EthDeposit1, user1EthDeposit2})
-	user1EthDepositList := ck.GetDepositList(ctx, token.EthToken, user1CUAddr)
+	ik.SetDepositList(ctx, "eth", user1CUAddr, sdk.DepositList{user1EthDeposit1, user1EthDeposit2})
+	user1EthDepositList := ik.GetDepositList(ctx, "eth", user1CUAddr)
 	require.Equal(t, 2, len(user1EthDepositList))
 
 	user1EthOrderID1 := uuid.NewV1().String()
@@ -1954,7 +1977,7 @@ func TestCheckCollectOrders(t *testing.T) {
 			CUAddress: user1CUAddr,
 			ID:        user1EthOrderID1,
 			OrderType: sdk.OrderTypeCollect,
-			Symbol:    token.EthToken,
+			Symbol:    "eth",
 		},
 		CollectFromCU: user1CUAddr,
 		Txhash:        user1EthDeposit1.Hash,
@@ -1972,7 +1995,7 @@ func TestCheckCollectOrders(t *testing.T) {
 			CUAddress: user1CUAddr,
 			ID:        user1EthOrderID2,
 			OrderType: sdk.OrderTypeCollect,
-			Symbol:    token.EthToken,
+			Symbol:    "eth",
 		},
 		CollectFromCU: user1CUAddr,
 		Txhash:        user1EthDeposit2.Hash,
@@ -1988,8 +2011,8 @@ func TestCheckCollectOrders(t *testing.T) {
 	require.Nil(t, err)
 	user1BtcDeposit2, err := sdk.NewDepositItem("user1BtcDeposit2", 0, sdk.NewInt(4000000000), "", "", sdk.DepositItemStatusWaitCollect)
 	require.Nil(t, err)
-	ck.SetDepositList(ctx, token.BtcToken, user1CUAddr, sdk.DepositList{user1BtcDeposit1, user1BtcDeposit2})
-	user1BtcDepositList := ck.GetDepositList(ctx, token.BtcToken, user1CUAddr)
+	ik.SetDepositList(ctx, "btc", user1CUAddr, sdk.DepositList{user1BtcDeposit1, user1BtcDeposit2})
+	user1BtcDepositList := ik.GetDepositList(ctx, "btc", user1CUAddr)
 
 	user1BtcOrderID1 := uuid.NewV1().String()
 	order = &sdk.OrderCollect{
@@ -1997,7 +2020,7 @@ func TestCheckCollectOrders(t *testing.T) {
 			CUAddress: user1CUAddr,
 			ID:        user1BtcOrderID1,
 			OrderType: sdk.OrderTypeCollect,
-			Symbol:    token.BtcToken,
+			Symbol:    "btc",
 		},
 		CollectFromCU: user1CUAddr,
 		Txhash:        user1BtcDeposit1.Hash,
@@ -2015,7 +2038,7 @@ func TestCheckCollectOrders(t *testing.T) {
 			CUAddress: user1CUAddr,
 			ID:        user1BtcOrderID2,
 			OrderType: sdk.OrderTypeCollect,
-			Symbol:    token.BtcToken,
+			Symbol:    "btc",
 		},
 		CollectFromCU: user1CUAddr,
 		Txhash:        user1BtcDeposit2.Hash,
@@ -2033,16 +2056,16 @@ func TestCheckCollectOrders(t *testing.T) {
 	//setup user2
 	user2CUAddr, err := sdk.CUAddressFromBase58("HBCLG5zCH4FtXi3G6wZps8TNfYYWgzb1Rr2q")
 	require.Nil(t, err)
-	user2CU := ck.GetCU(ctx, user2CUAddr)
+	user2CU := newTestCU(ck.GetCU(ctx, user2CUAddr))
 	require.NotNil(t, user2CU)
 	user2EthAddr := "0xd139E358aE9cB5424B2067da96F94cC938343446"
 	user2BtcAddr := "n3buST7Uz99E3ERQ1kMCQ848JbTVNQVUeP"
-	user2CU.SetAssetAddress(token.BtcToken, user2BtcAddr, 1)
-	user2CU.SetAssetAddress(token.EthToken, user2EthAddr, 1)
+	user2CU.SetAssetAddress("btc", user2BtcAddr, 1)
+	user2CU.SetAssetAddress("eth", user2EthAddr, 1)
 
 	user2EthDeposit1, err := sdk.NewDepositItem("user2EthDeposit1", 0, sdk.NewInt(100000002), "", "", sdk.DepositItemStatusWaitCollect)
 	require.Nil(t, err)
-	ck.SetDepositList(ctx, token.EthToken, user2CUAddr, sdk.DepositList{user2EthDeposit1})
+	ik.SetDepositList(ctx, "eth", user2CUAddr, sdk.DepositList{user2EthDeposit1})
 
 	user2EthOrderID1 := uuid.NewV1().String()
 	order = &sdk.OrderCollect{
@@ -2050,7 +2073,7 @@ func TestCheckCollectOrders(t *testing.T) {
 			CUAddress: user2CUAddr,
 			ID:        user2EthOrderID1,
 			OrderType: sdk.OrderTypeCollect,
-			Symbol:    token.EthToken,
+			Symbol:    "eth",
 		},
 		CollectFromCU: user2CUAddr,
 		Txhash:        user2EthDeposit1.Hash,
@@ -2099,7 +2122,7 @@ func TestCheckCollectOrders(t *testing.T) {
 	user1ErrOrder := ok.NewOrder(ctx, order)
 	ok.SetOrder(ctx, user1ErrOrder)
 	_, _, _, _, _, sdkErr = keeper.CheckCollectOrders(ctx, []string{user1ErrOrderID}, sdk.OrderStatusBegin, sdk.DepositItemStatusWaitCollect)
-	require.Equal(t, sdk.CodeInvalidSymbol, sdkErr.Code())
+	require.Equal(t, sdk.CodeUnsupportToken, sdkErr.Code())
 
 	//symbol is not support by token
 	user1ErrOrder.(*sdk.OrderCollect).Symbol = "notsupport"
@@ -2114,31 +2137,31 @@ func TestCheckCollectOrders(t *testing.T) {
 
 	//token's sendenable is false
 	keeper.SetSendEnabled(ctx, true)
-	tokenInfo := tk.GetTokenInfo(ctx, sdk.Symbol(token.EthToken))
-	tokenInfo.IsSendEnabled = false
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tokenInfo := tk.GetIBCToken(ctx, sdk.Symbol("eth"))
+	tokenInfo.SendEnabled = false
+	tk.SetToken(ctx, tokenInfo)
 	_, _, _, _, _, sdkErr = keeper.CheckCollectOrders(ctx, []string{user1EthOrderID1}, sdk.OrderStatusBegin, sdk.DepositItemStatusWaitCollect)
 	require.Equal(t, sdk.CodeTransactionIsNotEnabled, sdkErr.Code())
 
 	//token's withdrawalenable is false
-	tokenInfo = tk.GetTokenInfo(ctx, sdk.Symbol(token.EthToken))
-	tokenInfo.IsSendEnabled = true
-	tokenInfo.IsWithdrawalEnabled = false
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tokenInfo = tk.GetIBCToken(ctx, sdk.Symbol("eth"))
+	tokenInfo.SendEnabled = true
+	tokenInfo.WithdrawalEnabled = false
+	tk.SetToken(ctx, tokenInfo)
 	_, _, _, _, _, sdkErr = keeper.CheckCollectOrders(ctx, []string{user1EthOrderID1}, sdk.OrderStatusBegin, sdk.DepositItemStatusWaitCollect)
 	require.Equal(t, sdk.CodeTransactionIsNotEnabled, sdkErr.Code())
 
-	tokenInfo = tk.GetTokenInfo(ctx, sdk.Symbol(token.EthToken))
-	tokenInfo.IsWithdrawalEnabled = true
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tokenInfo = tk.GetIBCToken(ctx, sdk.Symbol("eth"))
+	tokenInfo.WithdrawalEnabled = true
+	tk.SetToken(ctx, tokenInfo)
 
 	//duplicated  order's
-	_, _, _, _, _, sdkErr = keeper.CheckCollectOrders(ctx, []string{user1EthOrderID1, user1EthOrderID1}, sdk.OrderStatusBegin, sdk.DepositItemStatusWaitCollect)
-	require.Equal(t, sdk.CodeInvalidOrder, sdkErr.Code())
+	//_, _, _, _, _, sdkErr = keeper.CheckCollectOrders(ctx, []string{user1EthOrderID1, user1EthOrderID1}, sdk.OrderStatusBegin, sdk.DepositItemStatusWaitCollect)
+	//require.Equal(t, sdk.CodeInvalidOrder, sdkErr.Code())
 
 	//the second order does not exist
 	_, _, _, _, _, sdkErr = keeper.CheckCollectOrders(ctx, []string{user1EthOrderID1, uuid.NewV1().String()}, sdk.OrderStatusBegin, sdk.DepositItemStatusWaitCollect)
-	//require.Equal(t, sdk.CodeNotFoundOrder, sdkErr.Code())
+	require.Equal(t, sdk.CodeNotFoundOrder, sdkErr.Code())
 
 	//the second order is not a collect order
 	user1WithdrawalOrderID := uuid.NewV1().String()
@@ -2156,18 +2179,19 @@ func TestCheckCollectOrders(t *testing.T) {
 	ok.SetOrder(ctx, user1WithdrawalOrder)
 	_, _, _, _, _, sdkErr = keeper.CheckCollectOrders(ctx, []string{user1EthOrderID1, user1WithdrawalOrderID}, sdk.OrderStatusBegin, sdk.DepositItemStatusWaitCollect)
 	require.Equal(t, sdk.CodeInvalidOrder, sdkErr.Code())
-	//	require.Contains(t, sdkErr.Error(), "is not a Collect Order")
+	require.Contains(t, sdkErr.Error(), "is not a Collect Order")
 
 	//the second order status is not expected
-	user1ErrOrder.(*sdk.OrderCollect).Symbol = token.EthToken
+	user1ErrOrder.(*sdk.OrderCollect).Symbol = "eth"
 	user1ErrOrder.SetOrderStatus(sdk.OrderStatusWaitSign)
 	ok.SetOrder(ctx, user1ErrOrder)
 	_, _, _, _, _, sdkErr = keeper.CheckCollectOrders(ctx, []string{user1EthOrderID1, user1ErrOrderID}, sdk.OrderStatusBegin, sdk.DepositItemStatusWaitCollect)
-	require.Equal(t, sdk.CodeInvalidOrder, sdkErr.Code())
-	//	require.Contains(t, sdkErr.Error(), "doesn't match expctedStatus")
+	require.Equal(t, sdk.CodeInvalidTx, sdkErr.Code())
+	require.Contains(t, sdkErr.Error(), fmt.Sprintf("orderid:%v's status is %v, not as expected", user1ErrOrderID, sdk.OrderStatusWaitSign))
 
+	//symbol check removed
 	//the second order symbol is not expected
-	user1ErrOrder.(*sdk.OrderCollect).Symbol = token.BtcToken
+	user1ErrOrder.(*sdk.OrderCollect).Symbol = "btc"
 	user1ErrOrder.SetOrderStatus(sdk.OrderStatusBegin)
 	ok.SetOrder(ctx, user1ErrOrder)
 	_, _, _, _, _, sdkErr = keeper.CheckCollectOrders(ctx, []string{user1EthOrderID1, user1ErrOrderID}, sdk.OrderStatusBegin, sdk.DepositItemStatusWaitCollect)
@@ -2175,7 +2199,7 @@ func TestCheckCollectOrders(t *testing.T) {
 	require.Contains(t, sdkErr.Error(), "symbol mismatch")
 
 	//the second user CU does not exist
-	user1ErrOrder.(*sdk.OrderCollect).Symbol = token.EthToken
+	user1ErrOrder.(*sdk.OrderCollect).Symbol = "eth"
 	cuAddr, _ := sdk.CUAddressFromBase58("HBCiopN1Vw38QyjEnfJ7nKeVgMSi9sFjQfkg")
 	user1ErrOrder.(*sdk.OrderCollect).CUAddress = cuAddr
 	ok.SetOrder(ctx, user1ErrOrder)
@@ -2204,41 +2228,41 @@ func TestCheckCollectOrders(t *testing.T) {
 	user1ErrOrder.(*sdk.OrderCollect).Amount = user1EthDeposit2.Amount
 	user1ErrOrder.(*sdk.OrderCollect).Index = user1EthDeposit2.Index
 	ok.SetOrder(ctx, user1ErrOrder)
-	ck.SetDepositStatus(ctx, token.EthToken, user1CUAddr, user1EthDeposit2.Hash, user1EthDeposit2.Index, sdk.DepositItemStatusConfirmed)
+	ik.SetDepositStatus(ctx, "eth", user1CUAddr, user1EthDeposit2.Hash, user1EthDeposit2.Index, sdk.DepositItemStatusConfirmed)
 	_, _, _, _, _, sdkErr = keeper.CheckCollectOrders(ctx, []string{user1EthOrderID1, user1ErrOrderID}, sdk.OrderStatusBegin, sdk.DepositItemStatusWaitCollect)
 	require.Equal(t, sdk.CodeInvalidOrder, sdkErr.Code())
-	require.Contains(t, sdkErr.Error(), "status is not in expected statuses")
-	ck.SetDepositStatus(ctx, token.EthToken, user1CUAddr, user1EthDeposit2.Hash, user1EthDeposit2.Index, sdk.DepositItemStatusWaitCollect)
+	require.Contains(t, sdkErr.Error(), "not in expected statuses")
+	ik.SetDepositStatus(ctx, "eth", user1CUAddr, user1EthDeposit2.Hash, user1EthDeposit2.Index, sdk.DepositItemStatusWaitCollect)
 
 	//the second cu's address is not consistent with the first one
 	_, _, _, _, _, sdkErr = keeper.CheckCollectOrders(ctx, []string{user1EthOrderID1, user2EthOrderID1}, sdk.OrderStatusBegin, sdk.DepositItemStatusWaitCollect)
 	require.Equal(t, sdk.CodeInvalidOrder, sdkErr.Code())
 	require.Contains(t, sdkErr.Error(), "Different CU in one collect order for AccountBased token")
 
-	amt, _, vins, collectOrders, deposits, sdkErr := keeper.CheckCollectOrders(ctx, []string{user1EthOrderID1}, sdk.OrderStatusBegin, sdk.DepositItemStatusUnCollected)
+	amt, _, vins, collectOrders, deposits, sdkErr := keeper.CheckCollectOrders(ctx, []string{user1EthOrderID1}, sdk.OrderStatusBegin, sdk.DepositItemStatusWaitCollect)
 	require.Nil(t, sdkErr)
-	require.Equal(t, user1EthDeposit1.Amount, amt.AmountOf(token.EthToken))
+	require.Equal(t, user1EthDeposit1.Amount, amt.AmountOf("eth"))
 	require.Nil(t, vins)
 	require.Equal(t, user1EthOrder1.GetID(), collectOrders[0].GetID())
 	require.Equal(t, &user1EthDeposit1, deposits[0])
 
 	amt, _, vins, collectOrders, deposits, sdkErr = keeper.CheckCollectOrders(ctx, []string{user1EthOrderID1, user1EthOrderID2}, sdk.OrderStatusBegin, sdk.DepositItemStatusWaitCollect)
 	require.Nil(t, sdkErr)
-	require.Equal(t, user1EthDeposit1.Amount.Add(user1EthDeposit2.Amount), amt.AmountOf(token.EthToken))
+	require.Equal(t, user1EthDeposit1.Amount.Add(user1EthDeposit2.Amount), amt.AmountOf("eth"))
 	require.Nil(t, vins)
 	require.Equal(t, user1EthOrder1.GetID(), collectOrders[0].GetID())
 	require.Equal(t, user1EthOrder2.GetID(), collectOrders[1].GetID())
 	require.Equal(t, &user1EthDeposit1, deposits[0])
 	require.Equal(t, &user1EthDeposit2, deposits[1])
 
-	tokenInfo = tk.GetTokenInfo(ctx, sdk.Symbol(token.BtcToken))
-	tokenInfo.IsSendEnabled = true
-	tokenInfo.IsWithdrawalEnabled = true
-	tk.SetTokenInfo(ctx, tokenInfo)
+	tokenInfo = tk.GetIBCToken(ctx, sdk.Symbol("btc"))
+	tokenInfo.SendEnabled = true
+	tokenInfo.WithdrawalEnabled = true
+	tk.SetToken(ctx, tokenInfo)
 
 	amt, _, vins, collectOrders, deposits, sdkErr = keeper.CheckCollectOrders(ctx, []string{user1BtcOrderID1}, sdk.OrderStatusBegin, sdk.DepositItemStatusWaitCollect)
 	require.Nil(t, sdkErr)
-	require.Equal(t, user1BtcDeposit1.Amount, amt.AmountOf(token.BtcToken))
+	require.Equal(t, user1BtcDeposit1.Amount, amt.AmountOf("btc"))
 	require.Equal(t, 1, len(vins))
 	require.Equal(t, "user1BtcDeposit1", vins[0].Hash)
 	require.Equal(t, user1BtcOrder1.GetID(), collectOrders[0].GetID())
@@ -2246,7 +2270,7 @@ func TestCheckCollectOrders(t *testing.T) {
 
 	amt, _, vins, collectOrders, deposits, sdkErr = keeper.CheckCollectOrders(ctx, []string{user1BtcOrderID1, user1BtcOrderID2}, sdk.OrderStatusBegin, sdk.DepositItemStatusWaitCollect)
 	require.Nil(t, sdkErr)
-	require.Equal(t, user1BtcDeposit1.Amount.Add(user1BtcDeposit2.Amount), amt.AmountOf(token.BtcToken))
+	require.Equal(t, user1BtcDeposit1.Amount.Add(user1BtcDeposit2.Amount), amt.AmountOf("btc"))
 	require.Equal(t, 2, len(vins))
 	require.Equal(t, "user1BtcDeposit1", vins[0].Hash)
 	require.Equal(t, "user1BtcDeposit2", vins[1].Hash)

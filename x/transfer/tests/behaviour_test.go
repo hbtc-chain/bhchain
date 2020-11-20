@@ -16,6 +16,7 @@ func TestBehaviourOPCUAssetTransferNormal(t *testing.T) {
 	validators := input.validators
 	keeper := input.k
 	ctx := input.ctx.WithBlockHeight(100)
+	input.opcu.SetAssetAddress("eth", "eth", 0)
 	input.opcu.SetEnableSendTx(false, "eth", ethAddr)
 	input.ck.SetCU(ctx, input.opcu)
 
@@ -41,6 +42,7 @@ func TestBehaviourOPCUAssetTransferAbnormal(t *testing.T) {
 	validators := input.validators
 	keeper := input.k
 	ctx := input.ctx.WithBlockHeight(100)
+	input.opcu.SetAssetAddress("eth", "eth", 0)
 	input.opcu.SetEnableSendTx(false, "eth", ethAddr)
 	input.ck.SetCU(ctx, input.opcu)
 
@@ -416,12 +418,14 @@ func prepareCollectOrder(t *testing.T, input testInput, ctx sdk.Context, deposit
 	collectTxHash := orderID
 	amount := sdk.ZeroInt()
 
+	asset := input.ik.GetOrNewCUIBCAsset(input.ctx, sdk.CUTypeUser, user1CUAddr)
+	input.ik.SetCUIBCAsset(input.ctx, asset)
 	require.Nil(t, err)
 
 	depositItem, err := sdk.NewDepositItem(depositTxHash, depositTxIndex, amount, user1EthAddr, "", sdk.DepositItemStatusInProcess)
 	require.NoError(t, err)
 
-	input.ck.SaveDeposit(ctx, symbol, user1CUAddr, depositItem)
+	input.ik.SaveDeposit(ctx, symbol, user1CUAddr, depositItem)
 
 	signedData := []byte("Collect")
 	input.ok.SetOrder(ctx, &sdk.OrderCollect{
@@ -466,6 +470,9 @@ func prepareDepositOrder(t *testing.T, input testInput, ctx sdk.Context, deposit
 	depositTxIndex := uint64(0)
 	collectTxHash := "collectTxHash"
 	amount := sdk.NewInt(80000000000)
+
+	asset := input.ik.GetOrNewCUIBCAsset(input.ctx, sdk.CUTypeUser, user1CUAddr)
+	input.ik.SetCUIBCAsset(input.ctx, asset)
 
 	require.Nil(t, err)
 

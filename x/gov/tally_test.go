@@ -502,19 +502,19 @@ func TestTallyDelgatorMultipleInherit(t *testing.T) {
 
 	valTokens1 := sdk.TokensFromConsensusPower(250000)
 	val1CreateMsg := staking.NewMsgCreateValidator(
-		sdk.ValAddress(input.addrs[0]), ed25519.GenPrivKey().PubKey(), sdk.NewCoin(sdk.DefaultBondDenom, valTokens1), testDescription, testCommissionRates, sdk.OneInt(), true,
+		sdk.ValAddress(input.addrs[0]), ed25519.GenPrivKey().PubKey(), sdk.NewCoin(sdk.DefaultBondDenom, valTokens1), testDescription, testCommissionRates, sdk.OneInt(),
 	)
 	stakingHandler(ctx, val1CreateMsg)
 
 	valTokens2 := sdk.TokensFromConsensusPower(60000)
 	val2CreateMsg := staking.NewMsgCreateValidator(
-		sdk.ValAddress(input.addrs[1]), ed25519.GenPrivKey().PubKey(), sdk.NewCoin(sdk.DefaultBondDenom, valTokens2), testDescription, testCommissionRates, sdk.OneInt(), true,
+		sdk.ValAddress(input.addrs[1]), ed25519.GenPrivKey().PubKey(), sdk.NewCoin(sdk.DefaultBondDenom, valTokens2), testDescription, testCommissionRates, sdk.OneInt(),
 	)
 	stakingHandler(ctx, val2CreateMsg)
 
 	valTokens3 := sdk.TokensFromConsensusPower(70000)
 	val3CreateMsg := staking.NewMsgCreateValidator(
-		sdk.ValAddress(input.addrs[2]), ed25519.GenPrivKey().PubKey(), sdk.NewCoin(sdk.DefaultBondDenom, valTokens3), testDescription, testCommissionRates, sdk.OneInt(), true,
+		sdk.ValAddress(input.addrs[2]), ed25519.GenPrivKey().PubKey(), sdk.NewCoin(sdk.DefaultBondDenom, valTokens3), testDescription, testCommissionRates, sdk.OneInt(),
 	)
 	stakingHandler(ctx, val3CreateMsg)
 

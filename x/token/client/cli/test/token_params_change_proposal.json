@@ -2,17 +2,18 @@
   "title": "Token Parameters Change",
   "description": "token parameter change proposal",
   "symbol": "testtoken",
+  "votetime": 100,
   "changes": [
     {
-      "key": "is_send_enabled",
+      "key": "send_enabled",
       "value": true
     },
     {
-      "key": "is_deposit_enabled",
+      "key": "deposit_enabled",
       "value": false
     },
     {
-      "key": "is_withdrawal_enabled",
+      "key": "withdrawal_enabled",
       "value": false
     },
     {

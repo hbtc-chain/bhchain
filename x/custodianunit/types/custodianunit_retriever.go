@@ -55,28 +55,13 @@ func (cr CURetriever) GetCUWithHeight(addr sdk.CUAddress) (exported.CustodianUni
 	return CU, height, nil
 }
 
-func (cr CURetriever) GetOpCUWithHeight(symbol string) (sdk.OpCUsInfo, int64, error) {
+func (cr CURetriever) GetOpCUWithHeight(symbol string) (sdk.OpCUsAstInfo, int64, error) {
 	token := sdk.Symbol(symbol)
-	if !token.IsValidTokenName() {
+	if !token.IsValid() {
 		return nil, 0, fmt.Errorf("invalid symbol:%v", symbol)
 	}
 
-	bs, err := ModuleCdc.MarshalJSON(NewQueryOpCUParams(symbol))
-	if err != nil {
-		return nil, 0, err
-	}
-
-	res, height, err := cr.querier.QueryWithData(fmt.Sprintf("custom/%s/%s", QuerierRoute, QueryOpCU), bs)
-	if err != nil {
-		return nil, height, err
-	}
-
-	var OpCUs sdk.OpCUsInfo
-	if err := ModuleCdc.UnmarshalJSON(res, &OpCUs); err != nil {
-		return nil, height, err
-	}
-
-	return OpCUs, height, nil
+	return nil, 0, nil
 }
 
 // EnsureExists returns an error if no CustodianUnit exists for the given address else nil.

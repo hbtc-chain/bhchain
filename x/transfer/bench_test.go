@@ -7,7 +7,7 @@ import (
 	abci "github.com/tendermint/tendermint/abci/types"
 
 	sdk "github.com/hbtc-chain/bhchain/types"
-	"github.com/hbtc-chain/bhchain/x/custodianunit"
+	"github.com/hbtc-chain/bhchain/x/genaccounts"
 	"github.com/hbtc-chain/bhchain/x/mock"
 	"github.com/hbtc-chain/bhchain/x/receipt"
 	"github.com/hbtc-chain/bhchain/x/supply"
@@ -32,7 +32,7 @@ func getInitChainer(mapp *mock.App, keeper *keeper.BaseKeeper) sdk.InitChainer {
 	return func(ctx sdk.Context, req abci.RequestInitChain) abci.ResponseInitChain {
 		mapp.InitChainer(ctx, req)
 		bankGenesis := transfer.DefaultGenesisState()
-		transfer.InitGenesis(ctx, keeper, bankGenesis)
+		transfer.InitGenesis(ctx, *keeper, bankGenesis)
 
 		return abci.ResponseInitChain{}
 	}
@@ -46,19 +46,13 @@ func getBenchmarkMockApp() (*mock.App, error) {
 
 	blacklistedAddrs := make(map[string]bool)
 	blacklistedAddrs[moduleAccAddr.String()] = true
-	keyTransfer := sdk.NewKVStoreKey(transfer.StoreKey)
 
-	rk := mapp.ReceiptKeeper
-	bankKeeper := keeper.NewBaseKeeper(mapp.Cdc, keyTransfer,
-		mapp.CUKeeper, nil, nil, rk, nil, nil,
-		mapp.ParamsKeeper.Subspace(types.DefaultParamspace),
-		types.DefaultCodespace,
-		blacklistedAddrs,
-	)
-	mapp.Router().AddRoute(types.RouterKey, transfer.NewHandler(bankKeeper))
+	bankKeeper := mapp.TransferKeeper
+
+	mapp.Router().AddRoute(types.RouterKey, transfer.NewHandler(*bankKeeper))
 	mapp.SetInitChainer(getInitChainer(mapp, bankKeeper))
 
-	err := mapp.CompleteSetup()
+	err := mapp.CompleteSetup(mapp.KeyTransfer)
 	return mapp, err
 }
 
@@ -66,12 +60,12 @@ func BenchmarkOneBankSendTxPerBlock(b *testing.B) {
 	benchmarkApp, _ := getBenchmarkMockApp()
 
 	// Add an CU at genesis
-	acc := &custodianunit.BaseCU{
+	acc := genaccounts.GenesisCU{
 		Address: addr1,
 		// Some value conceivably higher than the benchmarks would ever go
 		Coins: sdk.Coins{sdk.NewInt64Coin("foocoin", 100000000000)},
 	}
-	accs := []custodianunit.CU{acc}
+	accs := []genaccounts.GenesisCU{acc}
 
 	// Construct genesis state
 	mock.SetGenesis(benchmarkApp, accs)
@@ -96,12 +90,12 @@ func BenchmarkOneBankMultiSendTxPerBlock(b *testing.B) {
 	benchmarkApp, _ := getBenchmarkMockApp()
 
 	// Add an CU at genesis
-	acc := &custodianunit.BaseCU{
+	acc := genaccounts.GenesisCU{
 		Address: addr1,
 		// Some value conceivably higher than the benchmarks would ever go
 		Coins: sdk.Coins{sdk.NewInt64Coin("foocoin", 100000000000)},
 	}
-	accs := []custodianunit.CU{acc}
+	accs := []genaccounts.GenesisCU{acc}
 
 	// Construct genesis state
 	mock.SetGenesis(benchmarkApp, accs)

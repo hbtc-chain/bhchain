@@ -43,6 +43,8 @@ type StakingKeeper interface {
 	GetLastValidatorPower(ctx sdk.Context, valAddr sdk.ValAddress) int64
 
 	GetAllSDKDelegations(ctx sdk.Context) []staking.Delegation
+
+	GetCurrentEpoch(ctx sdk.Context) sdk.Epoch
 }
 
 // StakingHooks event hooks for staking validator object (noalias)
@@ -67,4 +69,10 @@ type SupplyKeeper interface {
 	SendCoinsFromModuleToModule(ctx sdk.Context, senderModule string, recipientModule string, amt sdk.Coins) (sdk.Result, sdk.Error)
 	SendCoinsFromModuleToAccount(ctx sdk.Context, senderModule string, recipientAddr sdk.CUAddress, amt sdk.Coins) (sdk.Result, sdk.Error)
 	SendCoinsFromAccountToModule(ctx sdk.Context, senderAddr sdk.CUAddress, recipientModule string, amt sdk.Coins) (sdk.Result, sdk.Error)
+}
+
+type TransferKeeper interface {
+	GetBalance(ctx sdk.Context, addr sdk.CUAddress, symbol string) sdk.Int
+	GetAllBalance(ctx sdk.Context, addr sdk.CUAddress) sdk.Coins
+	AddCoins(ctx sdk.Context, addr sdk.CUAddress, coins sdk.Coins) (sdk.Coins, []sdk.Flow, sdk.Error)
 }

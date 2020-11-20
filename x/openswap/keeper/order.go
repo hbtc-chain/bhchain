@@ -18,12 +18,6 @@ func (k Keeper) GetOrder(ctx sdk.Context, orderID string) *types.Order {
 	return &order
 }
 
-func (k Keeper) CreateOrder(ctx sdk.Context, order *types.Order) {
-	k.saveOrder(ctx, order)
-	k.addUnfinishedOrder(ctx, order)
-	k.marketManager.AddOrder(order)
-}
-
 func (k Keeper) CancelOrders(ctx sdk.Context, from sdk.CUAddress, orderIDs []string) sdk.Result {
 	var flows []sdk.Flow
 	for _, orderID := range orderIDs {
@@ -40,6 +34,7 @@ func (k Keeper) CancelOrders(ctx sdk.Context, from sdk.CUAddress, orderIDs []str
 		balanceFlows := k.finishOrderWithStatus(ctx, order, types.OrderStatusCanceled)
 		flows = append(flows, balanceFlows...)
 	}
+	k.addWaitToRemoveFromMatchingOrderID(ctx, orderIDs)
 	result := sdk.Result{}
 	if len(flows) > 0 {
 		receipt := k.rk.NewReceipt(sdk.CategoryTypeOpenswap, flows)
@@ -62,76 +57,75 @@ func (k Keeper) InitMatchingManager(ctx sdk.Context) {
 	k.marketManager.Init(ctx)
 }
 
-func (k Keeper) GetAllOrders(baseSymbol, quoteSymbol sdk.Symbol) ([]*types.Order, []*types.Order) {
-	return k.marketManager.GetAllOrders(baseSymbol, quoteSymbol)
+func (k Keeper) GetAllOrders(dexID uint32, baseSymbol, quoteSymbol sdk.Symbol) ([]*types.Order, []*types.Order) {
+	return k.marketManager.GetAllOrders(dexID, baseSymbol, quoteSymbol)
 }
 
 func (k Keeper) MatchingOrders(ctx sdk.Context) {
 	var (
-		swapEvents  types.EventSwaps
-		totalBurned = sdk.ZeroInt()
+		swapEvents types.EventSwaps
 	)
 	for _, market := range k.marketManager.GetMarkets() {
-		pair := k.GetTradingPair(ctx, market.BaseSymbol(), market.QuoteSymbol())
+		pair := k.GetTradingPair(ctx, market.DexID(), market.BaseSymbol(), market.QuoteSymbol())
 		if pair == nil {
 			continue
 		}
 
 		for {
-			highestBuyOrder, lowestSellOrder := market.GetHighestBuyOrder(), market.GetLowestSellOrder()
-			canMatchingSellOrder := lowestSellOrder != nil && calLimitSwapAmount(lowestSellOrder, pair).IsPositive()
-			canMatchingBuyOrder := highestBuyOrder != nil && calLimitSwapAmount(highestBuyOrder, pair).IsPositive()
-
-			if !canMatchingSellOrder && !canMatchingBuyOrder {
-				break
-			}
-
 			var (
-				matchedAmount  sdk.Int
-				event          *types.EventSwap
-				finishedOrders []*types.Order
-				burned         sdk.Int
+				event            *types.EventSwap
+				finishedOrders   []*types.Order
+				priceSuitable    bool
+				sellOrderMatched bool
+				buyOrderMatched  bool
 			)
 
 			// matching sell order first
-			if canMatchingSellOrder {
-				sellOrderIter := market.SellOrderBook().Iterator()
-				for sellOrderIter.Next() {
-					order := sellOrderIter.Value()
-
-					matchedAmount, burned, _, event, pair = k.limitSwap(ctx, order, pair)
-					if matchedAmount.IsZero() {
-						break
-					}
-					if order.LockedFund.IsZero() {
-						finishedOrders = append(finishedOrders, order)
-					}
-
-					swapEvents = append(swapEvents, event)
-					totalBurned = totalBurned.Add(burned)
+			sellOrderIter := market.SellOrderBook().Iterator()
+			for sellOrderIter.Next() {
+				order := sellOrderIter.Value()
+				_, event, pair, priceSuitable = k.limitSwap(ctx, order, pair)
+				if !priceSuitable {
+					break
 				}
+				if event == nil || event.AmountIn.IsZero() {
+					continue
+				}
+
+				sellOrderMatched = true
+				if order.Status == types.OrderStatusFilled {
+					finishedOrders = append(finishedOrders, order)
+				}
+
+				swapEvents = append(swapEvents, event)
 			}
 
-			if canMatchingBuyOrder {
-				buyOrderIter := market.BuyOrderBook().ReverseIterator()
-				for buyOrderIter.Next() {
-					order := buyOrderIter.Value()
-
-					matchedAmount, burned, _, event, pair = k.limitSwap(ctx, order, pair)
-					if matchedAmount.IsZero() {
-						break
-					}
-					if order.LockedFund.IsZero() {
-						finishedOrders = append(finishedOrders, order)
-					}
-
-					swapEvents = append(swapEvents, event)
-					totalBurned = totalBurned.Add(burned)
+			buyOrderIter := market.BuyOrderBook().ReverseIterator()
+			for buyOrderIter.Next() {
+				order := buyOrderIter.Value()
+				_, event, pair, priceSuitable = k.limitSwap(ctx, order, pair)
+				if !priceSuitable {
+					break
 				}
+				if event == nil || event.AmountIn.IsZero() {
+					continue
+				}
+
+				buyOrderMatched = true
+				if order.Status == types.OrderStatusFilled {
+					finishedOrders = append(finishedOrders, order)
+				}
+
+				swapEvents = append(swapEvents, event)
+			}
+
+			if !sellOrderMatched && !buyOrderMatched {
+				break
 			}
 
 			for _, order := range finishedOrders {
-				k.finishOrderWithStatus(ctx, order, types.OrderStatusFilled)
+				k.delUnfinishedOrder(ctx, order)
+				k.marketManager.DelOrder(order)
 			}
 			finishedOrders = finishedOrders[:0]
 		}
@@ -141,12 +135,17 @@ func (k Keeper) MatchingOrders(ctx sdk.Context) {
 		ctx.EventManager().EmitEvent(sdk.NewEvent(
 			types.EventTypeSwap,
 			sdk.NewAttribute(types.AttributeKeySwapResult, swapEvents.String()),
-			sdk.NewAttribute(types.AttributeKeyBurned, totalBurned.String()),
 		))
 	}
 }
 
-func (k Keeper) ClearExpiredOrders(ctx sdk.Context) {
+func (k Keeper) UpdateOrdersInMatching(ctx sdk.Context) {
+	k.clearExpiredOrders(ctx)
+	k.insertOrderToMatching(ctx)
+	k.removeOrderFromMatching(ctx)
+}
+
+func (k Keeper) clearExpiredOrders(ctx sdk.Context) {
 	var orderIDs []string
 	for _, order := range k.marketManager.GetExpiredOrders(ctx) {
 		k.ExpireOrder(ctx, order)
@@ -159,6 +158,36 @@ func (k Keeper) ClearExpiredOrders(ctx sdk.Context) {
 			sdk.NewAttribute(types.AttributeKeyOrders, event.String()),
 		))
 	}
+}
+
+func (k Keeper) insertOrderToMatching(ctx sdk.Context) {
+	orderIDs := k.getWaitToInsertMatchingOrderIDs(ctx)
+	if len(orderIDs) == 0 {
+		return
+	}
+	for _, orderID := range orderIDs {
+		order := k.GetOrder(ctx, orderID)
+		if !order.IsFinished() {
+			k.marketManager.AddOrder(order)
+		}
+	}
+
+	store := ctx.KVStore(k.storeKey)
+	store.Delete(types.WaitToInsertMatchingKey)
+}
+
+func (k Keeper) removeOrderFromMatching(ctx sdk.Context) {
+	orderIDs := k.getWaitToRemoveFromMatchingOrderIDs(ctx)
+	if len(orderIDs) == 0 {
+		return
+	}
+	for _, orderID := range orderIDs {
+		order := k.GetOrder(ctx, orderID)
+		k.marketManager.DelOrder(order)
+	}
+
+	store := ctx.KVStore(k.storeKey)
+	store.Delete(types.WaitToRemoveFromMatchingKey)
 }
 
 func (k Keeper) IteratorAllUnfinishedOrder(ctx sdk.Context, f func(*types.Order)) {
@@ -177,33 +206,22 @@ func (k Keeper) finishOrderWithStatus(ctx sdk.Context, order *types.Order, statu
 	order.Status = status
 	flows := make([]sdk.Flow, 0)
 	if order.LockedFund.IsPositive() {
-		cu := k.cuKeeper.GetCU(ctx, order.From)
-		coins := k.getOrderLockedCoins(ctx, order)
-		cu.SubCoinsHold(coins)
-		cu.AddCoins(coins)
-		k.cuKeeper.SetCU(ctx, cu)
-
+		coin := k.getOrderLockedCoin(ctx, order)
+		flows, _ = k.tk.UnlockCoin(ctx, order.From, coin)
 		order.LockedFund = sdk.ZeroInt()
-
-		for _, flow := range cu.GetBalanceFlows() {
-			flows = append(flows, flow)
-		}
-
 	}
 
 	k.saveOrder(ctx, order)
 	k.delUnfinishedOrder(ctx, order)
-	k.marketManager.DelOrder(order)
 	return flows
 }
 
-func (k Keeper) getOrderLockedCoins(ctx sdk.Context, order *types.Order) sdk.Coins {
+func (k Keeper) getOrderLockedCoin(ctx sdk.Context, order *types.Order) sdk.Coin {
 	symbol := order.BaseSymbol
 	if order.Side == types.OrderSideBuy {
 		symbol = order.QuoteSymbol
 	}
-	coin := sdk.NewCoin(symbol.String(), order.LockedFund)
-	return sdk.NewCoins(coin)
+	return sdk.NewCoin(symbol.String(), order.LockedFund)
 }
 
 func (k Keeper) saveOrder(ctx sdk.Context, order *types.Order) {
@@ -215,9 +233,46 @@ func (k Keeper) saveOrder(ctx sdk.Context, order *types.Order) {
 func (k Keeper) addUnfinishedOrder(ctx sdk.Context, order *types.Order) {
 	store := ctx.KVStore(k.storeKey)
 	store.Set(types.UnfinishedOrderKey(order), []byte{})
+	k.addWaitToInsertMatchingOrderID(ctx, order.OrderID)
 }
 
 func (k Keeper) delUnfinishedOrder(ctx sdk.Context, order *types.Order) {
 	store := ctx.KVStore(k.storeKey)
 	store.Delete(types.UnfinishedOrderKey(order))
+}
+
+func (k Keeper) getWaitToInsertMatchingOrderIDs(ctx sdk.Context) []string {
+	store := ctx.KVStore(k.storeKey)
+	bz := store.Get(types.WaitToInsertMatchingKey)
+	orderIDs := make([]string, 0)
+	if len(bz) > 0 {
+		k.cdc.MustUnmarshalBinaryBare(bz, &orderIDs)
+	}
+	return orderIDs
+}
+
+func (k Keeper) addWaitToInsertMatchingOrderID(ctx sdk.Context, orderID string) {
+	orderIDs := k.getWaitToInsertMatchingOrderIDs(ctx)
+	orderIDs = append(orderIDs, orderID)
+	store := ctx.KVStore(k.storeKey)
+	bz := k.cdc.MustMarshalBinaryBare(orderIDs)
+	store.Set(types.WaitToInsertMatchingKey, bz)
+}
+
+func (k Keeper) getWaitToRemoveFromMatchingOrderIDs(ctx sdk.Context) []string {
+	store := ctx.KVStore(k.storeKey)
+	bz := store.Get(types.WaitToRemoveFromMatchingKey)
+	orderIDs := make([]string, 0)
+	if len(bz) > 0 {
+		k.cdc.MustUnmarshalBinaryBare(bz, &orderIDs)
+	}
+	return orderIDs
+}
+
+func (k Keeper) addWaitToRemoveFromMatchingOrderID(ctx sdk.Context, ids []string) {
+	orderIDs := k.getWaitToRemoveFromMatchingOrderIDs(ctx)
+	orderIDs = append(orderIDs, ids...)
+	store := ctx.KVStore(k.storeKey)
+	bz := k.cdc.MustMarshalBinaryBare(orderIDs)
+	store.Set(types.WaitToRemoveFromMatchingKey, bz)
 }

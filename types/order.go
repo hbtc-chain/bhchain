@@ -161,7 +161,7 @@ type OrderKeyGen struct {
 	KeyNodes         []CUAddress `json:"key_nodes"`
 	SignThreshold    uint64      `json:"sign_threshold"`
 	To               CUAddress   `json:"to"`
-	OpenFee          Coins       `json:"open_fee"`
+	OpenFee          Coin        `json:"open_fee"`
 	MultiSignAddress string      `json:"multi_sign_address"`
 	Pubkey           []byte      `json:"pubkey"`
 	Epoch            uint64      `json:"epoch"`

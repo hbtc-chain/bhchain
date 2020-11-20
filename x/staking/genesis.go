@@ -96,10 +96,9 @@ func InitGenesis(ctx sdk.Context, keeper Keeper, cuKeeper types.CUKeeper,
 		panic(fmt.Sprintf("%s module CustodianUnit has not been set", types.BondedPoolName))
 	}
 
-	// TODO remove with genesis 2-phases refactor https://github.com/hbtc-chain/bhchain/issues/2862
-	// add coins if not provided on genesis
-	if bondedPool.GetCoins().IsZero() {
-		if err := bondedPool.SetCoins(bondedCoins); err != nil {
+	transferKeeper := keeper.GetTransferKeeper()
+	if transferKeeper.GetBalance(ctx, bondedPool.GetAddress(), data.Params.BondDenom).IsZero() {
+		if _, _, err := transferKeeper.AddCoins(ctx, bondedPool.GetAddress(), bondedCoins); err != nil {
 			panic(err)
 		}
 		supplyKeeper.SetModuleAccount(ctx, bondedPool)
@@ -110,8 +109,8 @@ func InitGenesis(ctx sdk.Context, keeper Keeper, cuKeeper types.CUKeeper,
 		panic(fmt.Sprintf("%s module CustodianUnit has not been set", types.NotBondedPoolName))
 	}
 
-	if notBondedPool.GetCoins().IsZero() {
-		if err := notBondedPool.SetCoins(notBondedCoins); err != nil {
+	if transferKeeper.GetBalance(ctx, notBondedPool.GetAddress(), data.Params.BondDenom).IsZero() {
+		if _, _, err := transferKeeper.AddCoins(ctx, notBondedPool.GetAddress(), notBondedCoins); err != nil {
 			panic(err)
 		}
 		supplyKeeper.SetModuleAccount(ctx, notBondedPool)
@@ -131,6 +130,7 @@ func InitGenesis(ctx sdk.Context, keeper Keeper, cuKeeper types.CUKeeper,
 		}
 	} else {
 		res = keeper.ApplyAndReturnValidatorSetUpdates(ctx)
+		keeper.StartNewEpoch(ctx, data.KeyNodes)
 	}
 
 	return res

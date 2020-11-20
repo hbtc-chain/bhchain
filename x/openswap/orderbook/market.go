@@ -6,20 +6,26 @@ import (
 )
 
 type Market struct {
+	dexID       uint32
 	baseSymbol  sdk.Symbol
 	quoteSymbol sdk.Symbol
 	buyOrders   *Orderbook
 	sellOrders  *Orderbook
 }
 
-func NewMarket(baseSymbol, quoteSymbol sdk.Symbol) *Market {
+func NewMarket(dexID uint32, baseSymbol, quoteSymbol sdk.Symbol) *Market {
 	e := &Market{
+		dexID:       dexID,
 		baseSymbol:  baseSymbol,
 		quoteSymbol: quoteSymbol,
 		buyOrders:   NewOrderbook(),
 		sellOrders:  NewOrderbook(),
 	}
 	return e
+}
+
+func (e *Market) DexID() uint32 {
+	return e.dexID
 }
 
 func (e *Market) BaseSymbol() sdk.Symbol {
@@ -65,22 +71,6 @@ func (e *Market) GetAllOrders() ([]*types.Order, []*types.Order) {
 		sellOrders = append(sellOrders, sellOrderIter.Value())
 	}
 	return sellOrders, buyOrders
-}
-
-func (e *Market) GetHighestBuyOrder() *types.Order {
-	buyOrderIter := e.buyOrders.ReverseIterator()
-	if buyOrderIter.Next() {
-		return buyOrderIter.Value()
-	}
-	return nil
-}
-
-func (e *Market) GetLowestSellOrder() *types.Order {
-	sellOrderIter := e.sellOrders.Iterator()
-	if sellOrderIter.Next() {
-		return sellOrderIter.Value()
-	}
-	return nil
 }
 
 func (e *Market) GetExpiredOrders(ctx sdk.Context) []*types.Order {

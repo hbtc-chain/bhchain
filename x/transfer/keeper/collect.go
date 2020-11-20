@@ -15,15 +15,15 @@ var (
 )
 
 func (keeper BaseKeeper) CollectWaitSign(ctx sdk.Context, toCUAddr sdk.CUAddress, orderIDs []string, rawData []byte) sdk.Result {
-	toCU := keeper.ck.GetCU(ctx, toCUAddr)
-	if toCU == nil {
+	toCUAst := keeper.ik.GetCUIBCAsset(ctx, toCUAddr)
+	if toCUAst == nil {
 		return sdk.ErrInvalidAccount(toCUAddr.String()).Result()
 	}
-	if toCU.GetCUType() != sdk.CUTypeOp {
+	if toCUAst.GetCUType() != sdk.CUTypeOp {
 		return sdk.ErrInvalidTx(fmt.Sprintf("collect to a non OP Cu :%v", toCUAddr)).Result()
 	}
 
-	if toCU.GetMigrationStatus() != sdk.MigrationFinish {
+	if toCUAst.GetMigrationStatus() != sdk.MigrationFinish {
 		return sdk.ErrInvalidTx(fmt.Sprintf("To OPCU %v is in migration", toCUAddr)).Result()
 	}
 
@@ -33,6 +33,7 @@ func (keeper BaseKeeper) CollectWaitSign(ctx sdk.Context, toCUAddr sdk.CUAddress
 		return err.Result()
 	}
 
+	toCU := keeper.ck.GetCU(ctx, toCUAddr)
 	symbol := collectOrders[0].Symbol
 	chain := tokenInfo.Chain.String()
 	if toCU.GetSymbol() != symbol {
@@ -43,14 +44,14 @@ func (keeper BaseKeeper) CollectWaitSign(ctx sdk.Context, toCUAddr sdk.CUAddress
 	//Retrieve gas Price
 	gasPrice := tokenInfo.GasPrice
 	if chain != symbol {
-		ti := keeper.tk.GetTokenInfo(ctx, sdk.Symbol(chain))
+		ti := keeper.tk.GetIBCToken(ctx, sdk.Symbol(chain))
 		if ti == nil {
 			return sdk.ErrInvalidSymbol(fmt.Sprintf("%s does not exist", chain)).Result()
 		}
 		gasPrice = ti.GasPrice
 	}
 
-	toAddr := toCU.GetAssetAddress(symbol, curEpoch.Index)
+	toAddr := toCUAst.GetAssetAddress(symbol, curEpoch.Index)
 	if toAddr == "" {
 		return sdk.ErrInvalidTx(fmt.Sprintf("OP CU %v does not have %v's address", toCUAddr, symbol)).Result()
 	}
@@ -113,12 +114,20 @@ func (keeper BaseKeeper) CollectWaitSign(ctx sdk.Context, toCUAddr sdk.CUAddress
 			return sdk.ErrInvalidTx(fmt.Sprintf("gas price is too low, actual:%v, lowlimit:%v", price, priceLowLimit)).Result()
 		}
 
+		for i := range collectOrders {
+			userCUAst := keeper.ik.GetCUIBCAsset(ctx, collectOrders[i].CollectFromCU)
+			coins := sdk.NewCoins(sdk.NewCoin(collectOrders[i].Symbol, collectOrders[i].Amount))
+			userCUAst.SubAssetCoins(coins)
+			userCUAst.AddAssetCoinsHold(coins)
+			keeper.ik.SetCUIBCAsset(ctx, userCUAst)
+		}
+
 	case sdk.AccountBased:
-		fromCU := keeper.ck.GetCU(ctx, collectOrders[0].CollectFromCU)
-		sendable := fromCU.IsEnabledSendTx(chain, collectOrders[0].CollectFromAddress)
+		fromCUAst := keeper.ik.GetCUIBCAsset(ctx, collectOrders[0].CollectFromCU)
+		sendable := fromCUAst.IsEnabledSendTx(chain, collectOrders[0].CollectFromAddress)
 		//support only one collect at one time
 		if !sendable {
-			return sdk.ErrInternal(fmt.Sprintf("%v %v sendable is false", fromCU.GetAddress(), chain)).Result()
+			return sdk.ErrInternal(fmt.Sprintf("%v %v sendable is false", fromCUAst.GetAddress(), chain)).Result()
 		}
 
 		tx, _, err := keeper.cn.QueryAccountTransactionFromData(chain, symbol, rawData)
@@ -142,14 +151,14 @@ func (keeper BaseKeeper) CollectWaitSign(ctx sdk.Context, toCUAddr sdk.CUAddress
 			return sdk.ErrInvalidTx(fmt.Sprintf("gas limit %v != expected %v", tx.GasLimit, tokenInfo.GasLimit)).Result()
 		}
 
-		nonce := fromCU.GetNonce(tokenInfo.Chain.String(), collectOrders[0].CollectFromAddress)
+		nonce := fromCUAst.GetNonce(tokenInfo.Chain.String(), collectOrders[0].CollectFromAddress)
 		if nonce != tx.Nonce {
-			return sdk.ErrInvalidTx(fmt.Sprintf("cu(%v) tx nonce not equal, cunoce :%v, rawdata:%v", fromCU.String(), nonce, tx.Nonce)).Result()
+			return sdk.ErrInvalidTx(fmt.Sprintf("cu(%v) tx nonce not equal, cunoce :%v, rawdata:%v", fromCUAst.GetAddress(), nonce, tx.Nonce)).Result()
 		}
 
 		fee := tx.GasPrice.Mul(tx.GasLimit)
 		coins := sdk.NewCoins(sdk.NewCoin(symbol, tx.Amount))
-		gasRemained := fromCU.GetGasRemained(chain, collectOrders[0].CollectFromAddress)
+		gasRemained := fromCUAst.GetGasRemained(chain, collectOrders[0].CollectFromAddress)
 		//for erc20, check gr-gu, if gr-gu < estimated gas, error
 		if chain != symbol {
 			if !totalCoins.IsEqual(coins) {
@@ -184,9 +193,13 @@ func (keeper BaseKeeper) CollectWaitSign(ctx sdk.Context, toCUAddr sdk.CUAddress
 		gasPrice = tx.GasPrice
 		gasLimit = tx.GasLimit
 
-		//Lock user CU
-		fromCU.SetEnableSendTx(false, chain, collectOrders[0].CollectFromAddress)
-		keeper.ck.SetCU(ctx, fromCU)
+		fromCUAst.SubAssetCoins(totalCoins)
+		fromCUAst.AddAssetCoinsHold(totalCoins)
+		if tokenInfo.IsNonceBased {
+			//Lock user CU
+			fromCUAst.SetEnableSendTx(false, chain, collectOrders[0].CollectFromAddress)
+		}
+		keeper.ik.SetCUIBCAsset(ctx, fromCUAst)
 
 	case sdk.AccountSharedBased:
 		return sdk.ErrInvalidTx("Not support AccountSharedBased temporary").Result()
@@ -201,7 +214,7 @@ func (keeper BaseKeeper) CollectWaitSign(ctx sdk.Context, toCUAddr sdk.CUAddress
 		collectOrders[i].RawData = make([]byte, len(rawData))
 		copy(collectOrders[i].RawData, rawData)
 		keeper.ok.SetOrder(ctx, collectOrders[i])
-		_ = keeper.ck.SetDepositStatus(ctx, symbol, collectOrders[i].CUAddress, depositItems[i].Hash, depositItems[i].Index, sdk.DepositItemStatusInProcess)
+		_ = keeper.ik.SetDepositStatus(ctx, symbol, collectOrders[i].CUAddress, depositItems[i].Hash, depositItems[i].Index, sdk.DepositItemStatusInProcess)
 	}
 
 	var flows []sdk.Flow
@@ -214,7 +227,7 @@ func (keeper BaseKeeper) CollectWaitSign(ctx sdk.Context, toCUAddr sdk.CUAddress
 	return result
 }
 
-func (keeper BaseKeeper) CollectSignFinish(ctx sdk.Context, orderIDs []string, signedTx []byte, txHash string) sdk.Result {
+func (keeper BaseKeeper) CollectSignFinish(ctx sdk.Context, orderIDs []string, signedTx []byte) sdk.Result {
 	//basic  check
 	_, tokenInfo, vins, collectOrders, _, err := keeper.checkCollectOrders(ctx, orderIDs, sdk.OrderStatusWaitSign, sdk.DepositItemStatusInProcess)
 	if err != nil {
@@ -224,6 +237,7 @@ func (keeper BaseKeeper) CollectSignFinish(ctx sdk.Context, orderIDs []string, s
 	chain := tokenInfo.Chain.String()
 	rawData := collectOrders[0].RawData
 
+	var txHash string
 	switch tokenInfo.TokenType {
 	case sdk.UtxoBased:
 		result, hash := keeper.verifyUtxoBasedSignedTx(ctx, vins, nil, chain, symbol, rawData, signedTx)
@@ -252,7 +266,7 @@ func (keeper BaseKeeper) CollectSignFinish(ctx sdk.Context, orderIDs []string, s
 
 	var flows []sdk.Flow
 	flows = append(flows, keeper.rk.NewOrderFlow(sdk.Symbol(symbol), collectOrders[0].CollectFromCU, collectOrders[0].GetID(), sdk.OrderTypeCollect, sdk.OrderStatusSignFinish))
-	flows = append(flows, keeper.rk.NewCollectSignFinishFlow(orderIDs, signedTx, txHash))
+	flows = append(flows, keeper.rk.NewCollectSignFinishFlow(orderIDs, signedTx))
 
 	result := sdk.Result{}
 	receipt := keeper.rk.NewReceipt(sdk.CategoryTypeCollect, flows)
@@ -298,19 +312,19 @@ func (keeper BaseKeeper) CollectFinish(ctx sdk.Context, fromCUAddr sdk.CUAddress
 
 		//update fromCU's asset, collectOrders' status and deposit status
 		for i := range collectOrders {
-			userCU := keeper.ck.GetCU(ctx, collectOrders[i].CollectFromCU)
+			userCUAst := keeper.ik.GetCUIBCAsset(ctx, collectOrders[i].CollectFromCU)
 			coins := sdk.NewCoins(sdk.NewCoin(collectOrders[i].Symbol, collectOrders[i].Amount))
-			userCU.SubAssetCoins(coins)
+			userCUAst.SubAssetCoinsHold(coins)
 
 			//record the gr/gu in userCU[0]
 			if i == 0 {
 				gr := sdk.NewCoins(sdk.NewCoin(symbol, costFee))
-				userCU.AddGasReceived(gr)
-				userCU.AddGasUsed(gr)
+				userCUAst.AddGasReceived(gr)
+				userCUAst.AddGasUsed(gr)
 			}
 
-			keeper.ck.SetCU(ctx, userCU)
-			_ = keeper.ck.SetDepositStatus(ctx, collectOrders[i].Symbol, collectOrders[i].CollectFromCU, collectOrders[i].Txhash, collectOrders[i].Index, sdk.DepositItemStatusConfirmed)
+			keeper.ik.SetCUIBCAsset(ctx, userCUAst)
+			_ = keeper.ik.SetDepositStatus(ctx, collectOrders[i].Symbol, collectOrders[i].CollectFromCU, collectOrders[i].Txhash, collectOrders[i].Index, sdk.DepositItemStatusConfirmed)
 			collectOrders[i].Status = sdk.OrderStatusFinish
 			keeper.ok.SetOrder(ctx, collectOrders[i])
 		}
@@ -325,14 +339,14 @@ func (keeper BaseKeeper) CollectFinish(ctx sdk.Context, fromCUAddr sdk.CUAddress
 			if err != nil {
 				return sdk.ErrInvalidTx(fmt.Sprintf("fail to create deposit item, %v %v %v", localTx.Hash, i, vout.Amount)).Result()
 			}
-			_ = keeper.ck.SaveDeposit(ctx, symbol, toCUAddr, item)
+			_ = keeper.ik.SaveDeposit(ctx, symbol, toCUAddr, item)
 		}
 
 		//update collectToCU's asset
-		opCU := keeper.ck.GetCU(ctx, toCUAddr)
+		opCUAst := keeper.ik.GetCUIBCAsset(ctx, toCUAddr)
 		coins := sdk.NewCoins(sdk.NewCoin(symbol, outAmt))
-		opCU.AddAssetCoins(coins)
-		keeper.ck.SetCU(ctx, opCU)
+		opCUAst.AddAssetCoins(coins)
+		keeper.ik.SetCUIBCAsset(ctx, opCUAst)
 
 	case sdk.AccountBased:
 		localTx, err := keeper.cn.QueryAccountTransactionFromSignedData(chain, symbol, signedTx)
@@ -340,45 +354,45 @@ func (keeper BaseKeeper) CollectFinish(ctx sdk.Context, fromCUAddr sdk.CUAddress
 			return sdk.ErrInvalidTx(fmt.Sprintf("Fail to get transaction:%v, err:%v", signedTx, err)).Result()
 		}
 
-		userCU := keeper.ck.GetCU(ctx, collectOrders[0].CollectFromCU)
+		userCUAst := keeper.ik.GetCUIBCAsset(ctx, collectOrders[0].CollectFromCU)
 		//coins := sdk.NewCoins(sdk.NewCoin(symbol, totalCoins))
-		userCU.SubAssetCoins(totalCoins)
+		userCUAst.SubAssetCoinsHold(totalCoins)
 		//update gr if necessary
 		if chain == symbol {
 			gr := totalCoins.Sub(sdk.NewCoins(sdk.NewCoin(symbol, localTx.Amount)))
-			userCU.AddGasReceived(gr)
-			userCU.AddGasRemained(symbol, collectOrders[0].CollectFromAddress, gr.AmountOf(symbol))
+			userCUAst.AddGasReceived(gr)
+			userCUAst.AddGasRemained(symbol, collectOrders[0].CollectFromAddress, gr.AmountOf(symbol))
 		}
 		gu := sdk.NewCoins(sdk.NewCoin(chain, costFee)) //update gasused
-		userCU.AddGasUsed(gu)
-		userCU.SubGasRemained(chain, collectOrders[0].CollectFromAddress, costFee)
-		userCU.SetEnableSendTx(true, chain, collectOrders[0].CollectFromAddress)
+		userCUAst.AddGasUsed(gu)
+		userCUAst.SubGasRemained(chain, collectOrders[0].CollectFromAddress, costFee)
 
 		if tokenInfo.IsNonceBased {
 			//don't update local nonce for trx
-			nonce := userCU.GetNonce(tokenInfo.Chain.String(), collectOrders[0].CollectFromAddress) + 1
-			userCU.SetNonce(tokenInfo.Chain.String(), nonce, collectOrders[0].CollectFromAddress)
+			nonce := userCUAst.GetNonce(tokenInfo.Chain.String(), collectOrders[0].CollectFromAddress) + 1
+			userCUAst.SetNonce(tokenInfo.Chain.String(), nonce, collectOrders[0].CollectFromAddress)
+			userCUAst.SetEnableSendTx(true, chain, collectOrders[0].CollectFromAddress)
 		}
-		keeper.ck.SetCU(ctx, userCU)
+		keeper.ik.SetCUIBCAsset(ctx, userCUAst)
 
 		for i := range collectOrders {
-			_ = keeper.ck.SetDepositStatus(ctx, collectOrders[i].Symbol, collectOrders[i].CollectFromCU, collectOrders[i].Txhash, collectOrders[i].Index, sdk.DepositItemStatusConfirmed)
+			_ = keeper.ik.SetDepositStatus(ctx, collectOrders[i].Symbol, collectOrders[i].CollectFromCU, collectOrders[i].Txhash, collectOrders[i].Index, sdk.DepositItemStatusConfirmed)
 			collectOrders[i].Status = sdk.OrderStatusFinish
 			keeper.ok.SetOrder(ctx, collectOrders[i])
 		}
 
 		//update collectToCU's asset
-		opCU := keeper.ck.GetCU(ctx, toCUAddr)
+		opCUAst := keeper.ik.GetCUIBCAsset(ctx, toCUAddr)
 		coins := sdk.NewCoins(sdk.NewCoin(symbol, localTx.Amount))
-		opCU.AddAssetCoins(coins)
-		keeper.ck.SetCU(ctx, opCU)
+		opCUAst.AddAssetCoins(coins)
+		keeper.ik.SetCUIBCAsset(ctx, opCUAst)
 
 		//add deposititem into opcu, status is collected
 		item, err := sdk.NewDepositItem(localTx.Hash, uint64(0), localTx.Amount, localTx.To, "", sdk.DepositItemStatusConfirmed)
 		if err != nil {
 			return sdk.ErrInvalidTx(fmt.Sprintf("fail to create deposit item, %v %v %v", localTx.Hash, 0, localTx.Amount)).Result()
 		}
-		_ = keeper.ck.SaveDeposit(ctx, symbol, toCUAddr, item)
+		_ = keeper.ik.SaveDeposit(ctx, symbol, toCUAddr, item)
 
 	case sdk.AccountSharedBased:
 		return sdk.ErrInvalidOrder("Not support AccountSharedBased temporary").Result()
@@ -393,7 +407,7 @@ func (keeper BaseKeeper) CollectFinish(ctx sdk.Context, fromCUAddr sdk.CUAddress
 	return result
 }
 
-func (keeper BaseKeeper) checkCollectOrders(ctx sdk.Context, orderIDs []string, orderStatus sdk.OrderStatus, depositStatuses ...sdk.DepositItemStatus) (coins sdk.Coins, tokenInfo *sdk.TokenInfo,
+func (keeper BaseKeeper) checkCollectOrders(ctx sdk.Context, orderIDs []string, orderStatus sdk.OrderStatus, depositStatuses ...sdk.DepositItemStatus) (coins sdk.Coins, tokenInfo *sdk.IBCToken,
 	vins []*sdk.UtxoIn, collectOrders []*sdk.OrderCollect, depositItems []*sdk.DepositItem, err sdk.Error) {
 	order := keeper.ok.GetOrder(ctx, orderIDs[0])
 	if order == nil {
@@ -408,18 +422,13 @@ func (keeper BaseKeeper) checkCollectOrders(ctx sdk.Context, orderIDs []string, 
 	}
 
 	symbol := order.GetSymbol()
-	if !sdk.Symbol(symbol).IsValidTokenName() {
-		err = sdk.ErrInvalidSymbol(symbol)
-		return
-	}
 
-	if !keeper.tk.IsTokenSupported(ctx, sdk.Symbol(symbol)) {
+	tokenInfo = keeper.tk.GetIBCToken(ctx, sdk.Symbol(symbol))
+	if tokenInfo == nil {
 		err = sdk.ErrUnSupportToken(symbol)
 		return
 	}
-
-	tokenInfo = keeper.tk.GetTokenInfo(ctx, sdk.Symbol(symbol))
-	if !tokenInfo.IsWithdrawalEnabled || !tokenInfo.IsSendEnabled || !keeper.GetSendEnabled(ctx) {
+	if !tokenInfo.WithdrawalEnabled || !tokenInfo.SendEnabled || !keeper.IsSendEnabled(ctx) {
 		err = sdk.ErrTransactionIsNotEnabled(fmt.Sprintf("%v's collect is not enabled temporary", symbol))
 		return
 	}
@@ -496,7 +505,7 @@ func (keeper BaseKeeper) checkCollectOrders(ctx sdk.Context, orderIDs []string, 
 			err = sdk.ErrInvalidOrder(fmt.Sprintf("order %v CU type is not user type", order))
 			return
 		}
-		depositItem := keeper.ck.GetDeposit(ctx, symbol, collectOrder.CUAddress, collectOrder.Txhash, collectOrder.Index)
+		depositItem := keeper.ik.GetDeposit(ctx, symbol, collectOrder.CUAddress, collectOrder.Txhash, collectOrder.Index)
 		if depositItem == sdk.DepositNil {
 			err = sdk.ErrInvalidOrder(fmt.Sprintf("order %v's deposit item %v %v does not exist", order, collectOrder.Txhash, collectOrder.Index))
 			return

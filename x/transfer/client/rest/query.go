@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gorilla/mux"
@@ -11,45 +12,70 @@ import (
 	"github.com/hbtc-chain/bhchain/x/transfer/types"
 )
 
-// query accountREST Handler
-func QueryBalancesRequestHandlerFn(cliCtx context.CLIContext) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		vars := mux.Vars(r)
-		bech32addr := vars["address"]
+// RegisterRoutes - Central function to define routes that get registered by the main application
+func RegisterRoutes(cliCtx context.CLIContext, r *mux.Router) {
+	r.HandleFunc("/transfer/balance/{address}/{symbol}", queryBalancesRequestHandlerFn(cliCtx)).Methods("GET")
+	r.HandleFunc("/transfer/balances/{address}", queryAllBalancesRequestHandlerFn(cliCtx)).Methods("GET")
+}
 
-		addr, err := sdk.CUAddressFromBase58(bech32addr)
-		if err != nil {
-			rest.WriteErrorResponse(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		var ok bool
-		cliCtx, ok = rest.ParseQueryHeightOrReturnBadRequest(w, cliCtx, r)
+func queryBalancesRequestHandlerFn(cliCtx context.CLIContext) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		route := fmt.Sprintf("custom/%s/%s", types.QuerierRoute, types.QueryBalance)
+
+		cliCtx, ok := rest.ParseQueryHeightOrReturnBadRequest(w, cliCtx, r)
 		if !ok {
 			return
 		}
 
-		params := types.NewQueryBalanceParams(addr)
-		bz, err := cliCtx.Codec.MarshalJSON(params)
+		addr, err := sdk.CUAddressFromBase58(mux.Vars(r)["address"])
+		if err != nil {
+			rest.WriteErrorResponse(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		bz, err := cliCtx.Codec.MarshalJSON(types.NewQueryBalanceParams(addr, mux.Vars(r)["symbol"]))
 		if err != nil {
 			rest.WriteErrorResponse(w, http.StatusBadRequest, err.Error())
 			return
 		}
 
-		res, height, err := cliCtx.QueryWithData("custom/transfer/balances", bz)
+		res, height, err := cliCtx.QueryWithData(route, bz)
 		if err != nil {
 			rest.WriteErrorResponse(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 
 		cliCtx = cliCtx.WithHeight(height)
+		rest.PostProcessResponse(w, cliCtx, res)
+	}
+}
 
-		// the query will return empty if there is no data for this CU
-		if len(res) == 0 {
-			rest.PostProcessResponse(w, cliCtx, sdk.Coins{})
+func queryAllBalancesRequestHandlerFn(cliCtx context.CLIContext) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		route := fmt.Sprintf("custom/%s/%s", types.QuerierRoute, types.QueryAllBalance)
+
+		cliCtx, ok := rest.ParseQueryHeightOrReturnBadRequest(w, cliCtx, r)
+		if !ok {
 			return
 		}
 
+		addr, err := sdk.CUAddressFromBase58(mux.Vars(r)["address"])
+		if err != nil {
+			rest.WriteErrorResponse(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		bz, err := cliCtx.Codec.MarshalJSON(types.NewQueryAllBalanceParams(addr))
+		if err != nil {
+			rest.WriteErrorResponse(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		res, height, err := cliCtx.QueryWithData(route, bz)
+		if err != nil {
+			rest.WriteErrorResponse(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		cliCtx = cliCtx.WithHeight(height)
 		rest.PostProcessResponse(w, cliCtx, res)
 	}
 }

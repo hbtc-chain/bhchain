@@ -38,3 +38,8 @@ type DistributionKeeper interface {
 	SetFeePool(ctx sdk.Context, feePool distrtype.FeePool)
 	GetFeePool(ctx sdk.Context) distrtype.FeePool
 }
+
+type TransferKeeper interface {
+	GetAllBalance(ctx sdk.Context, addr sdk.CUAddress) sdk.Coins
+	AddCoins(ctx sdk.Context, addr sdk.CUAddress, coins sdk.Coins) (sdk.Coins, []sdk.Flow, sdk.Error)
+}

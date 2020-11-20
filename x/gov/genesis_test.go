@@ -118,7 +118,7 @@ func TestImportExportQueues(t *testing.T) {
 	require.True(t, proposal1.Status == StatusDepositPeriod)
 	require.True(t, proposal2.Status == StatusVotingPeriod)
 
-	require.Equal(t, input2.keeper.GetDepositParams(ctx2).MinDeposit, input2.keeper.GetGovernanceAccount(ctx2).GetCoins())
+	require.Equal(t, input2.keeper.GetDepositParams(ctx2).MinDeposit,input.tk.GetAllBalance(ctx,input2.keeper.GetGovernanceAccount(ctx2).GetAddress()))
 
 	// Run the endblocker. Check to make sure that proposal1 is removed from state, and proposal2 is finished VotingPeriod.
 	EndBlocker(ctx2, input2.keeper)

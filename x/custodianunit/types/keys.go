@@ -75,8 +75,13 @@ func DecodeSymbolFromDepositListKey(key []byte) string {
 
 // key = prefix + symbol + cuaddress
 func OpCUKey(symbol string, addr sdk.CUAddress) []byte {
+	return append(OpCUKeyPrefix(symbol), addr.Bytes()...)
+}
+
+func OpCUKeyPrefix(symbol string) []byte {
 	k := append(OpCUPrefix, []byte(symbol)...)
-	return append(k, addr.Bytes()...)
+	k = append(k, Sep...)
+	return k
 }
 
 func AddressFromOpCUKey(OpCUKey []byte) []byte {

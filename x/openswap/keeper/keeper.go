@@ -17,20 +17,18 @@ type Keeper struct {
 	cdc           *codec.Codec
 	tokenKeeper   types.TokenKeeper
 	tk            types.TransferKeeper
-	cuKeeper      types.CUKeeper
 	rk            types.ReceiptKeeper
 	sk            types.SupplyKeeper
 	marketManager *orderbook.Manager
 	paramstore    params.Subspace
 }
 
-func NewKeeper(cdc *codec.Codec, key sdk.StoreKey, tokenKeeper types.TokenKeeper, cuKeeper types.CUKeeper,
+func NewKeeper(cdc *codec.Codec, key sdk.StoreKey, tokenKeeper types.TokenKeeper,
 	rk types.ReceiptKeeper, sk types.SupplyKeeper, tk types.TransferKeeper, paramstore params.Subspace) Keeper {
 	k := Keeper{
 		storeKey:    key,
 		cdc:         cdc,
 		tokenKeeper: tokenKeeper,
-		cuKeeper:    cuKeeper,
 		rk:          rk,
 		sk:          sk,
 		tk:          tk,
@@ -41,74 +39,90 @@ func NewKeeper(cdc *codec.Codec, key sdk.StoreKey, tokenKeeper types.TokenKeeper
 }
 
 func (k Keeper) CheckSymbol(ctx sdk.Context, symbol sdk.Symbol) sdk.Result {
-	tokenInfo := k.tokenKeeper.GetTokenInfo(ctx, symbol)
+	tokenInfo := k.tokenKeeper.GetToken(ctx, symbol)
 	if tokenInfo == nil {
 		return sdk.ErrUnSupportToken(fmt.Sprintf("token %s does not exist", symbol.String())).Result()
 	}
-	if !tokenInfo.IsSendEnabled {
+	if !tokenInfo.IsSendEnabled() {
 		return sdk.ErrUnSupportToken(fmt.Sprintf("token %s is not enable to send", symbol)).Result()
 	}
 	return sdk.Result{}
 }
 
-func (k Keeper) AddLiquidity(ctx sdk.Context, from sdk.CUAddress, tokenA, tokenB sdk.Symbol, minTokenAAmount, minTokenBAmount sdk.Int) sdk.Result {
+func (k Keeper) AddLiquidity(ctx sdk.Context, from sdk.CUAddress, dexID uint32, tokenA, tokenB sdk.Symbol,
+	maxTokenAAmount, maxTokenBAmount sdk.Int) sdk.Result {
+
 	if tokenA > tokenB {
 		tokenA, tokenB = tokenB, tokenA
-		minTokenAAmount, minTokenBAmount = minTokenBAmount, minTokenAAmount
+		maxTokenAAmount, maxTokenBAmount = maxTokenBAmount, maxTokenAAmount
 	}
-	pair := k.GetTradingPair(ctx, tokenA, tokenB)
+	pair := k.GetTradingPair(ctx, dexID, tokenA, tokenB)
+	if pair == nil && dexID != 0 {
+		return sdk.ErrInvalidTx(fmt.Sprintf("%s-%s trading pair does not exist in dex %d",
+			tokenA, tokenB, dexID)).Result()
+	}
+	if pair != nil && pair.IsPublic && pair.DexID != 0 {
+		pair = k.GetTradingPair(ctx, 0, tokenA, tokenB)
+	}
 	var needTokenA, needTokenB, liquidity sdk.Int
-	if pair == nil {
-		product := big.NewInt(0).Mul(minTokenAAmount.BigInt(), minTokenBAmount.BigInt())
+	if pair == nil || pair.TotalLiquidity.IsZero() {
+		product := big.NewInt(0).Mul(maxTokenAAmount.BigInt(), maxTokenBAmount.BigInt())
 		sqr := sdk.NewIntFromBigInt(big.NewInt(0).Sqrt(product))
 		minimumLiquidity := k.MinimumLiquidity(ctx)
 		liquidity = sqr.Sub(minimumLiquidity) // lock MinimumLiquidity permanently
 		if !liquidity.IsPositive() {
 			return sdk.ErrInvalidAmount("insufficient liquidity").Result()
 		}
-		pair = types.NewTradingPair(tokenA, tokenB, minimumLiquidity)
-		needTokenA, needTokenB = minTokenAAmount, minTokenBAmount
-	} else {
-		needTokenB = mulAndDiv(minTokenAAmount, pair.TokenBAmount, pair.TokenAAmount)
-		if needTokenB.LT(minTokenBAmount) {
-			needTokenA = mulAndDiv(minTokenBAmount, pair.TokenAAmount, pair.TokenBAmount)
-			if needTokenA.LT(minTokenAAmount) {
-				return sdk.ErrInvalidAmount("insufficient min token amount").Result()
-			}
-			needTokenB = minTokenBAmount
+		if pair == nil {
+			pair = types.NewDefaultTradingPair(tokenA, tokenB, minimumLiquidity)
 		} else {
-			needTokenA = minTokenAAmount
+			pair.TotalLiquidity = minimumLiquidity
+		}
+		needTokenA, needTokenB = maxTokenAAmount, maxTokenBAmount
+	} else {
+		needTokenB = mulAndDiv(maxTokenAAmount, pair.TokenBAmount, pair.TokenAAmount)
+		if needTokenB.GT(maxTokenBAmount) {
+			needTokenA = mulAndDiv(maxTokenBAmount, pair.TokenAAmount, pair.TokenBAmount)
+			if needTokenA.GT(maxTokenAAmount) {
+				return sdk.ErrInvalidAmount("need amount exceeds expectation").Result()
+			}
+			needTokenB = maxTokenBAmount
+		} else {
+			needTokenA = maxTokenAAmount
 		}
 		liquidity = sdk.MinInt(mulAndDiv(needTokenA, pair.TotalLiquidity, pair.TokenAAmount), mulAndDiv(needTokenB, pair.TotalLiquidity, pair.TokenBAmount))
 	}
-	cu := k.cuKeeper.GetCU(ctx, from)
-	have := cu.GetCoins()
-	need := sdk.NewCoins(sdk.NewCoin(tokenA.String(), needTokenA), sdk.NewCoin(tokenB.String(), needTokenB))
-	if have.AmountOf(tokenA.String()).LT(needTokenA) || have.AmountOf(tokenB.String()).LT(needTokenB) {
-		return sdk.ErrInsufficientFunds(fmt.Sprintf("insufficient funds, need:%v, have:%v", need, have)).Result()
+
+	if !needTokenA.IsPositive() || !needTokenB.IsPositive() {
+		return sdk.ErrInvalidTx(fmt.Sprintf("amount is too small, %s amount: %v, %s amount: %v",
+			tokenA, tokenB, needTokenA.String(), needTokenB.String())).Result()
 	}
-	cu.SubCoins(need)
-	k.cuKeeper.SetCU(ctx, cu)
+	if !liquidity.IsPositive() {
+		return sdk.ErrInvalidTx(fmt.Sprintf("liquidity %s is too small",
+			liquidity.String())).Result()
+	}
+
+	need := sdk.NewCoins(sdk.NewCoin(tokenA.String(), needTokenA), sdk.NewCoin(tokenB.String(), needTokenB))
+	_, flows, err := k.tk.SubCoins(ctx, from, need)
+	if err != nil {
+		return err.Result()
+	}
 
 	pair.TokenAAmount = pair.TokenAAmount.Add(needTokenA)
 	pair.TokenBAmount = pair.TokenBAmount.Add(needTokenB)
 	pair.TotalLiquidity = pair.TotalLiquidity.Add(liquidity)
-	k.saveTradingPair(ctx, pair)
+	k.SaveTradingPair(ctx, pair)
 
-	addrLiquidity := k.GetLiquidity(ctx, tokenA, tokenB, from)
+	addrLiquidity := k.GetLiquidity(ctx, from, pair.DexID, tokenA, tokenB)
 	addrLiquidity = addrLiquidity.Add(liquidity)
-	k.saveLiquidity(ctx, tokenA, tokenB, from, addrLiquidity)
+	k.saveLiquidity(ctx, from, pair.DexID, tokenA, tokenB, addrLiquidity)
 
-	k.onUpdateLiquidity(ctx, tokenA, tokenB, from, liquidity)
+	k.onUpdateLiquidity(ctx, from, pair.DexID, tokenA, tokenB, liquidity)
 
-	flows := make([]sdk.Flow, 0, 2)
-	for _, flow := range cu.GetBalanceFlows() {
-		flows = append(flows, flow)
-	}
 	receipt := k.rk.NewReceipt(sdk.CategoryTypeOpenswap, flows)
 	result := sdk.Result{}
 	k.rk.SaveReceiptToResult(receipt, &result)
-	eventLiquidity := types.NewEventLiquidity(from, tokenA, tokenB, pair.TokenAAmount, pair.TokenBAmount, needTokenA, needTokenB)
+	eventLiquidity := types.NewEventLiquidity(from, pair.DexID, tokenA, tokenB, pair.TokenAAmount, pair.TokenBAmount, needTokenA, needTokenB)
 	ctx.EventManager().EmitEvents(sdk.Events{
 		sdk.NewEvent(
 			types.EventTypeAddLiquidity,
@@ -120,15 +134,17 @@ func (k Keeper) AddLiquidity(ctx sdk.Context, from sdk.CUAddress, tokenA, tokenB
 	return result
 }
 
-func (k Keeper) RemoveLiquidity(ctx sdk.Context, from sdk.CUAddress, tokenA, tokenB sdk.Symbol, liquidity sdk.Int) sdk.Result {
-	if tokenA > tokenB {
-		tokenA, tokenB = tokenB, tokenA
-	}
-	pair := k.GetTradingPair(ctx, tokenA, tokenB)
+func (k Keeper) RemoveLiquidity(ctx sdk.Context, from sdk.CUAddress, dexID uint32, tokenA, tokenB sdk.Symbol, liquidity sdk.Int) sdk.Result {
+	tokenA, tokenB = k.SortToken(tokenA, tokenB)
+	pair := k.GetTradingPair(ctx, dexID, tokenA, tokenB)
 	if pair == nil {
-		return sdk.ErrInvalidTx(fmt.Sprintf("no trading pair of %s-%s", tokenA.String(), tokenB.String())).Result()
+		return sdk.ErrInvalidTx(fmt.Sprintf("%s-%s trading pair does not exist in dex %d",
+			tokenA.String(), tokenB.String(), dexID)).Result()
 	}
-	addrLiquidity := k.GetLiquidity(ctx, tokenA, tokenB, from)
+	if pair.IsPublic && pair.DexID != 0 {
+		pair = k.GetTradingPair(ctx, 0, tokenA, tokenB)
+	}
+	addrLiquidity := k.GetLiquidity(ctx, from, pair.DexID, tokenA, tokenB)
 	if addrLiquidity.LT(liquidity) {
 		return sdk.ErrInsufficientFunds(fmt.Sprintf("insufficient liquidity, has %s, need %s", addrLiquidity.String(), liquidity.String())).Result()
 	}
@@ -137,29 +153,31 @@ func (k Keeper) RemoveLiquidity(ctx sdk.Context, from sdk.CUAddress, tokenA, tok
 	}
 	returnTokenA := mulAndDiv(liquidity, pair.TokenAAmount, pair.TotalLiquidity)
 	returnTokenB := mulAndDiv(liquidity, pair.TokenBAmount, pair.TotalLiquidity)
-	cu := k.cuKeeper.GetCU(ctx, from)
+	if !returnTokenA.IsPositive() || !returnTokenB.IsPositive() {
+		return sdk.ErrInvalidTx(fmt.Sprintf("amount is too small, %s amount: %v, %s amount: %v",
+			tokenA, tokenB, returnTokenA.String(), returnTokenB.String())).Result()
+	}
+
 	returnCoins := sdk.NewCoins(sdk.NewCoin(tokenA.String(), returnTokenA), sdk.NewCoin(tokenB.String(), returnTokenB))
-	cu.AddCoins(returnCoins)
-	k.cuKeeper.SetCU(ctx, cu)
+	_, flows, err := k.tk.AddCoins(ctx, from, returnCoins)
+	if err != nil {
+		return err.Result()
+	}
 
 	pair.TokenAAmount = pair.TokenAAmount.Sub(returnTokenA)
 	pair.TokenBAmount = pair.TokenBAmount.Sub(returnTokenB)
 	pair.TotalLiquidity = pair.TotalLiquidity.Sub(liquidity)
-	k.saveTradingPair(ctx, pair)
+	k.SaveTradingPair(ctx, pair)
 
 	addrLiquidity = addrLiquidity.Sub(liquidity)
-	k.saveLiquidity(ctx, tokenA, tokenB, from, addrLiquidity)
+	k.saveLiquidity(ctx, from, pair.DexID, tokenA, tokenB, addrLiquidity)
 
-	k.onUpdateLiquidity(ctx, tokenA, tokenB, from, liquidity.Neg())
+	k.onUpdateLiquidity(ctx, from, pair.DexID, tokenA, tokenB, liquidity.Neg())
 
-	flows := make([]sdk.Flow, 0, 2)
-	for _, flow := range cu.GetBalanceFlows() {
-		flows = append(flows, flow)
-	}
 	receipt := k.rk.NewReceipt(sdk.CategoryTypeOpenswap, flows)
 	result := sdk.Result{}
 	k.rk.SaveReceiptToResult(receipt, &result)
-	eventLiquidity := types.NewEventLiquidity(from, tokenA, tokenB, pair.TokenAAmount, pair.TokenBAmount, returnTokenA, returnTokenB)
+	eventLiquidity := types.NewEventLiquidity(from, pair.DexID, tokenA, tokenB, pair.TokenAAmount, pair.TokenBAmount, returnTokenA, returnTokenB)
 	ctx.EventManager().EmitEvents(sdk.Events{
 		sdk.NewEvent(
 			types.EventTypeRemoveLiquidity,
@@ -171,16 +189,10 @@ func (k Keeper) RemoveLiquidity(ctx sdk.Context, from sdk.CUAddress, tokenA, tok
 	return result
 }
 
-func (k Keeper) SwapExactIn(ctx sdk.Context, from, referer, receiver sdk.CUAddress, amountIn, minAmountOut sdk.Int,
+func (k Keeper) SwapExactIn(ctx sdk.Context, dexID uint32, from, referer, receiver sdk.CUAddress, amountIn, minAmountOut sdk.Int,
 	path []sdk.Symbol) sdk.Result {
 
-	fromCU := k.cuKeeper.GetCU(ctx, from)
-	have := fromCU.GetCoins()
-	if have.AmountOf(path[0].String()).LT(amountIn) {
-		return sdk.ErrInsufficientFunds(fmt.Sprintf("token %s is insufficient", path[0].String())).Result()
-	}
-
-	amountOut, err := k.getAmountOut(ctx, amountIn, path)
+	amountOut, err := k.getAmountOut(ctx, dexID, amountIn, path)
 	if err != nil {
 		return sdk.ErrInvalidTx(err.Error()).Result()
 	}
@@ -188,19 +200,13 @@ func (k Keeper) SwapExactIn(ctx sdk.Context, from, referer, receiver sdk.CUAddre
 		return sdk.ErrInvalidAmount(fmt.Sprintf("insufficient amount out, min: %s, got: %s", minAmountOut.String(), amountOut.String())).Result()
 	}
 
-	return k.DoSwap(ctx, from, referer, receiver, amountIn, path)
+	return k.directSwap(ctx, dexID, from, referer, receiver, amountIn, path)
 }
 
-func (k Keeper) SwapExactOut(ctx sdk.Context, from, referer, receiver sdk.CUAddress, amountOut, maxAmountIn sdk.Int,
+func (k Keeper) SwapExactOut(ctx sdk.Context, dexID uint32, from, referer, receiver sdk.CUAddress, amountOut, maxAmountIn sdk.Int,
 	path []sdk.Symbol) sdk.Result {
 
-	fromCU := k.cuKeeper.GetCU(ctx, from)
-	have := fromCU.GetCoins()
-	if have.AmountOf(path[0].String()).LT(maxAmountIn) {
-		return sdk.ErrInsufficientFunds(fmt.Sprintf("token %s is insufficient", path[0].String())).Result()
-	}
-
-	amountIn, err := k.getAmountIn(ctx, amountOut, path)
+	amountIn, err := k.getAmountIn(ctx, dexID, amountOut, path)
 	if err != nil {
 		return sdk.ErrInvalidTx(err.Error()).Result()
 	}
@@ -208,53 +214,61 @@ func (k Keeper) SwapExactOut(ctx sdk.Context, from, referer, receiver sdk.CUAddr
 		return sdk.ErrInvalidAmount(fmt.Sprintf("excessive amount in, max: %s, got: %s", maxAmountIn.String(), amountIn.String())).Result()
 	}
 
-	return k.DoSwap(ctx, from, referer, receiver, amountIn, path)
+	return k.directSwap(ctx, dexID, from, referer, receiver, amountIn, path)
 }
 
-func (k Keeper) DoSwap(ctx sdk.Context, from, referer, receiver sdk.CUAddress, amountIn sdk.Int, path []sdk.Symbol) sdk.Result {
-	fromCU := k.cuKeeper.GetCU(ctx, from)
-	need := sdk.NewCoins(sdk.NewCoin(path[0].String(), amountIn))
-	fromCU.SubCoins(need)
-	k.cuKeeper.SetCU(ctx, fromCU)
+func (k Keeper) directSwap(ctx sdk.Context, dexID uint32, from, referer, receiver sdk.CUAddress, amountIn sdk.Int, path []sdk.Symbol) sdk.Result {
+
+	flows := make([]sdk.Flow, 0, 4)
+	need := sdk.NewCoin(path[0].String(), amountIn)
+	_, flow, err := k.tk.SubCoin(ctx, from, need)
+	if err != nil {
+		return err.Result()
+	}
+	flows = append(flows, flow)
 
 	bonusCoins := sdk.NewCoins()
 	repurchaseFunds := sdk.NewCoins()
 	var swapEvents types.EventSwaps
 	for i := 0; i < len(path)-1; i++ {
-		pair := k.GetTradingPair(ctx, path[i], path[i+1])
-		amountOut, bonus, repurchaseFund, updatedPair := k.swap(ctx, pair, path[i], amountIn, false)
+		pair := k.GetTradingPair(ctx, dexID, path[i], path[i+1])
+		feeRate := k.getFeeRates(ctx, pair)
+		if pair.IsPublic && pair.DexID != 0 {
+			pair = k.GetTradingPair(ctx, 0, path[i], path[i+1])
+		}
+		amountOut, bonus, repurchaseFund, updatedPair := k.swap(ctx, feeRate, pair, path[i], amountIn, false)
 
-		bonusCoins = bonusCoins.Add(sdk.NewCoins(sdk.NewCoin(path[i].String(), bonus)))
+		if bonus.IsPositive() {
+			bonusCoins = bonusCoins.Add(sdk.NewCoins(sdk.NewCoin(path[i].String(), bonus)))
+		}
 		if repurchaseFund.IsPositive() {
 			repurchaseFunds = repurchaseFunds.Add(sdk.NewCoins(sdk.NewCoin(path[i].String(), repurchaseFund)))
 		}
 
-		swapEvents = append(swapEvents, types.NewEventSwap(from, "", pair.TokenA, pair.TokenB, path[i],
+		swapEvents = append(swapEvents, types.NewEventSwap(from, "", dexID, pair.TokenA, pair.TokenB, path[i],
 			updatedPair.TokenAAmount, updatedPair.TokenBAmount, amountIn, amountOut))
 
 		amountIn = amountOut
 	}
 
-	receiverCU := k.cuKeeper.GetOrNewCU(ctx, sdk.CUTypeUser, receiver)
-	receiverCU.AddCoins(sdk.NewCoins(sdk.NewCoin(path[len(path)-1].String(), amountIn)))
-	k.cuKeeper.SetCU(ctx, receiverCU)
-
-	refererCU := k.cuKeeper.GetOrNewCU(ctx, sdk.CUTypeUser, referer)
-	refererCU.AddCoins(bonusCoins)
-	k.cuKeeper.SetCU(ctx, refererCU)
-
-	burnedAmount := k.repurchaseAndBurn(ctx, repurchaseFunds)
-
-	flows := make([]sdk.Flow, 0, 4)
-	for _, flow := range fromCU.GetBalanceFlows() {
+	if amountIn.IsPositive() {
+		_, flow, err = k.tk.AddCoin(ctx, receiver, sdk.NewCoin(path[len(path)-1].String(), amountIn))
+		if err != nil {
+			return err.Result()
+		}
 		flows = append(flows, flow)
 	}
-	for _, flow := range receiverCU.GetBalanceFlows() {
-		flows = append(flows, flow)
+
+	if bonusCoins.IsValid() {
+		_, refererFlows, err := k.tk.AddCoins(ctx, referer, bonusCoins)
+		if err != nil {
+			return err.Result()
+		}
+		flows = append(flows, refererFlows...)
 	}
-	for _, flow := range refererCU.GetBalanceFlows() {
-		flows = append(flows, flow)
-	}
+
+	k.addRepurchaseFunds(ctx, repurchaseFunds)
+
 	receipt := k.rk.NewReceipt(sdk.CategoryTypeOpenswap, flows)
 	result := sdk.Result{}
 	k.rk.SaveReceiptToResult(receipt, &result)
@@ -263,7 +277,6 @@ func (k Keeper) DoSwap(ctx sdk.Context, from, referer, receiver sdk.CUAddress, a
 		sdk.NewEvent(
 			types.EventTypeSwap,
 			sdk.NewAttribute(types.AttributeKeySwapResult, swapEvents.String()),
-			sdk.NewAttribute(types.AttributeKeyBurned, burnedAmount.String()),
 		),
 	})
 
@@ -271,42 +284,68 @@ func (k Keeper) DoSwap(ctx sdk.Context, from, referer, receiver sdk.CUAddress, a
 	return result
 }
 
-func (k Keeper) LimitSwap(ctx sdk.Context, orderID string, from, referer, receiver sdk.CUAddress, amountIn sdk.Int, price sdk.Dec,
-	baseSymbol, quoteSymbol sdk.Symbol, side int, expiredAt int64) sdk.Result {
+func (k Keeper) LimitSwap(ctx sdk.Context, dexID uint32, orderID string, from, referer, receiver sdk.CUAddress, amountIn sdk.Int,
+	price sdk.Dec, baseSymbol, quoteSymbol sdk.Symbol, side int, expiredAt int64) sdk.Result {
 
-	pair := k.GetTradingPair(ctx, baseSymbol, quoteSymbol)
+	pair := k.GetTradingPair(ctx, dexID, baseSymbol, quoteSymbol)
 	if pair == nil {
-		return sdk.ErrInvalidTx(fmt.Sprintf("no trading pair of %s-%s", baseSymbol.String(), quoteSymbol.String())).Result()
+		return sdk.ErrInvalidTx(fmt.Sprintf("%s-%s trading pair does not exist in dex %d", baseSymbol, quoteSymbol, dexID)).Result()
 	}
 
-	fromCU := k.cuKeeper.GetCU(ctx, from)
-	have := fromCU.GetCoins()
+	feeRate := k.getFeeRates(ctx, pair)
+	realInCoeff := sdk.OneDec().Sub(feeRate.TotalFeeRate())
+	realAmount := amountIn.ToDec().Mul(realInCoeff).TruncateDec()
+	var amountOut sdk.Int
+	if side == types.OrderSideBuy {
+		amountOut = realAmount.Quo(price).TruncateInt()
+	} else {
+		amountOut = realAmount.Mul(price).TruncateInt()
+	}
+	if !amountOut.IsPositive() {
+		return sdk.ErrInvalidTx("limit order amount is too small").Result()
+	}
+
+	if pair.IsPublic && dexID != 0 {
+		pair = k.GetTradingPair(ctx, 0, baseSymbol, quoteSymbol)
+	}
+	if pair == nil || !pair.TokenAAmount.IsPositive() || !pair.TokenBAmount.IsPositive() {
+		return sdk.ErrInvalidTx(fmt.Sprintf("%s-%s trading pair does not have enough liquidity", baseSymbol, quoteSymbol)).Result()
+	}
+
 	symbol := baseSymbol
 	if side == types.OrderSideBuy {
 		symbol = quoteSymbol
 	}
-	need := sdk.NewCoins(sdk.NewCoin(symbol.String(), amountIn))
-	if have.AmountOf(symbol.String()).LT(amountIn) {
-		return sdk.ErrInsufficientFunds("insufficient funds").Result()
-	}
-	fromCU.SubCoins(need)
-	fromCU.AddCoinsHold(need)
-	k.cuKeeper.SetCU(ctx, fromCU)
-	flows := make([]sdk.Flow, 0, 2)
-	for _, flow := range fromCU.GetBalanceFlows() {
-		flows = append(flows, flow)
+	flows, err := k.tk.LockCoin(ctx, from, sdk.NewCoin(symbol.String(), amountIn))
+	if err != nil {
+		return err.Result()
 	}
 
-	order := types.NewOrder(orderID, ctx.BlockTime().Unix(), expiredAt, from, referer, receiver,
-		baseSymbol, quoteSymbol, price, amountIn, byte(side))
-	k.CreateOrder(ctx, order)
+	order := &types.Order{
+		DexID:       pair.DexID,
+		OrderID:     orderID,
+		CreatedTime: ctx.BlockTime().Unix(),
+		ExpiredTime: expiredAt,
+		From:        from,
+		Referer:     referer,
+		Receiver:    receiver,
+		Price:       price,
+		Side:        byte(side),
+		BaseSymbol:  baseSymbol,
+		QuoteSymbol: quoteSymbol,
+		AmountIn:    amountIn,
+		LockedFund:  amountIn,
+		FeeRate:     feeRate,
+	}
+	k.saveOrder(ctx, order)
 
-	_, burned, balanceFlows, event, _ := k.limitSwap(ctx, order, pair)
+	balanceFlows, event, _, _ := k.limitSwap(ctx, order, pair)
 	for _, flow := range balanceFlows {
 		flows = append(flows, flow)
 	}
-	if order.LockedFund.IsZero() {
-		k.finishOrderWithStatus(ctx, order, types.OrderStatusFilled)
+	if order.Status != types.OrderStatusFilled {
+		k.addUnfinishedOrder(ctx, order)
+		ctx.GasMeter().ConsumeGas(k.LimitSwapMatchingGas(ctx).Uint64(), "limit order matching gas fee")
 	}
 
 	receipt := k.rk.NewReceipt(sdk.CategoryTypeOpenswap, flows)
@@ -318,164 +357,138 @@ func (k Keeper) LimitSwap(ctx sdk.Context, orderID string, from, referer, receiv
 			sdk.NewEvent(
 				types.EventTypeSwap,
 				sdk.NewAttribute(types.AttributeKeySwapResult, events.String()),
-				sdk.NewAttribute(types.AttributeKeyBurned, burned.String()),
 			),
 		})
 		result.Events = append(result.Events, ctx.EventManager().Events()...)
 	}
 
 	return result
-
 }
 
-func (k Keeper) swap(ctx sdk.Context, pair *types.TradingPair, tokenIn sdk.Symbol, amountIn sdk.Int, isRepurchasing bool) (sdk.Int, sdk.Int, sdk.Int, *types.TradingPair) {
+func (k Keeper) swap(ctx sdk.Context, feeRate *types.FeeRate, pair *types.TradingPair, tokenIn sdk.Symbol, amountIn sdk.Int,
+	isRepurchasing bool) (sdk.Int, sdk.Int, sdk.Int, *types.TradingPair) {
 
 	amountInDec := sdk.NewDecFromInt(amountIn)
-	refererBonus, fee, repurchaseFund := sdk.ZeroInt(), sdk.ZeroInt(), sdk.ZeroInt()
+	lpReward, refererBonus, repurchaseFund := sdk.ZeroInt(), sdk.ZeroInt(), sdk.ZeroInt()
 	if !isRepurchasing {
-		refererBonus = amountInDec.Mul(k.RefererTransactionBonusRate(ctx)).TruncateInt()
-		fee = amountInDec.Mul(k.FeeRate(ctx)).TruncateInt()
-		repurchaseFund = amountInDec.Mul(k.RepurchaseRate(ctx)).TruncateInt()
-		if !k.canRepurchase(ctx, tokenIn) {
-			fee = fee.Add(repurchaseFund)
+		lpReward = amountInDec.Mul(feeRate.LPRewardRate).TruncateInt()
+		repurchaseFund = amountInDec.Mul(feeRate.RepurchaseRate).TruncateInt()
+		refererBonus = amountInDec.Mul(feeRate.RefererRewardRate).TruncateInt()
+		if !k.canRepurchase(ctx, tokenIn, repurchaseFund) {
+			lpReward = lpReward.Add(repurchaseFund)
 			repurchaseFund = sdk.ZeroInt()
 		}
 	}
-	realAmountIn := amountIn.Sub(refererBonus).Sub(fee).Sub(repurchaseFund)
+	realAmountIn := amountIn.Sub(lpReward).Sub(refererBonus).Sub(repurchaseFund)
 
 	var amountOut sdk.Int
 	if pair.TokenA == tokenIn {
 		amountOut = mulAndDiv(realAmountIn, pair.TokenBAmount, realAmountIn.Add(pair.TokenAAmount))
-		pair.TokenAAmount = pair.TokenAAmount.Add(realAmountIn).Add(fee)
+		pair.TokenAAmount = pair.TokenAAmount.Add(realAmountIn).Add(lpReward)
 		pair.TokenBAmount = pair.TokenBAmount.Sub(amountOut)
 	} else {
 		amountOut = mulAndDiv(realAmountIn, pair.TokenAAmount, realAmountIn.Add(pair.TokenBAmount))
-		pair.TokenBAmount = pair.TokenBAmount.Add(realAmountIn).Add(fee)
+		pair.TokenBAmount = pair.TokenBAmount.Add(realAmountIn).Add(lpReward)
 		pair.TokenAAmount = pair.TokenAAmount.Sub(amountOut)
 	}
-	k.saveTradingPair(ctx, pair)
+	k.SaveTradingPair(ctx, pair)
 	return amountOut, refererBonus, repurchaseFund, pair
 }
 
-func (k Keeper) limitSwap(ctx sdk.Context, order *types.Order, pair *types.TradingPair) (sdk.Int, sdk.Int, []sdk.Flow, *types.EventSwap, *types.TradingPair) {
-	maxAmountIn := calLimitSwapAmount(order, pair)
+func (k Keeper) limitSwap(ctx sdk.Context, order *types.Order, pair *types.TradingPair) ([]sdk.Flow, *types.EventSwap, *types.TradingPair, bool) {
+	maxAmountIn, priceSuitable := k.calLimitSwapAmount(ctx, order, pair)
 	if maxAmountIn.IsZero() {
-		return sdk.ZeroInt(), sdk.ZeroInt(), nil, nil, pair
+		return nil, nil, pair, priceSuitable
 	}
 
-	realAmountInCoeff := k.getRealInCoeff(ctx)
-	realMaxMountIn := maxAmountIn.ToDec().Quo(realAmountInCoeff).TruncateInt()
-	if realMaxMountIn.GT(order.LockedFund) {
-		realMaxMountIn = order.LockedFund
+	realAmountInCoeff := sdk.OneDec().Sub(order.FeeRate.TotalFeeRate())
+	realMaxAmountIn := maxAmountIn.ToDec().Quo(realAmountInCoeff).TruncateInt()
+	if realMaxAmountIn.GT(order.LockedFund) {
+		realMaxAmountIn = order.LockedFund
 	}
 
 	tokenIn, tokenOut := pair.TokenA, pair.TokenB
 	if order.Side == types.OrderSideBuy {
 		tokenIn, tokenOut = tokenOut, tokenIn
 	}
-	amountOut, bonus, repurchaseFund, pair := k.swap(ctx, pair, tokenIn, realMaxMountIn, false)
+	amountOut, bonus, repurchaseFund, pair := k.swap(ctx, order.FeeRate, pair, tokenIn, realMaxAmountIn, false)
 
-	swapEvent := types.NewEventSwap(order.From, order.OrderID, pair.TokenA, pair.TokenB, tokenIn,
-		pair.TokenAAmount, pair.TokenBAmount, realMaxMountIn, amountOut)
-
-	fromCU := k.cuKeeper.GetCU(ctx, order.From)
-	fromCU.SubCoinsHold(sdk.NewCoins(sdk.NewCoin(tokenIn.String(), realMaxMountIn)))
-	k.cuKeeper.SetCU(ctx, fromCU)
-
-	receiverCU := k.cuKeeper.GetOrNewCU(ctx, sdk.CUTypeUser, order.Receiver)
-	receiverCU.AddCoins(sdk.NewCoins(sdk.NewCoin(tokenOut.String(), amountOut)))
-	k.cuKeeper.SetCU(ctx, receiverCU)
-
-	refererCU := k.cuKeeper.GetOrNewCU(ctx, sdk.CUTypeUser, order.Referer)
-	refererCU.AddCoins(sdk.NewCoins(sdk.NewCoin(tokenIn.String(), bonus)))
-	k.cuKeeper.SetCU(ctx, refererCU)
-
-	burned := sdk.ZeroInt()
-	if repurchaseFund.IsPositive() {
-		burned = k.repurchaseAndBurn(ctx, sdk.NewCoins(sdk.NewCoin(tokenIn.String(), repurchaseFund)))
-	}
+	swapEvent := types.NewEventSwap(order.From, order.OrderID, pair.DexID, pair.TokenA, pair.TokenB, tokenIn,
+		pair.TokenAAmount, pair.TokenBAmount, realMaxAmountIn, amountOut)
 
 	flows := make([]sdk.Flow, 0, 3)
-	for _, flow := range fromCU.GetBalanceFlows() {
-		flows = append(flows, flow)
-	}
-	for _, flow := range receiverCU.GetBalanceFlows() {
-		flows = append(flows, flow)
-	}
-	for _, flow := range refererCU.GetBalanceFlows() {
+	if realMaxAmountIn.IsPositive() {
+		_, flow, _ := k.tk.SubCoinHold(ctx, order.From, sdk.NewCoin(tokenIn.String(), realMaxAmountIn))
 		flows = append(flows, flow)
 	}
 
-	order.LockedFund = order.LockedFund.Sub(realMaxMountIn)
-	order.Status = types.OrderStatusPartiallyFilled
+	if amountOut.IsPositive() {
+		_, flow, _ := k.tk.AddCoin(ctx, order.Receiver, sdk.NewCoin(tokenOut.String(), amountOut))
+		flows = append(flows, flow)
+	}
+
+	if bonus.IsPositive() {
+		_, flow, _ := k.tk.AddCoin(ctx, order.Referer, sdk.NewCoin(tokenIn.String(), bonus))
+		flows = append(flows, flow)
+	}
+
+	if repurchaseFund.IsPositive() {
+		k.addRepurchaseFunds(ctx, sdk.NewCoins(sdk.NewCoin(tokenIn.String(), repurchaseFund)))
+	}
+
+	order.LockedFund = order.LockedFund.Sub(realMaxAmountIn)
+	if order.LockedFund.IsZero() {
+		order.Status = types.OrderStatusFilled
+		order.FinishedTime = ctx.BlockTime().Unix()
+	} else {
+		order.Status = types.OrderStatusPartiallyFilled
+	}
 	k.saveOrder(ctx, order)
 
-	return realMaxMountIn, burned, flows, swapEvent, pair
+	return flows, swapEvent, pair, priceSuitable
 }
 
-func (k Keeper) repurchaseAndBurn(ctx sdk.Context, repurchaseFunds sdk.Coins) sdk.Int {
+func (k Keeper) RepurchaseAndBurn(ctx sdk.Context) sdk.Int {
+	if ctx.BlockHeight()%k.RepurchaseDuration(ctx) != 0 {
+		return sdk.ZeroInt()
+	}
+
+	store := ctx.KVStore(k.storeKey)
+	repurchaseFunds := k.getRepurchaseFunds(ctx)
 	totalRepurchaseAmount := sdk.ZeroInt()
 	for _, coin := range repurchaseFunds {
 		switch coin.Denom {
-		case sdk.NativeDefiToken:
+		case sdk.NativeToken:
 			totalRepurchaseAmount = totalRepurchaseAmount.Add(coin.Amount)
-		case types.RepurchaseRoutingCoin:
-			pair := k.GetTradingPair(ctx, types.RepurchaseRoutingCoin, sdk.NativeDefiToken)
-			amount, _, _, _ := k.swap(ctx, pair, types.RepurchaseRoutingCoin, coin.Amount, true)
-			totalRepurchaseAmount = totalRepurchaseAmount.Add(amount)
 		default:
-			pair := k.GetTradingPair(ctx, sdk.Symbol(coin.Denom), types.RepurchaseRoutingCoin)
-			amount, _, _, _ := k.swap(ctx, pair, sdk.Symbol(coin.Denom), coin.Amount, true)
-			pair = k.GetTradingPair(ctx, types.RepurchaseRoutingCoin, sdk.NativeDefiToken)
-			amount, _, _, _ = k.swap(ctx, pair, types.RepurchaseRoutingCoin, amount, true)
+			pair := k.GetTradingPair(ctx, 0, sdk.Symbol(coin.Denom), sdk.NativeToken)
+			feeRate := k.getFeeRates(ctx, pair)
+			amount, _, _, _ := k.swap(ctx, feeRate, pair, sdk.Symbol(coin.Denom), coin.Amount, true)
 			totalRepurchaseAmount = totalRepurchaseAmount.Add(amount)
 		}
+
+		store.Delete(types.RepurchaseFundKey(coin.Denom))
 	}
+
 	if totalRepurchaseAmount.IsPositive() {
-		burnedCoins := sdk.NewCoins(sdk.NewCoin(sdk.NativeDefiToken, totalRepurchaseAmount))
+		burnedCoins := sdk.NewCoins(sdk.NewCoin(sdk.NativeToken, totalRepurchaseAmount))
 		k.tk.AddCoins(ctx, types.ModuleCUAddress, burnedCoins)
 		k.sk.BurnCoins(ctx, types.ModuleName, burnedCoins)
+
+		ctx.EventManager().EmitEvents(sdk.Events{
+			sdk.NewEvent(
+				types.EventTypeRepurchase,
+				sdk.NewAttribute(types.AttributeKeyAmount, totalRepurchaseAmount.String()),
+			),
+		})
 	}
 	return totalRepurchaseAmount
 }
 
-func (k Keeper) GetTradingPair(ctx sdk.Context, tokenA, tokenB sdk.Symbol) *types.TradingPair {
-	if tokenA > tokenB {
-		tokenA, tokenB = tokenB, tokenA
-	}
-	store := ctx.KVStore(k.storeKey)
-	bz := store.Get(types.TradingPairKey(tokenA, tokenB))
-	if len(bz) == 0 {
-		return nil
-	}
-	var pair types.TradingPair
-	k.cdc.MustUnmarshalBinaryBare(bz, &pair)
-	return &pair
-}
-
-func (k Keeper) getAllTradingPairs(ctx sdk.Context) []*types.TradingPair {
-	var ret []*types.TradingPair
-	store := ctx.KVStore(k.storeKey)
-	iter := sdk.KVStorePrefixIterator(store, types.TradingPairKeyPrefix)
-	for ; iter.Valid(); iter.Next() {
-		var pair types.TradingPair
-		k.cdc.MustUnmarshalBinaryBare(iter.Value(), &pair)
-		ret = append(ret, &pair)
-	}
-	iter.Close()
-	return ret
-}
-
-func (k Keeper) saveTradingPair(ctx sdk.Context, pair *types.TradingPair) {
-	bz := k.cdc.MustMarshalBinaryBare(pair)
-	store := ctx.KVStore(k.storeKey)
-	store.Set(types.TradingPairKey(pair.TokenA, pair.TokenB), bz)
-}
-
 // require tokenA < tokenB
-func (k Keeper) GetLiquidity(ctx sdk.Context, tokenA, tokenB sdk.Symbol, addr sdk.CUAddress) sdk.Int {
+func (k Keeper) GetLiquidity(ctx sdk.Context, addr sdk.CUAddress, dexID uint32, tokenA, tokenB sdk.Symbol) sdk.Int {
 	store := ctx.KVStore(k.storeKey)
-	bz := store.Get(types.LiquidityKey(tokenA, tokenB, addr))
+	bz := store.Get(types.LiquidityKey(addr, dexID, tokenA, tokenB))
 	if len(bz) == 0 {
 		return sdk.ZeroInt()
 	}
@@ -484,11 +497,9 @@ func (k Keeper) GetLiquidity(ctx sdk.Context, tokenA, tokenB sdk.Symbol, addr sd
 	return d
 }
 
-func (k Keeper) GetAddrUnfinishedOrders(ctx sdk.Context, tokenA, tokenB sdk.Symbol, addr sdk.CUAddress) []*types.Order {
-	if tokenA > tokenB {
-		tokenA, tokenB = tokenB, tokenA
-	}
-	prefix := types.GetUnfinishedOrderKeyPrefix(tokenA, tokenB, addr)
+func (k Keeper) GetAddrUnfinishedOrders(ctx sdk.Context, addr sdk.CUAddress, dexID uint32, tokenA, tokenB sdk.Symbol) []*types.Order {
+	tokenA, tokenB = k.SortToken(tokenA, tokenB)
+	prefix := types.UnfinishedOrderKeyPrefixWithPair(addr, dexID, tokenA, tokenB)
 	store := ctx.KVStore(k.storeKey)
 	iter := sdk.KVStorePrefixIterator(store, prefix)
 	var orders []*types.Order
@@ -502,14 +513,19 @@ func (k Keeper) GetAddrUnfinishedOrders(ctx sdk.Context, tokenA, tokenB sdk.Symb
 	return orders
 }
 
-func (k Keeper) getAddrAllLiquidity(ctx sdk.Context, addr sdk.CUAddress) []*types.AddrLiquidity {
+func (k Keeper) getAddrAllLiquidity(ctx sdk.Context, addr sdk.CUAddress, dexID *uint32) []*types.AddrLiquidity {
 	var ret []*types.AddrLiquidity
+	var prefix []byte
+	if dexID == nil {
+		prefix = types.AddrLiquidityKeyPrefix(addr)
+	} else {
+		prefix = types.AddrLiquidityKeyPrefixWithDexID(addr, *dexID)
+	}
 	store := ctx.KVStore(k.storeKey)
-	prefix := types.AddrLiquidityKeyPrefix(addr)
 	iter := sdk.KVStorePrefixIterator(store, prefix)
 	for ; iter.Valid(); iter.Next() {
-		tokenA, tokenB := types.DecodeTokensFromLiquidityKey(iter.Key(), prefix)
-		pair := k.GetTradingPair(ctx, tokenA, tokenB)
+		dexID, tokenA, tokenB := types.DecodeLiquidityKey(iter.Key())
+		pair := k.GetTradingPair(ctx, dexID, tokenA, tokenB)
 		var liquidity sdk.Int
 		k.cdc.MustUnmarshalBinaryBare(iter.Value(), &liquidity)
 		ret = append(ret, types.NewAddrLiquidity(pair, liquidity))
@@ -518,10 +534,10 @@ func (k Keeper) getAddrAllLiquidity(ctx sdk.Context, addr sdk.CUAddress) []*type
 	return ret
 }
 
-func (k Keeper) saveLiquidity(ctx sdk.Context, tokenA, tokenB sdk.Symbol, addr sdk.CUAddress, d sdk.Int) {
+func (k Keeper) saveLiquidity(ctx sdk.Context, addr sdk.CUAddress, dexID uint32, tokenA, tokenB sdk.Symbol, liquidity sdk.Int) {
 	store := ctx.KVStore(k.storeKey)
-	bz := k.cdc.MustMarshalBinaryBare(d)
-	store.Set(types.LiquidityKey(tokenA, tokenB, addr), bz)
+	bz := k.cdc.MustMarshalBinaryBare(liquidity)
+	store.Set(types.LiquidityKey(addr, dexID, tokenA, tokenB), bz)
 }
 
 func (k Keeper) GetReferer(ctx sdk.Context, addr sdk.CUAddress) (ret sdk.CUAddress) {
@@ -541,4 +557,38 @@ func (k Keeper) BindReferer(ctx sdk.Context, addr, referer sdk.CUAddress) {
 	store := ctx.KVStore(k.storeKey)
 	bz := k.cdc.MustMarshalBinaryBare(referer)
 	store.Set(types.RefererKey(addr), bz)
+}
+
+func (k Keeper) getRepurchaseFund(ctx sdk.Context, symbol string) sdk.Int {
+	store := ctx.KVStore(k.storeKey)
+	bz := store.Get(types.RepurchaseFundKey(symbol))
+	if len(bz) == 0 {
+		return sdk.ZeroInt()
+	}
+	var amount sdk.Int
+	k.cdc.MustUnmarshalBinaryBare(bz, &amount)
+	return amount
+}
+
+func (k Keeper) getRepurchaseFunds(ctx sdk.Context) sdk.Coins {
+	funds := sdk.NewCoins()
+	store := ctx.KVStore(k.storeKey)
+	iter := sdk.KVStorePrefixIterator(store, types.RepurchaseFundKeyPrefix)
+	for ; iter.Valid(); iter.Next() {
+		var amount sdk.Int
+		k.cdc.MustUnmarshalBinaryBare(iter.Value(), &amount)
+		symbol := types.GetSymbolFromRepurchaseFundKey(iter.Key())
+		funds = funds.Add(sdk.NewCoins(sdk.NewCoin(symbol, amount)))
+	}
+	iter.Close()
+	return funds
+}
+
+func (k Keeper) addRepurchaseFunds(ctx sdk.Context, coins sdk.Coins) {
+	store := ctx.KVStore(k.storeKey)
+	for _, coin := range coins {
+		amount := coin.Amount.Add(k.getRepurchaseFund(ctx, coin.Denom))
+		bz := k.cdc.MustMarshalBinaryBare(amount)
+		store.Set(types.RepurchaseFundKey(coin.Denom), bz)
+	}
 }

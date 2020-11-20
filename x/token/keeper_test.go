@@ -3,15 +3,17 @@ package token
 import (
 	"testing"
 
+	"github.com/tendermint/tendermint/crypto/secp256k1"
+
 	"github.com/hbtc-chain/bhchain/store"
 	"github.com/hbtc-chain/bhchain/x/evidence"
 	"github.com/hbtc-chain/bhchain/x/params"
 	stakingtypes "github.com/hbtc-chain/bhchain/x/staking/types"
-	"github.com/tendermint/tendermint/crypto/secp256k1"
 
-	"github.com/hbtc-chain/bhchain/x/token/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+
+	"github.com/hbtc-chain/bhchain/x/token/types"
 
 	abci "github.com/tendermint/tendermint/abci/types"
 
@@ -62,20 +64,6 @@ func (m *mockStakingKeeper) IsActiveKeyNode(_ sdk.Context, addr sdk.CUAddress) (
 	return false, len(m.validators)
 }
 
-func (m *mockStakingKeeper) GetCurrentEpoch(ctx sdk.Context) sdk.Epoch {
-	valSet := make([]sdk.CUAddress, 0)
-	for _, validator := range m.validators {
-		valSet = append(valSet, sdk.CUAddress(validator.OperatorAddress))
-	}
-	return sdk.Epoch{
-		Index:             1,
-		StartBlockNum:     1,
-		EndBlockNum:       0,
-		KeyNodeSet:        valSet,
-		MigrationFinished: true,
-	}
-}
-
 func (m *mockStakingKeeper) GetEpochByHeight(ctx sdk.Context, height uint64) sdk.Epoch {
 	valSet := make([]sdk.CUAddress, 0)
 	for _, validator := range m.validators {
@@ -99,7 +87,21 @@ func (m *mockStakingKeeper) JailByOperator(ctx sdk.Context, operator sdk.ValAddr
 	m.Called(ctx, operator)
 }
 
-func setupUnitTestEnv() testEnv {
+func (m *mockStakingKeeper) GetCurrentEpoch(ctx sdk.Context) sdk.Epoch {
+	valSet := make([]sdk.CUAddress, 0)
+	for _, validator := range m.validators {
+		valSet = append(valSet, sdk.CUAddress(validator.OperatorAddress))
+	}
+	return sdk.Epoch{
+		Index:             1,
+		StartBlockNum:     1,
+		EndBlockNum:       0,
+		KeyNodeSet:        valSet,
+		MigrationFinished: true,
+	}
+}
+
+func setupUnitTestEnv(initDefaultTokens ...bool) testEnv {
 	validators := []stakingtypes.Validator{
 		{
 			OperatorAddress: sdk.ValAddress(addr1),
@@ -148,19 +150,20 @@ func setupUnitTestEnv() testEnv {
 
 	pk := params.NewKeeper(cdc, keyParams, tkeyParams, "bhchain")
 
-	tk := NewKeeper(tokenKey, cdc, pk.Subspace(DefaultParamspace))
+	tk := NewKeeper(tokenKey, cdc)
 
 	stakingKeeper := newMockStakingKeeper(validators)
 	tk.SetStakingKeeper(stakingKeeper)
 	evidenceKeeper := evidence.NewKeeper(cdc, keyEvid, pk.Subspace(evidence.DefaultParamspace), stakingKeeper)
 	evidence.InitGenesis(ctx, evidenceKeeper, evidence.DefaultGenesisState())
 	tk.SetEvidenceKeeper(evidenceKeeper)
-
-	InitGenesis(ctx, tk, DefaultGenesisState())
-	//for s := range TestTokenData {
-	//	symbol := s
-	//	tk.SetTokenInfo(ctx, newTokenInfo(symbol))
-	//}
+	if len(initDefaultTokens) > 0 && initDefaultTokens[0] {
+		InitGenesis(ctx, tk, DefaultGenesisState())
+	} else {
+		for _, t := range TestTokenData {
+			tk.SetToken(ctx, t)
+		}
+	}
 
 	return testEnv{
 		tk:                tk,
@@ -179,62 +182,47 @@ func TestSetTokenInfo(t *testing.T) {
 	keeper := input.tk
 
 	for symbol := range TestTokenData {
-		keeper.SetTokenInfo(ctx, newTokenInfo(symbol))
+		keeper.SetToken(ctx, newTokenInfo(symbol))
 	}
 
-	for symbol, testToken := range TestTokenData {
-		assert.Equal(t, testToken.Symbol, keeper.GetSymbol(ctx, symbol))
-		assert.Equal(t, testToken.Issuer, keeper.GetIssuer(ctx, symbol))
-		assert.Equal(t, testToken.Chain, keeper.GetChain(ctx, symbol))
-		assert.Equal(t, testToken.TokenType, keeper.GetTokenType(ctx, symbol))
-		assert.Equal(t, testToken.IsSendEnabled, keeper.IsSendEnabled(ctx, symbol))
-		assert.Equal(t, testToken.IsDepositEnabled, keeper.IsDepositEnabled(ctx, symbol))
-		assert.Equal(t, testToken.IsWithdrawalEnabled, keeper.IsWithdrawalEnabled(ctx, symbol))
-		assert.Equal(t, testToken.Decimals, keeper.GetDecimals(ctx, symbol))
-		assert.Equal(t, testToken.TotalSupply, keeper.GetTotalSupply(ctx, symbol))
-		assert.Equal(t, testToken.CollectThreshold, keeper.GetCollectThreshold(ctx, symbol))
-		assert.Equal(t, testToken.OpenFee, keeper.GetOpenFee(ctx, symbol))
-		assert.Equal(t, testToken.SysOpenFee, keeper.GetSysOpenFee(ctx, symbol))
-		assert.Equal(t, testToken.WithdrawalFeeRate, keeper.GetWithdrawalFeeRate(ctx, symbol))
-		assert.Equal(t, testToken.DepositThreshold, keeper.GetDepositThreshold(ctx, symbol))
-		assert.Equal(t, testToken.MaxOpCUNumber, keeper.GetMaxOpCUNumber(ctx, symbol))
-		assert.Equal(t, testToken.GasLimit, keeper.GetGasLimit(ctx, symbol))
-		assert.Equal(t, testToken.OpCUSysTransferAmount(), keeper.GetOpCUSystransferAmount(ctx, symbol))
-		assert.Equal(t, testToken.SysTransferAmount(), keeper.GetSystransferAmount(ctx, symbol))
+	for symbol, testToken := range TestIBCTokens {
+		tk := keeper.GetIBCToken(ctx, symbol)
+		assert.Equal(t, testToken.Symbol, tk.Symbol)
+		assert.Equal(t, testToken.Issuer, tk.Issuer)
+		assert.Equal(t, testToken.Chain, tk.Chain)
+		assert.Equal(t, testToken.TokenType, tk.TokenType)
+		assert.Equal(t, testToken.SendEnabled, tk.SendEnabled)
+		assert.Equal(t, testToken.DepositEnabled, tk.DepositEnabled)
+		assert.Equal(t, testToken.WithdrawalEnabled, tk.WithdrawalEnabled)
+		assert.Equal(t, testToken.Decimals, tk.Decimals)
+		assert.Equal(t, testToken.TotalSupply, tk.TotalSupply)
+		assert.Equal(t, testToken.CollectThreshold, tk.CollectThreshold)
+		assert.Equal(t, testToken.OpenFee, tk.OpenFee)
+		assert.Equal(t, testToken.SysOpenFee, tk.SysOpenFee)
+		assert.Equal(t, testToken.WithdrawalFeeRate, tk.WithdrawalFeeRate)
+		assert.Equal(t, testToken.DepositThreshold, tk.DepositThreshold)
+		assert.Equal(t, testToken.MaxOpCUNumber, tk.MaxOpCUNumber)
+		assert.Equal(t, testToken.GasLimit, tk.GasLimit)
+		assert.Equal(t, testToken.OpCUSysTransferAmount(), tk.OpCUSysTransferAmount())
+		assert.Equal(t, testToken.SysTransferAmount(), tk.SysTransferAmount())
 	}
 
-	symbols := keeper.GetSymbols(ctx)
-	assert.Contains(t, symbols, BtcToken)
-	assert.Contains(t, symbols, EthToken)
-	assert.Contains(t, symbols, UsdtToken)
+	//set token info does not update ibc symbol list
+	//symbols := keeper.GetIBCTokenSymbols(ctx)
+	//
+	//assert.Contains(t, symbols, sdk.Symbol("btc"))
+	//assert.Contains(t, symbols, sdk.Symbol("eth"))
+	//assert.Contains(t, symbols, sdk.Symbol("usdt"))
 }
 
-func TestModifySend(t *testing.T) {
-	input := setupUnitTestEnv()
-	ctx := input.ctx
-	keeper := input.tk
-
-	keeper.SetTokenInfo(ctx, newTokenInfo(sdk.Symbol(BtcToken)))
-	assert.True(t, keeper.IsSendEnabled(ctx, sdk.Symbol(BtcToken)))
-
-	keeper.EnableSend(ctx, sdk.Symbol(BtcToken))
-	assert.True(t, keeper.IsSendEnabled(ctx, sdk.Symbol(BtcToken)))
-
-	keeper.DisableSend(ctx, sdk.Symbol(BtcToken))
-	assert.False(t, keeper.IsSendEnabled(ctx, sdk.Symbol(BtcToken)))
-}
-
-func newTokenInfo(symbol sdk.Symbol) *sdk.TokenInfo {
+func newTokenInfo(symbol sdk.Symbol) sdk.Token {
 	t, ok := TestTokenData[symbol]
 	if !ok {
 		return nil
 	}
-	return NewTokenInfo(t.Symbol, t.Chain, t.Issuer, t.TokenType,
-		t.IsSendEnabled, t.IsDepositEnabled, t.IsWithdrawalEnabled, t.Decimals,
-		t.TotalSupply, t.CollectThreshold, t.DepositThreshold, t.OpenFee,
-		t.SysOpenFee, t.WithdrawalFeeRate, t.SysTransferNum, t.OpCUSysTransferNum,
-		t.GasLimit, t.GasPrice, t.MaxOpCUNumber, t.Confirmations, t.IsNonceBased)
-
+	return t
+	// nt := *t
+	// return &nt
 }
 
 func TestTokenInfoEncoding(t *testing.T) {
@@ -243,7 +231,7 @@ func TestTokenInfoEncoding(t *testing.T) {
 
 	for _, info := range TestTokenData {
 		bz := keeper.cdc.MustMarshalBinaryBare(info)
-		var tokenInfo sdk.TokenInfo
+		var tokenInfo sdk.Token
 		keeper.cdc.MustUnmarshalBinaryBare(bz, &tokenInfo)
 		assert.Equal(t, info, tokenInfo)
 	}
@@ -255,39 +243,14 @@ func TestKeeper_IsErc20Utxo(t *testing.T) {
 	keeper := input.tk
 
 	for symbol := range TestTokenData {
-		keeper.SetTokenInfo(ctx, newTokenInfo(symbol))
+		keeper.SetToken(ctx, newTokenInfo(symbol))
 	}
 
-	assert.True(t, keeper.IsSubToken(ctx, sdk.Symbol(UsdtToken)))
-	assert.False(t, keeper.IsSubToken(ctx, sdk.Symbol(BtcToken)))
-	assert.False(t, keeper.IsSubToken(ctx, sdk.Symbol(EthToken)))
+	assert.True(t, keeper.IsSubToken(ctx, testUsdtSymbol))
+	assert.False(t, keeper.IsSubToken(ctx, "aa"))
+	assert.False(t, keeper.IsSubToken(ctx, "bb"))
 
-	assert.True(t, keeper.IsUtxoBased(ctx, sdk.Symbol(BtcToken)))
-	assert.False(t, keeper.IsUtxoBased(ctx, sdk.Symbol(UsdtToken)))
-	assert.False(t, keeper.IsUtxoBased(ctx, sdk.Symbol(EthToken)))
-}
-
-func TestKeeper_EnableSendDepositWithdrawal(t *testing.T) {
-	input := setupUnitTestEnv()
-	keeper := input.tk
-	ctx := input.ctx
-	for symbol := range TestTokenData {
-		keeper.SetTokenInfo(ctx, newTokenInfo(symbol))
-	}
-
-	keeper.DisableSend(ctx, sdk.Symbol(EthToken))
-	keeper.DisableWithdrawal(ctx, sdk.Symbol(EthToken))
-	keeper.DisableDeposit(ctx, sdk.Symbol(EthToken))
-	onSend := keeper.IsSendEnabled(ctx, sdk.Symbol(EthToken))
-	onWithdrawal := keeper.IsWithdrawalEnabled(ctx, sdk.Symbol(EthToken))
-	onDeposit := keeper.IsDepositEnabled(ctx, sdk.Symbol(EthToken))
-	assert.EqualValues(t, false, onSend, onWithdrawal, onDeposit)
-
-	keeper.EnableSend(ctx, sdk.Symbol(EthToken))
-	keeper.EnableWithdrawal(ctx, sdk.Symbol(EthToken))
-	keeper.EnableDeposit(ctx, sdk.Symbol(EthToken))
-	onSend = keeper.IsSendEnabled(ctx, sdk.Symbol(EthToken))
-	onWithdrawal = keeper.IsWithdrawalEnabled(ctx, sdk.Symbol(EthToken))
-	onDeposit = keeper.IsDepositEnabled(ctx, sdk.Symbol(EthToken))
-	assert.EqualValues(t, true, onSend, onWithdrawal, onDeposit)
+	assert.True(t, keeper.GetIBCToken(ctx, testBtcSymbol).TokenType == sdk.UtxoBased)
+	assert.False(t, keeper.GetIBCToken(ctx, testUsdtSymbol).TokenType == sdk.UtxoBased)
+	assert.False(t, keeper.GetIBCToken(ctx, testEthSymbol).TokenType == sdk.UtxoBased)
 }

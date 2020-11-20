@@ -1,9 +1,58 @@
 package keeper
 
 import (
+	"fmt"
+
 	sdk "github.com/hbtc-chain/bhchain/types"
+	distrtypes "github.com/hbtc-chain/bhchain/x/distribution/types"
 	"github.com/hbtc-chain/bhchain/x/params"
+	paramstypes "github.com/hbtc-chain/bhchain/x/params/types"
 )
+
+var (
+	minBaseProposerReward = sdk.NewDecWithPrec(5, 2)
+	maxBaseProposerReward = sdk.NewDecWithPrec(15, 2)
+	minKeyNodeReward      = sdk.NewDecWithPrec(5, 2)
+	maxKeyNodeReward      = sdk.NewDecWithPrec(15, 2)
+)
+
+type ParameterChangeValidator struct {
+}
+
+func init() {
+	params.RegisterParameterChangeValidator(&ParameterChangeValidator{})
+}
+
+func (p *ParameterChangeValidator) Validate(change paramstypes.ParamChange) error {
+	if change.Subspace != DefaultParamspace {
+		return nil
+	}
+	bz := []byte(change.Value)
+	switch change.Key {
+	case string(ParamStoreKeyBaseProposerReward):
+		var value sdk.Dec
+		err := distrtypes.ModuleCdc.UnmarshalJSON(bz, &value)
+		if err != nil {
+			return err
+		}
+		if value.GT(maxBaseProposerReward) || value.LT(minBaseProposerReward) {
+			return fmt.Errorf("BaseProposerReward out of range")
+		}
+
+	case string(ParamStoreKeyKeyNodeReward):
+		var value sdk.Dec
+		err := distrtypes.ModuleCdc.UnmarshalJSON(bz, &value)
+		if err != nil {
+			return err
+		}
+		if value.GT(maxKeyNodeReward) || value.LT(minKeyNodeReward) {
+			return fmt.Errorf("KeyNodeReward out of range")
+		}
+	default:
+		return nil
+	}
+	return nil
+}
 
 // type declaration for parameters
 func ParamKeyTable() params.KeyTable {
@@ -12,6 +61,7 @@ func ParamKeyTable() params.KeyTable {
 		ParamStoreKeyBaseProposerReward, sdk.Dec{},
 		ParamStoreKeyBonusProposerReward, sdk.Dec{},
 		ParamStoreKeyWithdrawAddrEnabled, false,
+		ParamStoreKeyKeyNodeReward, sdk.Dec{},
 	)
 }
 
@@ -65,4 +115,16 @@ func (k Keeper) GetWithdrawAddrEnabled(ctx sdk.Context) bool {
 // nolint: errcheck
 func (k Keeper) SetWithdrawAddrEnabled(ctx sdk.Context, enabled bool) {
 	k.paramSpace.Set(ctx, ParamStoreKeyWithdrawAddrEnabled, &enabled)
+}
+
+// nolint: errcheck
+func (k Keeper) GetKeyNodeReward(ctx sdk.Context) sdk.Dec {
+	var percent sdk.Dec
+	k.paramSpace.Get(ctx, ParamStoreKeyKeyNodeReward, &percent)
+	return percent
+}
+
+// nolint: errcheck
+func (k Keeper) SetKeyNodeReward(ctx sdk.Context, percent sdk.Dec) {
+	k.paramSpace.Set(ctx, ParamStoreKeyKeyNodeReward, &percent)
 }

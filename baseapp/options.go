@@ -3,8 +3,9 @@ package baseapp
 
 import (
 	"fmt"
-	dbm "github.com/tendermint/tm-db"
 	"strings"
+
+	dbm "github.com/tendermint/tm-db"
 
 	"github.com/hbtc-chain/bhchain/store"
 	sdk "github.com/hbtc-chain/bhchain/types"
@@ -103,6 +104,13 @@ func (app *BaseApp) SetAnteHandler(ah sdk.AnteHandler) {
 		panic("SetAnteHandler() on sealed BaseApp")
 	}
 	app.anteHandler = ah
+}
+
+func (app *BaseApp) SetGasRefundHandler(gh sdk.GasRefundHandler) {
+	if app.sealed {
+		panic("SetGasRefundHandler() on sealed BaseApp")
+	}
+	app.gasRefundHandler = gh
 }
 
 func (app *BaseApp) SetAddrPeerFilter(pf sdk.PeerFilter) {

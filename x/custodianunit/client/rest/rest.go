@@ -11,9 +11,6 @@ func RegisterRoutes(cliCtx context.CLIContext, r *mux.Router, storeName string) 
 	r.HandleFunc(
 		"/cu/cus/{address}", QueryCURequestHandlerFn(storeName, cliCtx),
 	).Methods("GET")
-	r.HandleFunc(
-		"/cu/pending_deposit/{address}", QueryPendingDepositRequestHandlerFn(storeName, cliCtx),
-	).Methods("GET")
 }
 
 // RegisterTxRoutes registers all transaction routes on the provided router.

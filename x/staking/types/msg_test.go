@@ -41,7 +41,7 @@ func TestMsgCreateValidator(t *testing.T) {
 
 	for _, tc := range tests {
 		description := NewDescription(tc.moniker, tc.identity, tc.website, tc.details)
-		msg := NewMsgCreateValidator(tc.validatorAddr, tc.pubkey, tc.bond, description, tc.CommissionRates, tc.minSelfDelegation, true)
+		msg := NewMsgCreateValidator(tc.validatorAddr, tc.pubkey, tc.bond, description, tc.CommissionRates, tc.minSelfDelegation)
 		if tc.expectPass {
 			require.Nil(t, msg.ValidateBasic(), "test: %v", tc.name)
 		} else {
@@ -68,7 +68,7 @@ func TestMsgEditValidator(t *testing.T) {
 		newRate := sdk.ZeroDec()
 		newMinSelfDelegation := sdk.OneInt()
 
-		msg := NewMsgEditValidator(tc.validatorAddr, description, &newRate, &newMinSelfDelegation, nil)
+		msg := NewMsgEditValidator(tc.validatorAddr, description, &newRate, &newMinSelfDelegation)
 		if tc.expectPass {
 			require.Nil(t, msg.ValidateBasic(), "test: %v", tc.name)
 		} else {

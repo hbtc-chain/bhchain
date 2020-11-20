@@ -17,10 +17,7 @@ func EndBlocker(ctx sdk.Context, k keeper.Keeper) []abci.ValidatorUpdate {
 	// unbonded after the Endblocker (go from Bonded -> Unbonding during
 	// ApplyAndReturnValidatorSetUpdates and then Unbonding -> Unbonded during
 	// UnbondAllMatureValidatorQueue).
-	validatorUpdates := []abci.ValidatorUpdate{}
-	if (uint64(ctx.BlockHeight())%k.ElectionPeriod(ctx) == 0 || k.ReachJailQueueLimit(ctx)) && k.IsMigrationFinished(ctx) {
-		validatorUpdates = k.ApplyAndReturnValidatorSetUpdates(ctx)
-	}
+	validatorUpdates := k.ApplyAndReturnValidatorSetUpdates(ctx)
 
 	// Unbond all mature validators from the unbonding queue.
 	k.UnbondAllMatureValidatorQueue(ctx)

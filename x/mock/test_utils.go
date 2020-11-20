@@ -45,9 +45,7 @@ func RandFromBigInterval(r *rand.Rand, intervals []BigInterval) sdk.Int {
 // CheckBalance checks the balance of an CU.
 func CheckBalance(t *testing.T, app *App, addr sdk.CUAddress, exp sdk.Coins) {
 	ctxCheck := app.BaseApp.NewContext(true, abci.Header{})
-	res := app.CUKeeper.GetCU(ctxCheck, addr)
-
-	require.Equal(t, exp, res.GetCoins())
+	require.Equal(t, exp, app.TransferKeeper.GetAllBalance(ctxCheck, addr))
 }
 
 // CheckGenTx checks a generated signed transaction. The result of the check is

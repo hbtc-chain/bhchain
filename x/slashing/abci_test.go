@@ -13,7 +13,7 @@ import (
 )
 
 func TestBeginBlocker(t *testing.T) {
-	ctx, ck, sk, _, keeper := createTestInput(t, DefaultParams())
+	ctx, trk, sk, _, keeper := createTestInput(t, DefaultParams())
 	power := int64(1000000)
 	amt := sdk.TokensFromConsensusPower(power)
 	addr, pk := addrs[2], pks[2]
@@ -22,8 +22,9 @@ func TestBeginBlocker(t *testing.T) {
 	got := staking.NewHandler(sk)(ctx, NewTestMsgCreateValidator(addr, pk, amt))
 	require.True(t, got.IsOK())
 	staking.EndBlocker(ctx, sk)
+
 	require.Equal(
-		t, ck.GetCoins(ctx, sdk.CUAddress(addr)),
+		t, trk.GetAllBalance(ctx, sdk.CUAddress(addr)),
 		sdk.NewCoins(sdk.NewCoin(sk.GetParams(ctx).BondDenom, initTokens.Sub(amt))),
 	)
 	require.Equal(t, amt, sk.Validator(ctx, addr).GetBondedTokens())
