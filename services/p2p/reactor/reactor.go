@@ -21,6 +21,8 @@ const (
 	maxMsgSize = 1048576 // 1MB; NOTE/TODO: keep in sync with types.PartSet sizes.
 
 	maxMarkMapSize = 100000
+
+	maxCachedSigs = 100000
 )
 
 var _ p2p.Reactor = (*BHReactor)(nil)
@@ -32,6 +34,7 @@ type BHReactor struct {
 
 	localBHMsgFeed    *event.Feed // message from grpc stream
 	incomingBHMsgFeed *event.Feed // message from p2p networ
+	sigs              map[Hash]bool
 
 	peerMap map[p2p.ID]*peerWithMark
 
@@ -67,6 +70,7 @@ func NewBHReactor(logger log.Logger) *BHReactor {
 		localBHMsgFeed:    &event.Feed{},
 		incomingBHMsgFeed: &event.Feed{},
 		peerMap:           make(map[p2p.ID]*peerWithMark),
+		sigs:              make(map[Hash]bool),
 	}
 	bhR.BaseReactor = *p2p.NewBaseReactor("BHMsgReactor", bhR)
 
@@ -187,7 +191,11 @@ func (bhR *BHReactor) Receive(chID byte, src p2p.Peer, msgBytes []byte) {
 
 	p.markBHMsg(toHash(msg.Payload))
 
-	bhR.incomingBHMsgFeed.Send(msg)
+	sigHash := toHash(msg.Signature)
+	if !bhR.marked(sigHash) {
+		bhR.markSigs(sigHash)
+		bhR.incomingBHMsgFeed.Send(msg)
+	}
 }
 
 func (bhR *BHReactor) Communicate(stream pb.P2PService_CommunicateServer) error {
@@ -223,4 +231,20 @@ func (bhR *BHReactor) Communicate(stream pb.P2PService_CommunicateServer) error 
 			return err
 		}
 	}
+}
+
+func (bhR *BHReactor) markSigs(hash Hash) {
+	bhR.mtx.Lock()
+	defer bhR.mtx.Unlock()
+	if len(bhR.sigs) >= maxCachedSigs {
+		bhR.sigs = make(map[Hash]bool)
+	}
+	bhR.sigs[hash] = true
+}
+
+func (bhR *BHReactor) marked(hash Hash) bool {
+	bhR.mtx.RLock()
+	defer bhR.mtx.RUnlock()
+
+	return bhR.sigs[hash]
 }

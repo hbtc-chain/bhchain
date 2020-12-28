@@ -64,6 +64,9 @@ func ParseAddTokenProposalJSON(cdc *codec.Codec, proposalFile string) (AddTokenP
 	if err := cdc.UnmarshalJSON(contents, &proposal); err != nil {
 		return proposal, err
 	}
+	if proposal.TokenInfo.Symbol != proposal.TokenInfo.Chain {
+		proposal.TokenInfo.Symbol = types.CalSymbol(proposal.TokenInfo.Issuer, proposal.TokenInfo.Chain)
+	}
 
 	return proposal, nil
 }

@@ -91,6 +91,10 @@ func (msg MsgCreateDirectSwap) ValidateBasic() sdk.Error {
 		return sdk.ErrInvalidAmount(fmt.Sprintf("swap count invalid:%v, %v", msg.SwapInfo.Amount, msg.SwapInfo.SwapAmount))
 	}
 
+	if len(msg.SwapInfo.Desc) > MaxDescLength {
+		return sdk.ErrInvalidTx("description too long")
+	}
+
 	return nil
 }
 
@@ -140,6 +144,10 @@ func (msg MsgCreateFreeSwap) ValidateBasic() sdk.Error {
 	if msg.SwapInfo.TotalAmount.LTE(sdk.ZeroInt()) || msg.SwapInfo.MinSwapAmount.LTE(sdk.ZeroInt()) ||
 		msg.SwapInfo.MaxSwapAmount.LTE(sdk.ZeroInt()) || msg.SwapInfo.MaxSwapAmount.LT(msg.SwapInfo.MinSwapAmount) {
 		return sdk.ErrInvalidAmount(fmt.Sprintf("swap count invalid:%v, %v", msg.SwapInfo.MinSwapAmount, msg.SwapInfo.MaxSwapAmount))
+	}
+
+	if len(msg.SwapInfo.Desc) > MaxDescLength {
+		return sdk.ErrInvalidTx("description too long")
 	}
 
 	return nil

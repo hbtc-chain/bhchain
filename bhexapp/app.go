@@ -210,7 +210,7 @@ func Newbhexapp(
 	app.keygenKeeper = keygen.NewKeeper(keys[keygen.StoreKey], app.cdc, &app.tokenKeeper, app.cuKeeper, app.ibcassetKeeper, &app.orderKeeper, &app.receiptKeeper, &stakingKeeper, app.distrKeeper, app.transferKeeper, cn)
 	app.tokenKeeper.SetStakingKeeper(&stakingKeeper)
 
-	app.hrc10Keeper = hrc10.NewKeeper(app.cdc, keys[hrc10.StoreKey], hrc10Subspace, &app.tokenKeeper,  app.distrKeeper, app.supplyKeeper, &app.receiptKeeper, app.transferKeeper)
+	app.hrc10Keeper = hrc10.NewKeeper(app.cdc, keys[hrc10.StoreKey], hrc10Subspace, &app.tokenKeeper, app.distrKeeper, app.supplyKeeper, &app.receiptKeeper, app.transferKeeper)
 	app.mappingKeeper = mapping.NewKeeper(keys[mapping.StoreKey], app.cdc, &app.tokenKeeper, app.cuKeeper, &app.receiptKeeper, app.transferKeeper, mappingSubspace)
 	app.evidenceKeeper = evidence.NewKeeper(app.cdc, keys[evidence.StoreKey], evidenceSubspace, &stakingKeeper)
 
@@ -253,7 +253,7 @@ func Newbhexapp(
 		genutil.NewAppModule(app.cuKeeper, app.stakingKeeper, app.BaseApp.DeliverTx),
 		custodianunit.NewAppModule(app.cuKeeper),
 		crisis.NewAppModule(&app.crisisKeeper),
-		supply.NewAppModule(*app.supplyKeeper, app.cuKeeper),
+		supply.NewAppModule(*app.supplyKeeper, app.cuKeeper, app.transferKeeper),
 		distr.NewAppModule(app.distrKeeper, app.supplyKeeper),
 		gov.NewAppModule(app.govKeeper, app.supplyKeeper),
 		mint.NewAppModule(app.mintKeeper),

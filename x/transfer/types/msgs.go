@@ -595,7 +595,6 @@ func (msg MsgWithdrawal) ValidateBasic() sdk.Error {
 	if msg.OrderID == "" {
 		return ErrNilOrderID(DefaultCodespace)
 	}
-	//TODO(Keep), add symbol's check later
 
 	if !msg.Amount.IsPositive() {
 		return sdk.ErrInvalidAmount("amount is not positive")

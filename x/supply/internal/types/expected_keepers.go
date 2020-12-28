@@ -15,6 +15,7 @@ type CUKeeper interface {
 
 // BankKeeper defines the expected bank keeper (noalias)
 type TransferKeeper interface {
+	GetAllBalance(ctx sdk.Context, addr sdk.CUAddress) sdk.Coins
 	SendCoins(ctx sdk.Context, fromAddr sdk.CUAddress, toAddr sdk.CUAddress, amt sdk.Coins) (sdk.Result, []sdk.Flow, sdk.Error)
 	DelegateCoins(ctx sdk.Context, fromAdd, toAddr sdk.CUAddress, amt sdk.Coins) (sdk.Result, sdk.Error)
 	UndelegateCoins(ctx sdk.Context, fromAddr, toAddr sdk.CUAddress, amt sdk.Coins) (sdk.Result, sdk.Error)

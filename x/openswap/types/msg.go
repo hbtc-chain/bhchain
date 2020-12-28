@@ -277,7 +277,7 @@ func (msg MsgAddLiquidity) ValidateBasic() sdk.Error {
 	if msg.TokenA == msg.TokenB {
 		return sdk.ErrInvalidSymbol("token a and token b cannot be equal")
 	}
-	if !msg.MaxTokenAAmount.IsPositive() || !msg.MaxTokenAAmount.IsPositive() {
+	if !msg.MaxTokenAAmount.IsPositive() || !msg.MaxTokenBAmount.IsPositive() {
 		return sdk.ErrInvalidAmount("token amount should be positive")
 	}
 	return nil

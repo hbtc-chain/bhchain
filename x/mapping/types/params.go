@@ -11,6 +11,8 @@ import (
 
 var (
 	DefaultNewMappingFee = sdk.NewInt(10)
+
+	MaxDescLength = 1000
 )
 
 var (

@@ -52,10 +52,6 @@ func (keeper BaseKeeper) Withdrawal(ctx sdk.Context, fromCUAddr sdk.CUAddress, t
 		return sdk.ErrInsufficientFee(fmt.Sprintf("need:%v, actual have:%v", tokenInfo.WithdrawalFee(), gasFee)).Result()
 	}
 
-	if !amt.IsPositive() {
-		return sdk.ErrInvalidAmount(fmt.Sprintf("amt:%v", amt)).Result()
-	}
-
 	feeCoins := sdk.NewCoins(sdk.NewCoin(chain, gasFee))
 	coins := sdk.NewCoins(sdk.NewCoin(symbol, amt))
 	need := coins.Add(feeCoins)
@@ -443,8 +439,8 @@ func (keeper BaseKeeper) WithdrawalFinish(ctx sdk.Context, fromCUAddr sdk.CUAddr
 		return err.Result()
 	}
 
-	withdrawalOrder, valid := ord.(*sdk.OrderWithdrawal)
-	if !valid {
+	withdrawalOrder, ok := ord.(*sdk.OrderWithdrawal)
+	if !ok {
 		err := sdk.ErrInvalidOrder(fmt.Sprintf("order %v is not withdrawal order", orderIDs[0]))
 		return err.Result()
 	}

@@ -109,7 +109,6 @@ func (keeper BaseKeeper) OpcuAssetTransfer(ctx sdk.Context, opCUAddr sdk.CUAddre
 				keeper.ik.DelDeposit(ctx, symbol, opCUAddr, item.Hash, item.Index)
 			}
 			burnedCoins := sdk.NewCoins(sdk.NewCoin(symbol, sum))
-			opCUAst.SubAssetCoins(burnedCoins)
 			opCUAst.AddGasUsed(burnedCoins)
 			keeper.ik.SetCUIBCAsset(ctx, opCUAst)
 			if keeper.checkUtxoOpcuAstTransferFinish(ctx, fromAddr, symbol, opCUAddr) {
@@ -143,7 +142,6 @@ func (keeper BaseKeeper) OpcuAssetTransfer(ctx sdk.Context, opCUAddr sdk.CUAddre
 
 		if symbol == chain {
 			if items[0].Amount.LT(tokenInfo.SysTransferAmount()) {
-				opCUAst.SubAssetCoins(sdk.NewCoins(sdk.NewCoin(chain, items[0].Amount)))
 				opCUAst.AddGasUsed(sdk.NewCoins(sdk.NewCoin(chain, items[0].Amount)))
 				opCUAst.SetMigrationStatus(sdk.MigrationFinish)
 				keeper.ik.SetCUIBCAsset(ctx, opCUAst)
@@ -210,6 +208,8 @@ func (keeper BaseKeeper) OpcuAssetTransferWaitSign(ctx sdk.Context, orderID stri
 	priceUpLimit := sdk.NewDecFromInt(gasPrice).Mul(PriceUpLimitRatio)
 	priceLowLimit := sdk.NewDecFromInt(gasPrice).Mul(PriceLowLimitRatio)
 
+	var transferCoins sdk.Coins
+
 	switch tokenInfo.TokenType {
 	case sdk.UtxoBased:
 		//formulate the vins
@@ -217,6 +217,7 @@ func (keeper BaseKeeper) OpcuAssetTransferWaitSign(ctx sdk.Context, orderID stri
 		if err != nil {
 			return sdk.ErrInvalidTx(err.Error()).Result()
 		}
+		amt := sdk.ZeroInt()
 		for _, vin := range vins {
 			item := keeper.ik.GetDeposit(ctx, symbol, opCUAst.GetAddress(), vin.Hash, vin.Index)
 			if item == sdk.DepositNil {
@@ -229,7 +230,10 @@ func (keeper BaseKeeper) OpcuAssetTransferWaitSign(ctx sdk.Context, orderID stri
 
 			vin.Address = item.ExtAddress
 			vin.Amount = item.Amount
+			amt = amt.Add(vin.Amount)
 		}
+
+		transferCoins = sdk.NewCoins(sdk.NewCoin(symbol, amt))
 
 		if len(vins) != len(order.TransfertItems) {
 			return sdk.ErrInvalidTx(fmt.Sprintf("opcu transfer vins(%d) not match", len(vins))).Result()
@@ -306,6 +310,7 @@ func (keeper BaseKeeper) OpcuAssetTransferWaitSign(ctx sdk.Context, orderID stri
 		if !expectAmount.Equal(order.TransfertItems[0].Amount) {
 			return sdk.ErrInvalidTx(fmt.Sprintf("Unexpected opcu asset transfer Amount:%v, expected:%v", expectAmount, order.TransfertItems[0].Amount)).Result()
 		}
+		transferCoins = sdk.NewCoins(sdk.NewCoin(symbol, order.TransfertItems[0].Amount))
 
 		validContractAddr := ""
 		if tokenInfo.Issuer != "" {
@@ -362,6 +367,9 @@ func (keeper BaseKeeper) OpcuAssetTransferWaitSign(ctx sdk.Context, orderID stri
 	order.RawData = make([]byte, len(rawData))
 	copy(order.RawData, rawData)
 	keeper.ok.SetOrder(ctx, order)
+
+	opCUAst.SubAssetCoins(transferCoins)
+	keeper.ik.SetCUIBCAsset(ctx, opCUAst)
 
 	var flows []sdk.Flow
 	flows = append(flows, keeper.rk.NewOrderFlow(sdk.Symbol(symbol), order.GetCUAddress(), orderID, sdk.OrderTypeOpcuAssetTransfer, sdk.OrderStatusWaitSign))
@@ -462,6 +470,7 @@ func (keeper BaseKeeper) OpcuAssetTransferFinish(ctx sdk.Context, fromCUAddr sdk
 			return sdk.ErrInvalidTx(err.Error()).Result()
 		}
 
+		inSum := sdk.ZeroInt()
 		for _, vin := range vins {
 			item := keeper.ik.GetDeposit(ctx, symbol, opCUAst.GetAddress(), vin.Hash, vin.Index)
 			if item == sdk.DepositNil {
@@ -474,6 +483,7 @@ func (keeper BaseKeeper) OpcuAssetTransferFinish(ctx sdk.Context, fromCUAddr sdk
 
 			vin.Address = item.ExtAddress
 			vin.Amount = item.Amount
+			inSum = inSum.Add(vin.Amount)
 		}
 
 		tx, err := keeper.cn.QueryUtxoTransactionFromSignedData(chain, symbol, order.SignedTx, vins)
@@ -481,6 +491,7 @@ func (keeper BaseKeeper) OpcuAssetTransferFinish(ctx sdk.Context, fromCUAddr sdk
 			return sdk.ErrInvalidTx(fmt.Sprintf("Fail to get transaction from signed transaction:%v", order.SignedTx)).Result()
 		}
 
+		outSum := sdk.ZeroInt()
 		//check the change and update deposit item's status
 		for i, vout := range tx.Vouts {
 			if order.ToAddr == vout.Address {
@@ -491,6 +502,7 @@ func (keeper BaseKeeper) OpcuAssetTransferFinish(ctx sdk.Context, fromCUAddr sdk
 					return sdk.ErrInvalidOrder(fmt.Sprintf("fail to create deposit item, %v %v %v", vin.Hash, vin.Index, vin.Amount)).Result()
 				}
 				_ = keeper.ik.SaveDeposit(ctx, symbol, opCUAst.GetAddress(), depositItem)
+				outSum = outSum.Add(vout.Amount)
 			}
 		}
 
@@ -503,17 +515,27 @@ func (keeper BaseKeeper) OpcuAssetTransferFinish(ctx sdk.Context, fromCUAddr sdk
 			keeper.ik.DelDeposit(ctx, symbol, order.GetCUAddress(), vin.Hash, vin.Index)
 		}
 
-		opCUAst.SubAssetCoins(sdk.NewCoins(sdk.NewCoin(chain, costFee)))
-		opCUAst.AddGasUsed(sdk.NewCoins(sdk.NewCoin(chain, costFee)))
+		fee := inSum.Sub(outSum)
+		opCUAst.AddAssetCoins(sdk.NewCoins(sdk.NewCoin(chain, outSum)))
+		opCUAst.AddGasUsed(sdk.NewCoins(sdk.NewCoin(chain, fee)))
 
 		if keeper.checkUtxoOpcuAstTransferFinish(ctx, lastAsset.Address, symbol, opCUAst.GetAddress()) {
 			opCUAst.SetMigrationStatus(sdk.MigrationFinish)
 		}
 
 	case sdk.AccountBased:
-		//update opcu's assetcoinshold, and refund unused gas fee if necessary
+		tx, err := keeper.cn.QueryAccountTransactionFromSignedData(chain, symbol, order.SignedTx)
+		if err != nil {
+			return sdk.ErrInvalidTx(fmt.Sprintf("Fail to get transaction from signed transaction:%v", order.SignedTx)).Result()
+		}
 		feeCoins := sdk.NewCoins(sdk.NewCoin(chain, costFee))
-		opCUAst.SubAssetCoins(feeCoins)
+		if chain == symbol {
+			feeCoins = sdk.NewCoins(sdk.NewCoin(chain, order.TransfertItems[0].Amount.Sub(tx.Amount)))
+		} else {
+			opCUAst.SubAssetCoins(feeCoins)
+		}
+		//update opcu's assetcoinshold, and refund unused gas fee if necessary
+		opCUAst.AddAssetCoins(sdk.NewCoins(sdk.NewCoin(symbol, tx.Amount)))
 		opCUAst.AddGasUsed(feeCoins)
 
 		if symbol != chain {

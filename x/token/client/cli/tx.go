@@ -36,15 +36,17 @@ Where proposal.json contains:
   "description": "add a new token in",
   "votetime": "86400",
   "token_info":{
-  	"name": "usdt",
-  	"issuer": "0xC9476A4919a7E5c7e1760b68F945971769D5c1D8",
-  	"chain": "eth",
+    "BaseToken": {
+        "name": "usdt",
+  	    "issuer": "0xC9476A4919a7E5c7e1760b68F945971769D5c1D8",
+  	    "chain": "eth",
+		"send_enabled": true,
+		"decimals": "6",
+		"total_supply": "30000000000000000"
+	},
   	"type": "2",
-  	"send_enabled": true,
   	"deposit_enabled": true,
   	"withdrawal_enabled": true,
-  	"decimals": "6",
-  	"total_supply": "30000000000000000",
   	"collect_threshold": "200000000",
   	"deposit_threshold": "200000000",
   	"open_fee": "28000000000000000000",

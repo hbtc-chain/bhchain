@@ -24,7 +24,7 @@ const (
 	// Default maximum entries in a UBD/RED pair
 	DefaultMaxEntries uint16 = 7
 
-	DefaultMaxKeyNodes uint16 = 7
+	DefaultMaxKeyNodes uint16 = 15
 
 	DefaultMaxCandidateKeyNodeHeartbeatInterval uint64 = 100
 )

@@ -1,14 +1,9 @@
 package token
 
 import (
-	"crypto/sha256"
 	"errors"
 	"fmt"
-	"strings"
 
-	"golang.org/x/crypto/ripemd160"
-
-	"github.com/hbtc-chain/bhchain/base58"
 	"github.com/hbtc-chain/bhchain/codec"
 	sdk "github.com/hbtc-chain/bhchain/types"
 	govtypes "github.com/hbtc-chain/bhchain/x/gov/types"
@@ -23,8 +18,8 @@ func handleAddTokenProposal(ctx sdk.Context, keeper Keeper, proposal types.AddTo
 		return sdk.ErrInvalidSymbol(fmt.Sprintf("chain cannot be %s", tokenInfo.Chain)).Result()
 	}
 
-	if tokenInfo.Symbol != tokenInfo.Chain {
-		tokenInfo.Symbol = calSymbol(tokenInfo.Issuer, tokenInfo.Chain)
+	if tokenInfo.Symbol != tokenInfo.Chain && tokenInfo.Symbol != types.CalSymbol(tokenInfo.Issuer, tokenInfo.Chain) {
+		return sdk.ErrInvalidSymbol("invalid symbol").Result()
 	}
 
 	//symbol already exist
@@ -52,23 +47,6 @@ func handleAddTokenProposal(ctx sdk.Context, keeper Keeper, proposal types.AddTo
 		),
 	)
 	return sdk.Result{Events: ctx.EventManager().Events()}
-}
-
-func calSymbol(issuer string, chain sdk.Symbol) sdk.Symbol {
-	payload := []byte(fmt.Sprintf("%s-%s", chain, issuer))
-	hasherSHA256 := sha256.New()
-	hasherSHA256.Write(payload)
-	sha := hasherSHA256.Sum(nil)
-
-	hasherRIPEMD160 := ripemd160.New()
-	hasherRIPEMD160.Write(sha)
-	bz := hasherRIPEMD160.Sum(nil)
-
-	sum := base58.Checksum(bz)
-	bz = append(bz, sum[:]...)
-
-	symbol := strings.ToUpper(chain.String()) + base58.Encode(bz)
-	return sdk.Symbol(symbol)
 }
 
 func processBaseTokenChangeParam(key, value string, ti *sdk.BaseToken, cdc *codec.Codec) error {

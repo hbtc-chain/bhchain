@@ -8,6 +8,7 @@ import (
 	abci "github.com/tendermint/tendermint/abci/types"
 
 	sdk "github.com/hbtc-chain/bhchain/types"
+	"github.com/hbtc-chain/bhchain/x/token/types"
 )
 
 type GenesisState struct {
@@ -62,7 +63,7 @@ func DefaultGenesisState() GenesisState {
 			CollectThreshold:   sdk.NewIntWithDecimal(1, 6),  // btc
 			OpenFee:            sdk.NewIntWithDecimal(1, 16), // nativeToken
 			SysOpenFee:         sdk.ZeroInt(),                // nativeToken
-			WithdrawalFeeRate:  sdk.NewDecWithPrec(1, 0),
+			WithdrawalFeeRate:  sdk.NewDecWithPrec(2, 0),
 			MaxOpCUNumber:      4,
 			SysTransferNum:     sdk.NewInt(1), // gas * 3
 			OpCUSysTransferNum: sdk.NewInt(1), // SysTransferAmount * 10
@@ -88,7 +89,7 @@ func DefaultGenesisState() GenesisState {
 			CollectThreshold:   sdk.NewIntWithDecimal(1, 17), // 0.1eth
 			OpenFee:            sdk.NewIntWithDecimal(1, 16), // nativeToken
 			SysOpenFee:         sdk.NewIntWithDecimal(1, 17), // nativeToken
-			WithdrawalFeeRate:  sdk.NewDecWithPrec(1, 0),
+			WithdrawalFeeRate:  sdk.NewDecWithPrec(2, 0),
 			MaxOpCUNumber:      4,
 			SysTransferNum:     sdk.NewInt(1),
 			OpCUSysTransferNum: sdk.NewInt(1),
@@ -189,7 +190,7 @@ func DefaultGenesisState() GenesisState {
 			CollectThreshold:   sdk.NewIntWithDecimal(100, 6), // 100 trx
 			OpenFee:            sdk.NewIntWithDecimal(1, 16),  // nativeToken
 			SysOpenFee:         sdk.NewIntWithDecimal(1, 17),  // nativeToken
-			WithdrawalFeeRate:  sdk.NewDecWithPrec(1, 0),      // 1 trx
+			WithdrawalFeeRate:  sdk.NewDecWithPrec(2, 0),      // 1 trx
 			MaxOpCUNumber:      4,
 			SysTransferNum:     sdk.NewInt(1),       //1x gas
 			OpCUSysTransferNum: sdk.NewInt(5),       //5x gas
@@ -218,7 +219,7 @@ func DefaultGenesisState() GenesisState {
 			MaxOpCUNumber:      4,
 			SysTransferNum:     sdk.NewInt(1),       //1x gas
 			OpCUSysTransferNum: sdk.NewInt(5),       //5x gas
-			GasLimit:           sdk.NewInt(1000000), //  1trx
+			GasLimit:           sdk.NewInt(2000000), //  2trx
 			GasPrice:           sdk.NewInt(1),
 			DepositThreshold:   sdk.NewIntWithDecimal(10, 6), // 10 TRXUSDT
 			Confirmations:      20,
@@ -227,7 +228,7 @@ func DefaultGenesisState() GenesisState {
 	}
 	for _, ibcToken := range ibcTokens {
 		if ibcToken.Symbol != ibcToken.Chain {
-			ibcToken.Symbol = calSymbol(ibcToken.Issuer, ibcToken.Chain)
+			ibcToken.Symbol = types.CalSymbol(ibcToken.Issuer, ibcToken.Chain)
 		}
 	}
 

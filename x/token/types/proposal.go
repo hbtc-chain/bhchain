@@ -1,11 +1,14 @@
 package types
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"strings"
 
+	"github.com/hbtc-chain/bhchain/base58"
 	sdk "github.com/hbtc-chain/bhchain/types"
 	govtypes "github.com/hbtc-chain/bhchain/x/gov/types"
+	"golang.org/x/crypto/ripemd160"
 )
 
 const (
@@ -167,4 +170,21 @@ func (ctpp TokenParamsChangeProposal) String() string {
 		b.WriteString(fmt.Sprintf("%s: %s\t", pc.Key, pc.Value))
 	}
 	return b.String()
+}
+
+func CalSymbol(issuer string, chain sdk.Symbol) sdk.Symbol {
+	payload := []byte(fmt.Sprintf("%s-%s", chain, issuer))
+	hasherSHA256 := sha256.New()
+	hasherSHA256.Write(payload)
+	sha := hasherSHA256.Sum(nil)
+
+	hasherRIPEMD160 := ripemd160.New()
+	hasherRIPEMD160.Write(sha)
+	bz := hasherRIPEMD160.Sum(nil)
+
+	sum := base58.Checksum(bz)
+	bz = append(bz, sum[:]...)
+
+	symbol := strings.ToUpper(chain.String()) + base58.Encode(bz)
+	return sdk.Symbol(symbol)
 }

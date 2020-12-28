@@ -12,6 +12,7 @@ const (
 
 	AttributeKeyWithdrawAddress = "withdraw_address"
 	AttributeKeyValidator       = "validator"
+	AttributeKeyDelegator       = "delegator"
 	AttributeKeyRecipient       = "recipient"
 	AttributeKeyAmount          = "amount"
 

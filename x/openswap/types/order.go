@@ -105,6 +105,8 @@ type ResOrder struct {
 	AmountIn       sdk.Int       `json:"amount_int"`
 	LockedFund     sdk.Int       `json:"locked_fund"`
 	RemainQuantity sdk.Int       `json:"remain_quantity"`
+	DexID          uint32        `json:"dex_id"`
+	FeeRate        *FeeRate      `json:"fee_rate"`
 }
 
 func NewResOrder(order *Order) *ResOrder {
@@ -124,6 +126,8 @@ func NewResOrder(order *Order) *ResOrder {
 		AmountIn:       order.AmountIn,
 		LockedFund:     order.LockedFund,
 		RemainQuantity: order.RemainQuantity(),
+		DexID:          order.DexID,
+		FeeRate:        order.FeeRate,
 	}
 }
 
