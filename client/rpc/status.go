@@ -12,6 +12,7 @@ import (
 	"github.com/hbtc-chain/bhchain/client/context"
 	"github.com/hbtc-chain/bhchain/client/flags"
 	"github.com/hbtc-chain/bhchain/codec"
+	sdk "github.com/hbtc-chain/bhchain/types"
 	"github.com/hbtc-chain/bhchain/types/rest"
 	"github.com/hbtc-chain/bhchain/version"
 
@@ -32,13 +33,43 @@ func StatusCommand() *cobra.Command {
 	return cmd
 }
 
-func getNodeStatus(cliCtx context.CLIContext) (*ctypes.ResultStatus, error) {
+type StatusOutput struct {
+	NodeInfo      *p2p.DefaultNodeInfo `json:"node_info"`
+	SyncInfo      *ctypes.SyncInfo     `json:"sync_info"`
+	ValidatorInfo *ValidatorOutput     `json:"validator_info"`
+}
+
+func toBech32ValidatorOutput(validator ctypes.ValidatorInfo) (*ValidatorOutput, error) {
+	bechValPubkey, err := sdk.Bech32ifyConsPub(validator.PubKey)
+	if err != nil {
+		return nil, err
+	}
+	return &ValidatorOutput{
+		Address:     sdk.ConsAddress(validator.Address),
+		PubKey:      bechValPubkey,
+		VotingPower: validator.VotingPower,
+	}, nil
+}
+
+func getNodeStatus(cliCtx context.CLIContext) (*StatusOutput, error) {
 	node, err := cliCtx.GetNode()
 	if err != nil {
-		return &ctypes.ResultStatus{}, err
+		return nil, err
 	}
 
-	return node.Status()
+	status, err := node.Status()
+	if err != nil {
+		return nil, err
+	}
+	validatorOutput, err := toBech32ValidatorOutput(status.ValidatorInfo)
+	if err != nil {
+		return nil, err
+	}
+	return &StatusOutput{
+		NodeInfo:      &status.NodeInfo,
+		SyncInfo:      &status.SyncInfo,
+		ValidatorInfo: validatorOutput,
+	}, nil
 }
 
 func printNodeStatus(_ *cobra.Command, _ []string) error {
@@ -82,7 +113,7 @@ func NodeInfoRequestHandlerFn(cliCtx context.CLIContext) http.HandlerFunc {
 		}
 
 		resp := NodeInfoResponse{
-			DefaultNodeInfo:    status.NodeInfo,
+			DefaultNodeInfo:    *status.NodeInfo,
 			ApplicationVersion: version.NewInfo(),
 		}
 		rest.PostProcessResponseBare(w, cliCtx, resp)

@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"runtime/pprof"
+	"time"
 
 	"github.com/hbtc-chain/bhchain/services/p2p/pb"
 	bhreactor "github.com/hbtc-chain/bhchain/services/p2p/reactor"
@@ -227,7 +228,9 @@ func startInProcess(ctx *Context, appCreator AppCreator) (*node.Node, error) {
 			cpuProfileCleanup()
 		}
 
-		ctx.Logger.Info("exiting...")
+		ctx.Logger.Info("exiting..., wait 5 seconds")
+		time.Sleep(5 * time.Second)
+		ctx.Logger.Info("exited")
 	})
 
 	// run forever (the node will not be returned)
