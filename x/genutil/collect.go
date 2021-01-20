@@ -109,16 +109,13 @@ func CollectStdTxs(cdc *codec.Codec, moniker, genTxsDir string,
 		if err = cdc.UnmarshalJSON(jsonRawTx, &genStdTx); err != nil {
 			return appGenTxs, persistentPeers, err
 		}
-		appGenTxs = append(appGenTxs, genStdTx)
+
 
 		// the memo flag is used to store
 		// the ip and node-id, for example this may be:
 		// "528fd3df22b31f4969b05652bfe8f0fe921321d5@192.168.2.37:26656"
 		nodeAddrIP := genStdTx.GetMemo()
-		if len(nodeAddrIP) == 0 {
-			return appGenTxs, persistentPeers, fmt.Errorf(
-				"couldn't find node's address and IP in %s", fo.Name())
-		}
+
 
 		// genesis transactions must be single-message
 		msgs := genStdTx.GetMsgs()
@@ -127,27 +124,32 @@ func CollectStdTxs(cdc *codec.Codec, moniker, genTxsDir string,
 				"each genesis transaction must provide a single genesis message")
 		}
 
-		// TODO abstract out staking message validation back to staking
-		msg := msgs[0].(stakingtypes.MsgCreateValidator)
-		// validate delegator and validator addresses and funds against the accounts in the state
-		delAddr := msg.DelegatorAddress.String()
-		valAddr := sdk.CUAddress(msg.ValidatorAddress).String()
+		switch msg := genStdTx.GetMsgs()[0].(type) {
+			case stakingtypes.MsgCreateValidator:
 
-		_, delOk := addrMap[delAddr]
-		if !delOk {
-			return appGenTxs, persistentPeers, fmt.Errorf(
-				"CustodianUnit %v not in genesis.json: %+v", delAddr, addrMap)
-		}
+				delAddr := msg.DelegatorAddress.String()
+				valAddr := sdk.CUAddress(msg.ValidatorAddress).String()
 
-		_, valOk := addrMap[valAddr]
-		if !valOk {
-			return appGenTxs, persistentPeers, fmt.Errorf(
-				"CustodianUnit %v not in genesis.json: %+v", valAddr, addrMap)
-		}
+				_, delOk := addrMap[delAddr]
+				if !delOk {
+					return appGenTxs, persistentPeers, fmt.Errorf(
+						"CustodianUnit %v not in genesis.json: %+v", delAddr, addrMap)
+				}
 
-		// exclude itself from persistent peers
-		if msg.Description.Moniker != moniker {
-			addressesIPs = append(addressesIPs, nodeAddrIP)
+				_, valOk := addrMap[valAddr]
+				if !valOk {
+					return appGenTxs, persistentPeers, fmt.Errorf(
+						"CustodianUnit %v not in genesis.json: %+v", valAddr, addrMap)
+				}
+
+				// exclude itself from persistent peers
+				if msg.Description.Moniker != moniker {
+					addressesIPs = append(addressesIPs, nodeAddrIP)
+				}
+				appGenTxs = append([]authtypes.StdTx{genStdTx},appGenTxs...)
+			case stakingtypes.MsgDelegate:
+				appGenTxs = append(appGenTxs, genStdTx)
+
 		}
 	}
 

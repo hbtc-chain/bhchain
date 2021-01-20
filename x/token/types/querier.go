@@ -15,9 +15,10 @@ func NewQueryTokenInfoParams(symbol string) QueryTokenInfoParams {
 type ResToken struct {
 	Name                  string        `json:"name"`
 	Symbol                string        `json:"symbol"`
-	Issuer                string        `json:"issuer"`              //token's issuer
-	Chain                 string        `json:"chain"`               //related mainnet token, e.g. ERC20 token's Chain is ETH
-	TotalSupply           sdk.Int       `json:"total_supply"`        //token's total supply
+	Issuer                string        `json:"issuer"`       //token's issuer
+	Chain                 string        `json:"chain"`        //related mainnet token, e.g. ERC20 token's Chain is ETH
+	TotalSupply           sdk.Int       `json:"total_supply"` //token's total supply
+	Weight                int           `json:"weight"`
 	Decimals              uint64        `json:"decimals"`            //token's decimals, represents by the decimals's
 	SendEnabled           bool          `json:"send_enabled"`        //whether send enabled or not
 	DepositEnabled        bool          `json:"deposit_enabled"`     //whether send enabled or not
@@ -50,6 +51,7 @@ func NewResToken(token sdk.Token) *ResToken {
 		Chain:       token.GetChain().String(),
 		Decimals:    token.GetDecimals(),
 		TotalSupply: token.GetTotalSupply(),
+		Weight:      token.GetWeight(),
 		SendEnabled: token.IsSendEnabled(),
 	}
 	if token.IsIBCToken() {

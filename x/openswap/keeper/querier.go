@@ -150,16 +150,15 @@ func queryOrderbook(ctx sdk.Context, req abci.RequestQuery, k Keeper) ([]byte, s
 	if err != nil {
 		return nil, sdk.ErrInternal(fmt.Sprintf("failed to parse params: %s", err))
 	}
-	tokenA, tokenB := k.SortToken(params.BaseSymbol, params.QuoteSymbol)
-	pair := k.GetTradingPair(ctx, params.DexID, tokenA, tokenB)
+	pair := k.GetTradingPair(ctx, params.DexID, params.BaseSymbol, params.QuoteSymbol)
 	if pair == nil {
 		return nil, sdk.ErrInvalidSymbol(fmt.Sprintf("%s-%s trading pair not found", params.BaseSymbol, params.QuoteSymbol))
 	}
 
-	sellOrders, buyOrders := k.GetAllOrders(params.DexID, tokenA, tokenB)
+	sellOrders, buyOrders := k.GetAllOrders(params.DexID, pair.TokenA, pair.TokenB)
 	var ret interface{}
 	if params.Merge {
-		ret = types.NewDepthBook(ctx.BlockHeight(), ctx.BlockTime().Unix(), fmt.Sprintf("%s-%s", tokenA, tokenB), buyOrders, sellOrders)
+		ret = types.NewDepthBook(ctx.BlockHeight(), ctx.BlockTime().Unix(), fmt.Sprintf("%s-%s", pair.TokenA.String(), pair.TokenB.String()), buyOrders, sellOrders)
 	} else {
 		ret = map[string][]*types.Order{
 			"buy":  buyOrders,

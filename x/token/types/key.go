@@ -20,6 +20,11 @@ const (
 	QueryIBCTokens = "ibc_tokens"
 
 	TypeMsgSynGasPrice = "token-syngasprice"
+
+	DefaultStableCoinWeight  = 0
+	DefaultNativeTokenWeight = 10
+	DefaultIBCTokenWeight    = 20
+	DefaultHrc10TokenWeight  = 30
 )
 
 var (

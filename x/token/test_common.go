@@ -2,6 +2,7 @@ package token
 
 import (
 	sdk "github.com/hbtc-chain/bhchain/types"
+	"github.com/hbtc-chain/bhchain/x/token/types"
 )
 
 var (
@@ -20,6 +21,7 @@ var TestIBCTokens = map[sdk.Symbol]*sdk.IBCToken{
 			SendEnabled: true,
 			Decimals:    8,
 			TotalSupply: sdk.NewIntWithDecimal(21, 15),
+			Weight:      types.DefaultIBCTokenWeight,
 		},
 		TokenType:          sdk.UtxoBased,
 		DepositEnabled:     true,
@@ -47,6 +49,7 @@ var TestIBCTokens = map[sdk.Symbol]*sdk.IBCToken{
 			SendEnabled: true,
 			Decimals:    18,
 			TotalSupply: sdk.NewInt(0),
+			Weight:      types.DefaultIBCTokenWeight + 1,
 		},
 		TokenType:          sdk.AccountBased,
 		DepositEnabled:     true,
@@ -76,6 +79,7 @@ var TestIBCTokens = map[sdk.Symbol]*sdk.IBCToken{
 			SendEnabled: true,
 			Decimals:    18,
 			TotalSupply: sdk.NewIntWithDecimal(1, 28),
+			Weight:      types.DefaultStableCoinWeight,
 		},
 		TokenType:          sdk.AccountBased,
 		DepositEnabled:     true,
@@ -105,6 +109,7 @@ var TestBaseTokens = map[sdk.Symbol]*sdk.BaseToken{
 		SendEnabled: true,
 		Decimals:    sdk.NativeTokenDecimal,
 		TotalSupply: sdk.NewIntWithDecimal(21, 24),
+		Weight:      types.DefaultNativeTokenWeight,
 	},
 	sdk.NativeDefiToken: {
 		Name:        sdk.NativeDefiToken,
@@ -114,6 +119,7 @@ var TestBaseTokens = map[sdk.Symbol]*sdk.BaseToken{
 		SendEnabled: true,
 		Decimals:    sdk.NativeDefiTokenDecimal,
 		TotalSupply: sdk.NewIntWithDecimal(1, 16),
+		Weight:      types.DefaultHrc10TokenWeight,
 	},
 }
 

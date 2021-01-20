@@ -9,10 +9,14 @@ import (
 )
 
 func (k Keeper) canRepurchase(ctx sdk.Context, tokenIn sdk.Symbol, amount sdk.Int) bool {
-	if tokenIn == sdk.NativeToken {
+	repurchaseToken := sdk.Symbol(k.RepurchaseToken(ctx))
+	if repurchaseToken == "" {
+		return false
+	}
+	if tokenIn == repurchaseToken {
 		return true
 	}
-	pair := k.GetTradingPair(ctx, 0, tokenIn, sdk.NativeToken)
+	pair := k.GetTradingPair(ctx, 0, tokenIn, repurchaseToken)
 	return pair != nil
 }
 
@@ -96,11 +100,41 @@ func (k Keeper) getDec(ctx sdk.Context, key []byte) (ret sdk.Dec) {
 	return
 }
 
-func (k Keeper) SortToken(tokenA, tokenB sdk.Symbol) (sdk.Symbol, sdk.Symbol) {
-	if tokenA > tokenB {
-		tokenA, tokenB = tokenB, tokenA
+func (k Keeper) CheckSymbol(ctx sdk.Context, symbol sdk.Symbol) (sdk.Token, sdk.Result) {
+	tokenInfo := k.tokenKeeper.GetToken(ctx, symbol)
+	if tokenInfo == nil {
+		return nil, sdk.ErrUnSupportToken(fmt.Sprintf("token %s does not exist", symbol.String())).Result()
 	}
-	return tokenA, tokenB
+	if !tokenInfo.IsSendEnabled() {
+		return tokenInfo, sdk.ErrUnSupportToken(fmt.Sprintf("token %s is not enable to send", symbol)).Result()
+	}
+	return tokenInfo, sdk.Result{}
+}
+
+func (k Keeper) SortTokens(ctx sdk.Context, symbolA, symbolB sdk.Symbol) (sdk.Symbol, sdk.Symbol, sdk.Result) {
+	tokenA, result := k.CheckSymbol(ctx, symbolA)
+	if !result.IsOK() {
+		return symbolA, symbolB, result
+	}
+
+	tokenB, result := k.CheckSymbol(ctx, symbolB)
+	if !result.IsOK() {
+		return symbolA, symbolB, result
+	}
+
+	// sort by symbol
+	if tokenA.GetWeight() == tokenB.GetWeight() {
+		if symbolA > symbolB {
+			return symbolB, symbolA, sdk.Result{}
+		}
+		return symbolA, symbolB, sdk.Result{}
+	}
+
+	// sort by weight
+	if tokenA.GetWeight() < tokenB.GetWeight() {
+		return symbolB, symbolA, sdk.Result{}
+	}
+	return symbolA, symbolB, sdk.Result{}
 }
 
 func (k Keeper) setDec(ctx sdk.Context, key []byte, d sdk.Dec) {

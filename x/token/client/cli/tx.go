@@ -42,7 +42,8 @@ Where proposal.json contains:
   	    "chain": "eth",
 		"send_enabled": true,
 		"decimals": "6",
-		"total_supply": "30000000000000000"
+		"total_supply": "30000000000000000",
+		"weight": 25
 	},
   	"type": "2",
   	"deposit_enabled": true,

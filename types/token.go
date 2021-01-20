@@ -73,6 +73,7 @@ type Token interface {
 	IsSendEnabled() bool
 	GetDecimals() uint64
 	GetTotalSupply() Int
+	GetWeight() int
 	IsIBCToken() bool
 	IsValid() bool
 	String() string
@@ -88,6 +89,7 @@ type BaseToken struct {
 	SendEnabled bool   `json:"send_enabled" yaml:"send_enabled"`  //whether send enabled or not
 	Decimals    uint64 `json:"decimals" yaml:"decimals"`          //token's decimals, represents by the decimals's
 	TotalSupply Int    `json:"total_supply" yaml:"total_supply" ` //token's total supply
+	Weight      int    `json:"weight" yaml:"weight"`
 }
 
 func (t *BaseToken) String() string {
@@ -99,7 +101,8 @@ func (t *BaseToken) String() string {
 	SendEnabled:%v
 	Decimals:%v
 	TotalSupply:%v
-	`, t.Name, t.Symbol, t.Issuer, t.Chain, t.SendEnabled, t.Decimals, t.TotalSupply)
+	Weight:%v
+	`, t.Name, t.Symbol, t.Issuer, t.Chain, t.SendEnabled, t.Decimals, t.TotalSupply, t.Weight)
 }
 
 func (t *BaseToken) IsValid() bool {
@@ -145,6 +148,10 @@ func (t *BaseToken) GetTotalSupply() Int {
 	return t.TotalSupply
 }
 
+func (t *BaseToken) GetWeight() int {
+	return t.Weight
+}
+
 func (t *BaseToken) IsIBCToken() bool {
 	return t.Chain != NativeToken
 }
@@ -183,6 +190,7 @@ func (t *IBCToken) String() string {
 	WithdrawalEnabled:%v
 	Decimals:%v
 	TotalSupply:%v
+	Weight:%v
 	CollectThreshold:%v
 	DepositThreshold:%v
 	OpenFee:%v
@@ -197,7 +205,7 @@ func (t *IBCToken) String() string {
 	IsNonceBased:%v
 	NeedCollectFee:%v
 	`, t.Name, t.Symbol, t.Issuer, t.Chain, t.TokenType, t.SendEnabled, t.DepositEnabled,
-		t.WithdrawalEnabled, t.Decimals, t.TotalSupply, t.CollectThreshold, t.DepositThreshold,
+		t.WithdrawalEnabled, t.Decimals, t.TotalSupply, t.Weight, t.CollectThreshold, t.DepositThreshold,
 		t.OpenFee, t.SysOpenFee, t.WithdrawalFeeRate, t.MaxOpCUNumber, t.SysTransferNum,
 		t.OpCUSysTransferNum, t.GasLimit, t.GasPrice, t.Confirmations, t.IsNonceBased, t.NeedCollectFee)
 }
@@ -210,8 +218,7 @@ func (t *IBCToken) IsValid() bool {
 	if !IsTokenTypeValid(t.TokenType) {
 		return false
 	}
-	if !(t.CollectThreshold.IsPositive() && t.DepositThreshold.IsPositive() && t.OpenFee.IsPositive() &&
-		t.SysOpenFee.IsPositive() && t.WithdrawalFeeRate.IsPositive()) {
+	if !(t.CollectThreshold.IsPositive() && t.DepositThreshold.IsPositive() && t.OpenFee.IsPositive() && t.WithdrawalFeeRate.IsPositive()) {
 		return false
 	}
 

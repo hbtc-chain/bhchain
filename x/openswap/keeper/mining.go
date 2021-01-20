@@ -6,7 +6,7 @@ import (
 )
 
 func (k Keeper) CalculateEarning(ctx sdk.Context, addr sdk.CUAddress, dexID uint32, tokenA, tokenB sdk.Symbol) sdk.Int {
-	tokenA, tokenB = k.SortToken(tokenA, tokenB)
+	tokenA, tokenB, _ = k.SortTokens(ctx, tokenA, tokenB)
 	liquidity := k.GetLiquidity(ctx, addr, dexID, tokenA, tokenB)
 	globalMask := k.getDec(ctx, types.GlobalMaskKey(dexID, tokenA, tokenB))
 	addrMask := k.getDec(ctx, types.AddrMaskKey(addr, dexID, tokenA, tokenB))
@@ -14,7 +14,7 @@ func (k Keeper) CalculateEarning(ctx sdk.Context, addr sdk.CUAddress, dexID uint
 }
 
 func (k Keeper) ClaimEarning(ctx sdk.Context, addr sdk.CUAddress, dexID uint32, tokenA, tokenB sdk.Symbol) sdk.Result {
-	tokenA, tokenB = k.SortToken(tokenA, tokenB)
+	tokenA, tokenB, _ = k.SortTokens(ctx, tokenA, tokenB)
 	earning := k.CalculateEarning(ctx, addr, dexID, tokenA, tokenB)
 	if !earning.IsPositive() {
 		return sdk.Result{}
@@ -98,7 +98,7 @@ func (k Keeper) distribute(ctx sdk.Context, amount sdk.Int) {
 			distribution = amount.Mul(w.Weight).Quo(totalWeight)
 			remaining = remaining.Sub(distribution)
 		}
-		tokenA, tokenB := k.SortToken(w.TokenA, w.TokenB)
+		tokenA, tokenB, _ := k.SortTokens(ctx, w.TokenA, w.TokenB)
 		k.onMining(ctx, w.DexID, tokenA, tokenB, distribution)
 	}
 }

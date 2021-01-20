@@ -4,13 +4,11 @@ package genutil
 
 import (
 	"encoding/json"
-	"fmt"
 
 	abci "github.com/tendermint/tendermint/abci/types"
 
 	"github.com/hbtc-chain/bhchain/codec"
 	sdk "github.com/hbtc-chain/bhchain/types"
-	authexported "github.com/hbtc-chain/bhchain/x/custodianunit/exported"
 	authtypes "github.com/hbtc-chain/bhchain/x/custodianunit/types"
 	"github.com/hbtc-chain/bhchain/x/genutil/types"
 	stakingtypes "github.com/hbtc-chain/bhchain/x/staking/types"
@@ -41,7 +39,7 @@ func ValidateAccountInGenesis(appGenesisState map[string]json.RawMessage,
 	genAccIterator types.GenesisCUsIterator,
 	key sdk.CUAddress, coins sdk.Coins, cdc *codec.Codec) error {
 
-	accountIsInGenesis := false
+	//accountIsInGenesis := false
 
 	// TODO: refactor out bond denom to common state area
 	stakingDataBz := appGenesisState[stakingtypes.ModuleName]
@@ -52,25 +50,25 @@ func ValidateAccountInGenesis(appGenesisState map[string]json.RawMessage,
 	var genesisState GenesisState
 	cdc.MustUnmarshalJSON(genUtilDataBz, &genesisState)
 
-	var err error
-	genAccIterator.IterateGenesisCUs(cdc, appGenesisState,
-		func(acc authexported.CustodianUnit) (stop bool) {
-			CUAddress := acc.GetAddress()
-			// Ensure that CustodianUnit is in genesis
-			if CUAddress.Equals(key) {
-				accountIsInGenesis = true
-				return true
-			}
-			return false
-		},
-	)
-	if err != nil {
-		return err
-	}
-
-	if !accountIsInGenesis {
-		return fmt.Errorf("CustodianUnit %s in not in the app_state.accounts array of genesis.json", key)
-	}
+	//var err error
+	//genAccIterator.IterateGenesisCUs(cdc, appGenesisState,
+	//	func(acc authexported.CustodianUnit) (stop bool) {
+	//		CUAddress := acc.GetAddress()
+	//		// Ensure that CustodianUnit is in genesis
+	//		if CUAddress.Equals(key) {
+	//			accountIsInGenesis = true
+	//			return true
+	//		}
+	//		return false
+	//	},
+	//)
+	//if err != nil {
+	//	return err
+	//}
+	//
+	//if !accountIsInGenesis {
+	//	return fmt.Errorf("CustodianUnit %s in not in the app_state.accounts array of genesis.json", key)
+	//}
 
 	return nil
 }

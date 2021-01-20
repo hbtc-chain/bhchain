@@ -56,6 +56,11 @@ func (k Keeper) RepurchaseDuration(ctx sdk.Context) (res int64) {
 	return
 }
 
+func (k Keeper) RepurchaseToken(ctx sdk.Context) (res string) {
+	k.paramstore.Get(ctx, types.KeyRepurchaseToken, &res)
+	return
+}
+
 func (k Keeper) MiningWeights(ctx sdk.Context) (res []*types.MiningWeight) {
 	k.paramstore.Get(ctx, types.KeyMiningWeights, &res)
 	return
@@ -79,6 +84,7 @@ func (k Keeper) GetParams(ctx sdk.Context) types.Params {
 		k.RepurchaseDuration(ctx),
 		k.MiningWeights(ctx),
 		k.MiningPlans(ctx),
+		k.RepurchaseToken(ctx),
 	)
 }
 

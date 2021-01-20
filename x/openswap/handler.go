@@ -93,16 +93,13 @@ func handleMsgCreateTradingPair(ctx sdk.Context, k Keeper, msg types.MsgCreateTr
 	if !dex.Owner.Equals(msg.From) {
 		return sdk.ErrInvalidTx(fmt.Sprintf("dex %d belongs to %s, not %s", msg.DexID, dex.Owner.String(), msg.From.String())).Result()
 	}
-	tokenA, tokenB := k.SortToken(msg.TokenA, msg.TokenB)
+	tokenA, tokenB, result := k.SortTokens(ctx, msg.TokenA, msg.TokenB)
+	if !result.IsOK() {
+		return result
+	}
 	if k.GetTradingPair(ctx, msg.DexID, tokenA, tokenB) != nil {
 		return sdk.ErrInvalidTx(fmt.Sprintf("%s-%s trading pair already exists in dex %d",
 			tokenA, tokenB, msg.DexID)).Result()
-	}
-	if result := k.CheckSymbol(ctx, tokenA); !result.IsOK() {
-		return result
-	}
-	if result := k.CheckSymbol(ctx, tokenB); !result.IsOK() {
-		return result
 	}
 
 	if msg.IsPublic && msg.RefererRewardRate.LT(k.RefererTransactionBonusRate(ctx)) {
@@ -127,7 +124,7 @@ func handleMsgCreateTradingPair(ctx sdk.Context, k Keeper, msg types.MsgCreateTr
 		),
 	})
 
-	result := sdk.Result{}
+	result = sdk.Result{}
 	result.Events = append(result.Events, ctx.EventManager().Events()...)
 	return result
 }
@@ -140,7 +137,10 @@ func handleMsgEditTradingPair(ctx sdk.Context, k Keeper, msg types.MsgEditTradin
 	if !dex.Owner.Equals(msg.From) {
 		return sdk.ErrInvalidTx(fmt.Sprintf("dex %d belongs to %s, not %s", msg.DexID, dex.Owner.String(), msg.From.String())).Result()
 	}
-	tokenA, tokenB := k.SortToken(msg.TokenA, msg.TokenB)
+	tokenA, tokenB, result := k.SortTokens(ctx, msg.TokenA, msg.TokenB)
+	if !result.IsOK() {
+		return result
+	}
 	pair := k.GetTradingPair(ctx, msg.DexID, tokenA, tokenB)
 	if pair == nil {
 		return sdk.ErrInvalidTx(fmt.Sprintf("%s-%s trading pair does not exist in dex %d",
@@ -181,40 +181,40 @@ func handleMsgEditTradingPair(ctx sdk.Context, k Keeper, msg types.MsgEditTradin
 		),
 	})
 
-	result := sdk.Result{}
+	result = sdk.Result{}
 	result.Events = append(result.Events, ctx.EventManager().Events()...)
 	return result
 }
 
 func handleMsgAddLiquidity(ctx sdk.Context, k Keeper, msg types.MsgAddLiquidity) sdk.Result {
-	if result := k.CheckSymbol(ctx, msg.TokenA); !result.IsOK() {
-		return result
-	}
-	if result := k.CheckSymbol(ctx, msg.TokenB); !result.IsOK() {
+	tokenA, tokenB, result := k.SortTokens(ctx, msg.TokenA, msg.TokenB)
+	if !result.IsOK() {
 		return result
 	}
 	if msg.ExpiredAt > 0 && ctx.BlockTime().Unix() >= msg.ExpiredAt {
 		return sdk.ErrInvalidTx("expired tx").Result()
 	}
-	return k.AddLiquidity(ctx, msg.From, msg.DexID, msg.TokenA, msg.TokenB, msg.MaxTokenAAmount, msg.MaxTokenBAmount)
+	maxTokenAAmount, maxTokenBAmount := msg.MaxTokenAAmount, msg.MaxTokenBAmount
+	if tokenA != msg.TokenA {
+		maxTokenAAmount, maxTokenBAmount = maxTokenBAmount, maxTokenAAmount
+	}
+	return k.AddLiquidity(ctx, msg.From, msg.DexID, tokenA, tokenB, maxTokenAAmount, maxTokenBAmount)
 }
 
 func handleMsgRemoveLiquidity(ctx sdk.Context, k Keeper, msg types.MsgRemoveLiquidity) sdk.Result {
-	if result := k.CheckSymbol(ctx, msg.TokenA); !result.IsOK() {
-		return result
-	}
-	if result := k.CheckSymbol(ctx, msg.TokenB); !result.IsOK() {
+	tokenA, tokenB, result := k.SortTokens(ctx, msg.TokenA, msg.TokenB)
+	if !result.IsOK() {
 		return result
 	}
 	if msg.ExpiredAt > 0 && ctx.BlockTime().Unix() >= msg.ExpiredAt {
 		return sdk.ErrInvalidTx("expired tx").Result()
 	}
-	return k.RemoveLiquidity(ctx, msg.From, msg.DexID, msg.TokenA, msg.TokenB, msg.Liquidity)
+	return k.RemoveLiquidity(ctx, msg.From, msg.DexID, tokenA, tokenB, msg.Liquidity)
 }
 
 func handleMsgSwapExactIn(ctx sdk.Context, k Keeper, msg types.MsgSwapExactIn) sdk.Result {
 	for _, token := range msg.SwapPath {
-		if result := k.CheckSymbol(ctx, token); !result.IsOK() {
+		if _, result := k.CheckSymbol(ctx, token); !result.IsOK() {
 			return result
 		}
 	}
@@ -241,7 +241,7 @@ func handleMsgSwapExactIn(ctx sdk.Context, k Keeper, msg types.MsgSwapExactIn) s
 
 func handleMsgSwapExactOut(ctx sdk.Context, k Keeper, msg types.MsgSwapExactOut) sdk.Result {
 	for _, token := range msg.SwapPath {
-		if result := k.CheckSymbol(ctx, token); !result.IsOK() {
+		if _, result := k.CheckSymbol(ctx, token); !result.IsOK() {
 			return result
 		}
 	}
@@ -267,12 +267,14 @@ func handleMsgSwapExactOut(ctx sdk.Context, k Keeper, msg types.MsgSwapExactOut)
 }
 
 func handleMsgLimitSwap(ctx sdk.Context, k Keeper, msg types.MsgLimitSwap) sdk.Result {
-	if result := k.CheckSymbol(ctx, msg.BaseSymbol); !result.IsOK() {
+	tokenA, tokenB, result := k.SortTokens(ctx, msg.BaseSymbol, msg.QuoteSymbol)
+	if !result.IsOK() {
 		return result
 	}
-	if result := k.CheckSymbol(ctx, msg.QuoteSymbol); !result.IsOK() {
-		return result
+	if tokenA != msg.BaseSymbol || tokenB != msg.QuoteSymbol {
+		return sdk.ErrInvalidSymbol("wrong symbol sequence").Result()
 	}
+
 	if msg.ExpiredAt > 0 && ctx.BlockTime().Unix() >= msg.ExpiredAt {
 		return sdk.ErrInvalidTx("expired tx").Result()
 	}
@@ -304,5 +306,9 @@ func handleMsgCancelLimitSwap(ctx sdk.Context, k Keeper, msg types.MsgCancelLimi
 }
 
 func handleMsgClaimEarning(ctx sdk.Context, k Keeper, msg types.MsgClaimEarning) sdk.Result {
-	return k.ClaimEarning(ctx, msg.From, msg.DexID, msg.TokenA, msg.TokenB)
+	tokenA, tokenB, result := k.SortTokens(ctx, msg.TokenA, msg.TokenB)
+	if !result.IsOK() {
+		return result
+	}
+	return k.ClaimEarning(ctx, msg.From, msg.DexID, tokenA, tokenB)
 }

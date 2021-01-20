@@ -738,17 +738,17 @@ func TestHandleMsgSwapEdgeCase(t *testing.T) {
 	assert.Equal(t, originAmount, coins.AmountOf("usdt"))
 
 	expectedBtcEthPair := &types.TradingPair{
-		TokenA:            "btc",
-		TokenB:            "eth",
+		TokenA:            "eth",
+		TokenB:            "btc",
 		IsPublic:          true,
-		TokenAAmount:      btcEthAmountBtc,
-		TokenBAmount:      btcEthAmountEth.AddRaw(1),
+		TokenAAmount:      btcEthAmountEth.AddRaw(1),
+		TokenBAmount:      btcEthAmountBtc,
 		TotalLiquidity:    sdk.NewInt(565685),
 		LPRewardRate:      sdk.ZeroDec(),
 		RefererRewardRate: sdk.ZeroDec(),
 	}
 	assert.Equal(t, expectedBtcEthPair, k.GetTradingPair(runCtx, 0, "btc", "eth"))
-	assert.Equal(t, sdk.NewInt(565685).Sub(types.DefaultMinimumLiquidity), k.GetLiquidity(runCtx, address, 0, "btc", "eth"))
+	assert.Equal(t, sdk.NewInt(565685).Sub(types.DefaultMinimumLiquidity), k.GetLiquidity(runCtx, address, 0, "eth", "btc"))
 
 	expectedBtcUsdtPair := &types.TradingPair{
 		TokenA:            "btc",
@@ -809,17 +809,17 @@ func TestHandleMsgSwapEdgeCase(t *testing.T) {
 	assert.Equal(t, sdk.NewInt(400000).Sub(types.DefaultMinimumLiquidity), k.GetLiquidity(runCtx, address, 0, "btc", "usdt"))
 
 	expectedBtcEthPair = &types.TradingPair{
-		TokenA:            "btc",
-		TokenB:            "eth",
+		TokenA:            "eth",
+		TokenB:            "btc",
 		IsPublic:          true,
-		TokenAAmount:      btcEthAmountBtc.Add(btcAmtIn).Add(btcLpReward),
-		TokenBAmount:      btcEthAmountEth.Sub(ethOut),
+		TokenAAmount:      btcEthAmountEth.Sub(ethOut),
+		TokenBAmount:      btcEthAmountBtc.Add(btcAmtIn).Add(btcLpReward),
 		TotalLiquidity:    sdk.NewInt(565685),
 		LPRewardRate:      sdk.ZeroDec(),
 		RefererRewardRate: sdk.ZeroDec(),
 	}
 	assert.Equal(t, expectedBtcEthPair, k.GetTradingPair(runCtx, 0, "btc", "eth"))
-	assert.Equal(t, sdk.NewInt(565685).Sub(types.DefaultMinimumLiquidity), k.GetLiquidity(runCtx, address, 0, "btc", "eth"))
+	assert.Equal(t, sdk.NewInt(565685).Sub(types.DefaultMinimumLiquidity), k.GetLiquidity(runCtx, address, 0, "eth", "btc"))
 }
 
 func TestHandleMsgCreateDex(t *testing.T) {
@@ -997,13 +997,13 @@ func TestHandleMsgCreateTradingPair(t *testing.T) {
 	assert.Equal(t, []byte(types.AttributeKeyDexID), res.Events[0].Attributes[0].Key)
 	assert.Equal(t, []byte("1"), res.Events[0].Attributes[0].Value)
 	assert.Equal(t, []byte(types.AttributeKeyTokenA), res.Events[0].Attributes[1].Key)
-	assert.Equal(t, []byte("btc"), res.Events[0].Attributes[1].Value)
+	assert.Equal(t, []byte("eth"), res.Events[0].Attributes[1].Value)
 	assert.Equal(t, []byte(types.AttributeKeyTokenB), res.Events[0].Attributes[2].Key)
-	assert.Equal(t, []byte("eth"), res.Events[0].Attributes[2].Value)
+	assert.Equal(t, []byte("btc"), res.Events[0].Attributes[2].Value)
 	expectedTradingPair := &types.TradingPair{
 		DexID:             1,
-		TokenA:            "btc",
-		TokenB:            "eth",
+		TokenA:            "eth",
+		TokenB:            "btc",
 		TokenAAmount:      sdk.ZeroInt(),
 		TokenBAmount:      sdk.ZeroInt(),
 		TotalLiquidity:    sdk.ZeroInt(),
@@ -1032,6 +1032,7 @@ func TestHandleMsgCreateTradingPair(t *testing.T) {
 	msg = types.NewMsgCreateTradingPair(dexOwner, 1, "btc", "usdt", true, lpRewardRate, refererRewardRate)
 	res = handleMsgCreateTradingPair(ctx, k, msg)
 	assert.True(t, res.IsOK())
+	expectedTradingPair.TokenA = "btc"
 	expectedTradingPair.TokenB = "usdt"
 	assert.Equal(t, expectedTradingPair, k.GetTradingPair(ctx, 1, "btc", "usdt"))
 
@@ -1114,13 +1115,13 @@ func TestHandleMsgEditTradingPair(t *testing.T) {
 	assert.Equal(t, []byte(types.AttributeKeyDexID), res.Events[0].Attributes[0].Key)
 	assert.Equal(t, []byte("1"), res.Events[0].Attributes[0].Value)
 	assert.Equal(t, []byte(types.AttributeKeyTokenA), res.Events[0].Attributes[1].Key)
-	assert.Equal(t, []byte("btc"), res.Events[0].Attributes[1].Value)
+	assert.Equal(t, []byte("eth"), res.Events[0].Attributes[1].Value)
 	assert.Equal(t, []byte(types.AttributeKeyTokenB), res.Events[0].Attributes[2].Key)
-	assert.Equal(t, []byte("eth"), res.Events[0].Attributes[2].Value)
+	assert.Equal(t, []byte("btc"), res.Events[0].Attributes[2].Value)
 	expectedTradingPair := &types.TradingPair{
 		DexID:             1,
-		TokenA:            "btc",
-		TokenB:            "eth",
+		TokenA:            "eth",
+		TokenB:            "btc",
 		TokenAAmount:      sdk.ZeroInt(),
 		TokenBAmount:      sdk.ZeroInt(),
 		TotalLiquidity:    sdk.ZeroInt(),

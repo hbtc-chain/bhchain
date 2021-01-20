@@ -53,7 +53,9 @@ func (supply Supply) Inflate(amount sdk.Coins) exported.SupplyI {
 
 // Deflate subtracts coins from the total supply
 func (supply Supply) Deflate(amount sdk.Coins) exported.SupplyI {
-	supply.Total = supply.Total.Sub(amount)
+	if supply.Total.IsAllGTE(amount) {
+		supply.Total = supply.Total.Sub(amount)
+	}
 	supply.Burned = supply.Burned.Add(amount)
 	return supply
 }

@@ -29,6 +29,7 @@ const (
 	AttributeKeyOrders     = "orders"
 	AttributeKeyAmount     = "amount"
 	AttributeKeyAddress    = "address"
+	AttributeKeySymbol     = "symbol"
 )
 
 type EventLiquidity struct {

@@ -10,6 +10,7 @@ import (
 	"github.com/hbtc-chain/bhchain/base58"
 	sdk "github.com/hbtc-chain/bhchain/types"
 	"github.com/hbtc-chain/bhchain/x/hrc10/types"
+	tokentypes "github.com/hbtc-chain/bhchain/x/token/types"
 )
 
 func NewHandler(keeper Keeper) sdk.Handler {
@@ -35,7 +36,6 @@ func handleMsgNewToken(ctx sdk.Context, keeper Keeper, msg types.MsgNewToken) sd
 		return sdk.ErrAlreadyExitSymbol(fmt.Sprintf("token %s already exist", symbol)).Result()
 	}
 
-
 	issueFee := sdk.NewCoin(sdk.NativeToken, keeper.GetParams(ctx).IssueTokenFee)
 	_, flow, err := keeper.trk.SubCoin(ctx, msg.From, issueFee)
 	if err != nil {
@@ -54,6 +54,7 @@ func handleMsgNewToken(ctx sdk.Context, keeper Keeper, msg types.MsgNewToken) sd
 		SendEnabled: true,
 		Decimals:    msg.Decimals,
 		TotalSupply: totalSupply,
+		Weight:      tokentypes.DefaultHrc10TokenWeight,
 	}
 	e := keeper.tk.CreateToken(ctx, ti)
 	if e != nil {

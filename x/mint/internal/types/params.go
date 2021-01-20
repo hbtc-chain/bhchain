@@ -36,7 +36,7 @@ func NewParams(mintDenom string, inflation sdk.Dec, mintPerBlock sdk.Int) Params
 
 // default minting module parameters
 func DefaultParams() Params {
-	initMintPerBlock := sdk.NewIntWithDecimal(6, 16)
+	initMintPerBlock := sdk.NewIntWithDecimal(1, 17)
 	return Params{
 		MintDenom:    sdk.DefaultBondDenom,
 		Inflation:    sdk.NewDecWithPrec(3, 2),

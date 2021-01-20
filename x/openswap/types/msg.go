@@ -535,9 +535,6 @@ func (msg MsgLimitSwap) ValidateBasic() sdk.Error {
 	if !msg.Receiver.IsValidAddr() {
 		return sdk.ErrInvalidAddr(fmt.Sprintf("receiver address: %s is invalid", msg.From.String()))
 	}
-	if msg.BaseSymbol >= msg.QuoteSymbol {
-		return sdk.ErrInvalidSymbol("wrong symbol sequence")
-	}
 	if !msg.BaseSymbol.IsValid() {
 		return sdk.ErrInvalidSymbol("invalid base symbol")
 	}

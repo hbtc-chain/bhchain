@@ -19,14 +19,9 @@ var (
 	DefaultRepurchaseRate              = sdk.NewDecWithPrec(4, 4)  // 0.0004
 	DefaultRefererMiningBonusRate      = sdk.NewDecWithPrec(1, 1)  // 0.1
 	DefaultRepurchaseDuration          = int64(1000)
-	DefaultMiningWeights               = []*MiningWeight{NewMiningWeight(0, "hbc", "test", sdk.OneInt())}
-	DefaultMiningPlans                 = []*MiningPlan{
-		NewMiningPlan(1, sdk.NewInt(3000000000)),      // 30 perblock
-		NewMiningPlan(650001, sdk.NewInt(1500000000)), // 15 perblock
-		NewMiningPlan(1000001, sdk.NewInt(750000000)), // 7.5 perblock
-		NewMiningPlan(1700001, sdk.NewInt(375000000)), // 3.75 perblock
-		NewMiningPlan(3500001, sdk.NewInt(300000000)), // 3 perblock
-	}
+	DefaultRepurchaseToken             = sdk.NativeToken
+	DefaultMiningWeights               = []*MiningWeight{}
+	DefaultMiningPlans                 = []*MiningPlan{}
 )
 
 var (
@@ -38,6 +33,7 @@ var (
 	KeyRefererTransactionBonusRate = []byte("RefererTransactionBonusRate")
 	KeyRefererMiningBonusRate      = []byte("RefererMiningBonusRate")
 	KeyRepurchaseDuration          = []byte("RepurchaseDuration")
+	KeyRepurchaseToken             = []byte("RepurchaseToken")
 	KeyMiningWeights               = []byte("MiningWeights")
 	KeyMiningPlans                 = []byte("MiningPlans")
 )
@@ -84,11 +80,12 @@ type Params struct {
 	RepurchaseDuration          int64           `json:"repurchase_duration"`
 	MiningWeights               []*MiningWeight `json:"mining_weights"`
 	MiningPlans                 []*MiningPlan   `json:"mining_plans"`
+	RepurchaseToken             string          `json:"repurchase_token"`
 }
 
 // NewParams creates a new Params instance
 func NewParams(minLiquidity sdk.Int, limitSwapMatchingGas sdk.Uint, maxFeeRate, lpRewardRate, repurchaseRate, refererTransactionBonusRate, refererMiningBonusRate sdk.Dec,
-	repurchaseDuration int64, miningWeights []*MiningWeight, miningPlans []*MiningPlan) Params {
+	repurchaseDuration int64, miningWeights []*MiningWeight, miningPlans []*MiningPlan, repurchaseToken string) Params {
 	return Params{
 		MinimumLiquidity:            minLiquidity,
 		LimitSwapMatchingGas:        limitSwapMatchingGas,
@@ -100,6 +97,7 @@ func NewParams(minLiquidity sdk.Int, limitSwapMatchingGas sdk.Uint, maxFeeRate, 
 		RepurchaseDuration:          repurchaseDuration,
 		MiningWeights:               miningWeights,
 		MiningPlans:                 miningPlans,
+		RepurchaseToken:             repurchaseToken,
 	}
 }
 
@@ -116,6 +114,7 @@ func (p *Params) ParamSetPairs() params.ParamSetPairs {
 		{KeyRepurchaseDuration, &p.RepurchaseDuration},
 		{KeyMiningWeights, &p.MiningWeights},
 		{KeyMiningPlans, &p.MiningPlans},
+		{KeyRepurchaseToken, &p.RepurchaseToken},
 	}
 }
 
@@ -129,7 +128,7 @@ func (p Params) Equal(p2 Params) bool {
 func DefaultParams() Params {
 	return NewParams(DefaultMinimumLiquidity, DefaultLimitSwapMatchingGas, DefaultMaxFeeRate, DefaultLpRewardRate,
 		DefaultRepurchaseRate, DefaultRefererTransactionBonusRate, DefaultRefererMiningBonusRate,
-		DefaultRepurchaseDuration, DefaultMiningWeights, DefaultMiningPlans)
+		DefaultRepurchaseDuration, DefaultMiningWeights, DefaultMiningPlans, DefaultRepurchaseToken)
 }
 
 // String returns a human readable string representation of the parameters.
@@ -143,11 +142,12 @@ func (p Params) String() string {
   RefererTransactionBonusRate: %s
   RefererMiningBonusRate: %s
   RepurchaseDuration: %d
+  RepurchaseToken: %s
   MiningWeights: %v
   MiningPlans: %v`,
 		p.MinimumLiquidity.String(), p.LimitSwapMatchingGas.String(), p.MaxFeeRate.String(),
 		p.LpRewardRate.String(), p.RepurchaseRate.String(), p.RefererTransactionBonusRate.String(),
-		p.RefererMiningBonusRate.String(), p.RepurchaseDuration, p.MiningWeights, p.MiningPlans)
+		p.RefererMiningBonusRate.String(), p.RepurchaseDuration, p.RepurchaseToken, p.MiningWeights, p.MiningPlans)
 }
 
 // unmarshal the current staking params value from store key or panic
@@ -194,9 +194,7 @@ func (p Params) Validate() error {
 	if p.RefererMiningBonusRate.IsNegative() || p.RefererMiningBonusRate.GT(sdk.OneDec()) {
 		return errors.New("referer mining bonus rate must be between 0 to 1")
 	}
-	if len(p.MiningWeights) == 0 {
-		return errors.New("empty mining weights")
-	}
+
 	exists := make(map[string]bool)
 	for _, w := range p.MiningWeights {
 		if w.TokenA == w.TokenB {
@@ -215,9 +213,7 @@ func (p Params) Validate() error {
 			return errors.New("weight should be positive")
 		}
 	}
-	if len(p.MiningPlans) == 0 {
-		return errors.New("empty mining plans")
-	}
+
 	for i, w := range p.MiningPlans {
 		if !w.MiningPerBlock.IsPositive() {
 			return errors.New("mining perblock should be positive")

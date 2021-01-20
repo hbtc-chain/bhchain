@@ -38,24 +38,9 @@ func NewKeeper(cdc *codec.Codec, key sdk.StoreKey, tokenKeeper types.TokenKeeper
 	return k
 }
 
-func (k Keeper) CheckSymbol(ctx sdk.Context, symbol sdk.Symbol) sdk.Result {
-	tokenInfo := k.tokenKeeper.GetToken(ctx, symbol)
-	if tokenInfo == nil {
-		return sdk.ErrUnSupportToken(fmt.Sprintf("token %s does not exist", symbol.String())).Result()
-	}
-	if !tokenInfo.IsSendEnabled() {
-		return sdk.ErrUnSupportToken(fmt.Sprintf("token %s is not enable to send", symbol)).Result()
-	}
-	return sdk.Result{}
-}
-
 func (k Keeper) AddLiquidity(ctx sdk.Context, from sdk.CUAddress, dexID uint32, tokenA, tokenB sdk.Symbol,
 	maxTokenAAmount, maxTokenBAmount sdk.Int) sdk.Result {
 
-	if tokenA > tokenB {
-		tokenA, tokenB = tokenB, tokenA
-		maxTokenAAmount, maxTokenBAmount = maxTokenBAmount, maxTokenAAmount
-	}
 	pair := k.GetTradingPair(ctx, dexID, tokenA, tokenB)
 	if pair == nil && dexID != 0 {
 		return sdk.ErrInvalidTx(fmt.Sprintf("%s-%s trading pair does not exist in dex %d",
@@ -113,7 +98,7 @@ func (k Keeper) AddLiquidity(ctx sdk.Context, from sdk.CUAddress, dexID uint32, 
 	pair.TotalLiquidity = pair.TotalLiquidity.Add(liquidity)
 	k.SaveTradingPair(ctx, pair)
 
-	addrLiquidity := k.GetLiquidity(ctx, from, pair.DexID, tokenA, tokenB)
+	addrLiquidity := k.GetLiquidity(ctx, from, pair.DexID, pair.TokenA, pair.TokenB)
 	addrLiquidity = addrLiquidity.Add(liquidity)
 	k.saveLiquidity(ctx, from, pair.DexID, tokenA, tokenB, addrLiquidity)
 
@@ -135,7 +120,6 @@ func (k Keeper) AddLiquidity(ctx sdk.Context, from sdk.CUAddress, dexID uint32, 
 }
 
 func (k Keeper) RemoveLiquidity(ctx sdk.Context, from sdk.CUAddress, dexID uint32, tokenA, tokenB sdk.Symbol, liquidity sdk.Int) sdk.Result {
-	tokenA, tokenB = k.SortToken(tokenA, tokenB)
 	pair := k.GetTradingPair(ctx, dexID, tokenA, tokenB)
 	if pair == nil {
 		return sdk.ErrInvalidTx(fmt.Sprintf("%s-%s trading pair does not exist in dex %d",
@@ -144,7 +128,7 @@ func (k Keeper) RemoveLiquidity(ctx sdk.Context, from sdk.CUAddress, dexID uint3
 	if pair.IsPublic && pair.DexID != 0 {
 		pair = k.GetTradingPair(ctx, 0, tokenA, tokenB)
 	}
-	addrLiquidity := k.GetLiquidity(ctx, from, pair.DexID, tokenA, tokenB)
+	addrLiquidity := k.GetLiquidity(ctx, from, pair.DexID, pair.TokenA, pair.TokenB)
 	if addrLiquidity.LT(liquidity) {
 		return sdk.ErrInsufficientFunds(fmt.Sprintf("insufficient liquidity, has %s, need %s", addrLiquidity.String(), liquidity.String())).Result()
 	}
@@ -456,28 +440,32 @@ func (k Keeper) RepurchaseAndBurn(ctx sdk.Context) sdk.Int {
 	store := ctx.KVStore(k.storeKey)
 	repurchaseFunds := k.getRepurchaseFunds(ctx)
 	totalRepurchaseAmount := sdk.ZeroInt()
+	repurchaseToken := k.RepurchaseToken(ctx)
 	for _, coin := range repurchaseFunds {
 		switch coin.Denom {
-		case sdk.NativeToken:
+		case repurchaseToken:
 			totalRepurchaseAmount = totalRepurchaseAmount.Add(coin.Amount)
 		default:
-			pair := k.GetTradingPair(ctx, 0, sdk.Symbol(coin.Denom), sdk.NativeToken)
-			feeRate := k.getFeeRates(ctx, pair)
-			amount, _, _, _ := k.swap(ctx, feeRate, pair, sdk.Symbol(coin.Denom), coin.Amount, true)
-			totalRepurchaseAmount = totalRepurchaseAmount.Add(amount)
+			pair := k.GetTradingPair(ctx, 0, sdk.Symbol(coin.Denom), sdk.Symbol(repurchaseToken))
+			if pair != nil {
+				feeRate := k.getFeeRates(ctx, pair)
+				amount, _, _, _ := k.swap(ctx, feeRate, pair, sdk.Symbol(coin.Denom), coin.Amount, true)
+				totalRepurchaseAmount = totalRepurchaseAmount.Add(amount)
+			}
 		}
 
 		store.Delete(types.RepurchaseFundKey(coin.Denom))
 	}
 
 	if totalRepurchaseAmount.IsPositive() {
-		burnedCoins := sdk.NewCoins(sdk.NewCoin(sdk.NativeToken, totalRepurchaseAmount))
+		burnedCoins := sdk.NewCoins(sdk.NewCoin(repurchaseToken, totalRepurchaseAmount))
 		k.tk.AddCoins(ctx, types.ModuleCUAddress, burnedCoins)
 		k.sk.BurnCoins(ctx, types.ModuleName, burnedCoins)
 
 		ctx.EventManager().EmitEvents(sdk.Events{
 			sdk.NewEvent(
 				types.EventTypeRepurchase,
+				sdk.NewAttribute(types.AttributeKeySymbol, repurchaseToken),
 				sdk.NewAttribute(types.AttributeKeyAmount, totalRepurchaseAmount.String()),
 			),
 		})
@@ -485,7 +473,6 @@ func (k Keeper) RepurchaseAndBurn(ctx sdk.Context) sdk.Int {
 	return totalRepurchaseAmount
 }
 
-// require tokenA < tokenB
 func (k Keeper) GetLiquidity(ctx sdk.Context, addr sdk.CUAddress, dexID uint32, tokenA, tokenB sdk.Symbol) sdk.Int {
 	store := ctx.KVStore(k.storeKey)
 	bz := store.Get(types.LiquidityKey(addr, dexID, tokenA, tokenB))
@@ -498,7 +485,7 @@ func (k Keeper) GetLiquidity(ctx sdk.Context, addr sdk.CUAddress, dexID uint32, 
 }
 
 func (k Keeper) GetAddrUnfinishedOrders(ctx sdk.Context, addr sdk.CUAddress, dexID uint32, tokenA, tokenB sdk.Symbol) []*types.Order {
-	tokenA, tokenB = k.SortToken(tokenA, tokenB)
+	tokenA, tokenB, _ = k.SortTokens(ctx, tokenA, tokenB)
 	prefix := types.UnfinishedOrderKeyPrefixWithPair(addr, dexID, tokenA, tokenB)
 	store := ctx.KVStore(k.storeKey)
 	iter := sdk.KVStorePrefixIterator(store, prefix)

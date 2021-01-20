@@ -66,11 +66,13 @@ func (k Keeper) SaveTradingPair(ctx sdk.Context, pair *types.TradingPair) {
 }
 
 func (k Keeper) GetTradingPair(ctx sdk.Context, dexID uint32, tokenA, tokenB sdk.Symbol) *types.TradingPair {
-	tokenA, tokenB = k.SortToken(tokenA, tokenB)
 	store := ctx.KVStore(k.storeKey)
 	bz := store.Get(types.TradingPairKey(dexID, tokenA, tokenB))
 	if len(bz) == 0 {
-		return nil
+		bz = store.Get(types.TradingPairKey(dexID, tokenB, tokenA))
+		if len(bz) == 0 {
+			return nil
+		}
 	}
 	var pair types.TradingPair
 	k.cdc.MustUnmarshalBinaryBare(bz, &pair)
